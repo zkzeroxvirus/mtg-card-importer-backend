@@ -156,7 +156,7 @@ app.get('/random', async (req, res) => {
   try {
     const { count = 1, back, q = '' } = req.query;
     const cardBack = back || DEFAULT_BACK;
-    const numCards = Math.min(parseInt(count) || 1, 10); // Max 10
+    const numCards = Math.min(parseInt(count) || 1, 100); // Max 100
 
     const ttsCards = [];
 
