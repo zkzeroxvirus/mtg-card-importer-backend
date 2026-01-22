@@ -87,11 +87,12 @@ function spawnDeckList(decktext, color)
 	broadcastToColor('Building deck...', color, 'Yellow')
 	
 	local req = {
-		decklist = decktext,
-		back = getPlayerBack(color)
+		data = decktext,
+		back = getPlayerBack(color),
+		hand = hand
 	}
 	
-	postJSON(BaseURL .. '/deck', req, function(resp)
+	postJSON(BaseURL .. '/build', req, function(resp)
 		if resp.error ~= nil then
 			if resp.text and resp.text:find('"error"') then
 				local data = JSON.decode(resp.text)

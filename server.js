@@ -101,6 +101,54 @@ app.post('/deck', async (req, res) => {
 });
 
 /**
+ * POST /build
+ * Alias for /deck endpoint (for compatibility with bundled importer)
+ * Build a deck from decklist with hand position
+ * Returns NDJSON (newline-delimited JSON)
+ */
+app.post('/build', async (req, res) => {
+  try {
+    const { data, back, hand } = req.body;
+    const cardBack = back || DEFAULT_BACK;
+
+    if (!data) {
+      return res.status(400).json({ error: 'Decklist required' });
+    }
+
+    const cards = scryfallLib.parseDecklist(data);
+    
+    if (cards.length === 0) {
+      return res.status(400).json({ error: 'No valid cards in decklist' });
+    }
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+
+    let cardCount = 0;
+    for (const { count, name } of cards) {
+      try {
+        const scryfallCard = await scryfallLib.getCard(name);
+        
+        for (let i = 0; i < count; i++) {
+          const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
+          // Write just the TTS object (no wrapping)
+          res.write(JSON.stringify(ttsCard) + '\n');
+          cardCount++;
+        }
+      } catch (error) {
+        console.warn(`Skipped: ${name} - ${error.message}`);
+        // Continue with next card on error
+      }
+    }
+
+    console.log(`Deck spawned: ${cardCount} cards`);
+    res.end();
+  } catch (error) {
+    console.error('Error building deck:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /random
  * Get random card(s) - returns JSON array
  */
