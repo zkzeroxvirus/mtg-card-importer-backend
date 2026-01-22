@@ -213,21 +213,97 @@ app.get('/search', async (req, res) => {
 });
 
 /**
- * GET /rulings/:cardId
+ * GET /rulings/:name
  * Get card rulings from Scryfall
  */
-app.get('/rulings/:cardId', async (req, res) => {
+app.get('/rulings/:name', async (req, res) => {
   try {
-    const { cardId } = req.params;
+    const { name } = req.params;
 
-    if (!cardId) {
-      return res.status(400).json({ error: 'Card ID required' });
+    if (!name) {
+      return res.status(400).json({ error: 'Card name required' });
     }
 
-    const rulings = await scryfallLib.getCardRulings(cardId);
+    const rulings = await scryfallLib.getCardRulings(name);
     res.json(rulings);
   } catch (error) {
     console.error('Error fetching rulings:', error.message);
+    res.status(404).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /tokens/:name
+ * Get tokens associated with a card
+ */
+app.get('/tokens/:name', async (req, res) => {
+  try {
+    const { name } = req.params;
+    const { back } = req.query;
+    const cardBack = back || DEFAULT_BACK;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Card name required' });
+    }
+
+    const tokens = await scryfallLib.getTokens(name);
+    
+    if (tokens.length === 0) {
+      return res.json({ tokens: [], message: 'No tokens found for this card' });
+    }
+
+    // Convert to TTS cards
+    const ttsTokens = tokens.map(token => {
+      try {
+        return scryfallLib.convertToTTSCard(token, cardBack);
+      } catch (error) {
+        console.warn(`Skipped token: ${token.name}`);
+        return null;
+      }
+    }).filter(token => token !== null);
+
+    res.json(ttsTokens);
+  } catch (error) {
+    console.error('Error fetching tokens:', error.message);
+    res.status(404).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /printings/:name
+ * Get all printings of a card
+ */
+app.get('/printings/:name', async (req, res) => {
+  try {
+    const { name } = req.params;
+    const { back } = req.query;
+    const cardBack = back || DEFAULT_BACK;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Card name required' });
+    }
+
+    const printings = await scryfallLib.getPrintings(name);
+    
+    if (printings.length === 0) {
+      return res.json({ printings: [], message: 'No printings found' });
+    }
+
+    // Return as array of card info (not full TTS objects to keep response size reasonable)
+    const printingInfo = printings.map(card => ({
+      name: card.name,
+      set: card.set.toUpperCase(),
+      setName: card.set_name,
+      releaseDate: card.released_at,
+      rarity: card.rarity,
+      collectorNumber: card.collector_number,
+      language: card.lang,
+      image: scryfallLib.getCardImageUrl(card)
+    }));
+
+    res.json(printingInfo);
+  } catch (error) {
+    console.error('Error fetching printings:', error.message);
     res.status(404).json({ error: error.message });
   }
 });
