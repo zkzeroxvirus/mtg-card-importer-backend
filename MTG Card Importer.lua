@@ -1,7 +1,7 @@
 -- MTG Card Importer via Backend (Chat Based + Encoder Integration)
 -- Uses Scryfall API with proper rate limiting and attribution
 -- Integrates with Encoder mod for card buttons
-mod_name, version = 'MTG Card Importer', 2.3
+mod_name, version = 'MTG Card Importer', 2.4
 self.setName('[' .. mod_name .. '] v' .. version)
 
 -- Backend Configuration
@@ -79,13 +79,13 @@ function spawnDeckList(decktext, color)
 	local hand = player.getHandTransform(1)
 	
 	if hand == nil then
-		broadcastToColor('You need to take a seat for deck to be generated', color, 'Red')
+		broadcastToColor('[MTG Error] You need to take a seat at the table before spawning cards', color, 'Red')
 		return
 	end
 	
 	hand.position = hand.position + hand.forward:scale(2)
 	
-	broadcastToColor('Building deck...', color, 'Yellow')
+	broadcastToColor('[MTG] Building deck...', color, 'Yellow')
 	
 	local req = {
 		data = decktext,
@@ -97,9 +97,9 @@ function spawnDeckList(decktext, color)
 		if resp.error ~= nil then
 			if resp.text and resp.text:find('"error"') then
 				local data = JSON.decode(resp.text)
-				broadcastToColor('Error: ' .. data.error, color, 'Red')
+				broadcastToColor('[MTG Error] ' .. data.error, color, 'Red')
 			else
-				broadcastToColor('Server error, please try again later', color, 'Red')
+				broadcastToColor('[MTG Error] Server connection failed. Backend may be sleeping - try again in 30 seconds', color, 'Red')
 			end
 			return
 		end
@@ -108,13 +108,20 @@ function spawnDeckList(decktext, color)
 			return
 		end
 		
-		broadcastToColor('Rendering deck...', color, 'Yellow')
+		broadcastToColor('[MTG] Rendering deck...', color, 'Yellow')
+		local cardCount = 0
 		for _, obj in ipairs(split_lines(resp.text)) do
 			if obj ~= '' then
 				-- Backend returns NDJSON where each line is a TTS object
 				-- Spawn each line directly (no extraction needed)
 				spawnObjectJSON({json = obj})
+				cardCount = cardCount + 1
 			end
+		end
+		if cardCount > 0 then
+			broadcastToColor('[MTG] Spawned ' .. cardCount .. ' cards!', color, 'Green')
+		else
+			broadcastToColor('[MTG Warning] No cards spawned - check decklist format', color, 'Orange')
 		end
 	end)
 end
@@ -276,6 +283,132 @@ function setCardBack(url, color)
 	broadcastToColor('Card back set to: ' .. url, color, 'Green')
 end
 
+-- Deck Site Import
+function importDeckFromURL(url, color)
+	local site = nil
+	local exportURL = url
+	
+	-- Detect deck site and convert to export URL
+	if url:find('moxfield%.com') then
+		site = 'Moxfield'
+		local deckID = url:match('moxfield%.com/decks/([^/%s%?]+)')
+		if deckID then
+			exportURL = 'https://api.moxfield.com/v2/decks/all/' .. deckID
+			broadcastToColor('Importing from Moxfield: ' .. deckID, color, 'Yellow')
+			getJSON(exportURL, function(resp)
+				if resp.is_done and resp.text then
+					local success, data = pcall(function() return JSON.decode(resp.text) end)
+					if success and data and data.boards and data.boards.mainboard then
+						local decklist = ''
+						for cardName, cardData in pairs(data.boards.mainboard.cards) do
+							local count = cardData.quantity or 1
+							decklist = decklist .. count .. ' ' .. cardName .. '\n'
+						end
+						if decklist ~= '' then
+							spawnDeckList(decklist, color)
+						else
+							broadcastToColor('No cards found in deck', color, 'Red')
+						end
+					else
+						broadcastToColor('Error parsing Moxfield deck', color, 'Red')
+					end
+				else
+					broadcastToColor('Error fetching Moxfield deck', color, 'Red')
+				end
+			end)
+			return
+		end
+	elseif url:find('archidekt%.com') then
+		site = 'Archidekt'
+		local deckID = url:match('archidekt%.com/decks/(%d+)')
+		if deckID then
+			exportURL = 'https://archidekt.com/api/decks/' .. deckID .. '/small/'
+			broadcastToColor('Importing from Archidekt: ' .. deckID, color, 'Yellow')
+			getJSON(exportURL, function(resp)
+				if resp.is_done and resp.text then
+					local success, data = pcall(function() return JSON.decode(resp.text) end)
+					if success and data and data.cards then
+						local decklist = ''
+						for _, card in ipairs(data.cards) do
+							local count = card.quantity or 1
+							local name = card.card and card.card.oracleCard and card.card.oracleCard.name
+							if name then
+								decklist = decklist .. count .. ' ' .. name .. '\n'
+							end
+						end
+						if decklist ~= '' then
+							spawnDeckList(decklist, color)
+						else
+							broadcastToColor('No cards found in deck', color, 'Red')
+						end
+					else
+						broadcastToColor('Error parsing Archidekt deck', color, 'Red')
+					end
+				else
+					broadcastToColor('Error fetching Archidekt deck', color, 'Red')
+				end
+			end)
+			return
+		end
+	elseif url:find('tappedout%.net') then
+		site = 'Tappedout'
+		exportURL = url:gsub('%?.*', '') .. '?fmt=txt'
+		broadcastToColor('Importing from Tappedout...', color, 'Yellow')
+		getJSON(exportURL, function(resp)
+			if resp.is_done and resp.text then
+				spawnDeckList(resp.text, color)
+			else
+				broadcastToColor('Error fetching Tappedout deck', color, 'Red')
+			end
+		end)
+		return
+	elseif url:find('mtggoldfish%.com') then
+		site = 'MTGGoldfish'
+		if url:find('/deck/') then
+			exportURL = url:gsub('/deck/', '/deck/download/'):gsub('#.*', '')
+			broadcastToColor('Importing from MTGGoldfish...', color, 'Yellow')
+			getJSON(exportURL, function(resp)
+				if resp.is_done and resp.text then
+					spawnDeckList(resp.text, color)
+				else
+					broadcastToColor('Error fetching MTGGoldfish deck', color, 'Red')
+				end
+			end)
+			return
+		else
+			broadcastToColor('MTGGoldfish URL must be a /deck/ link', color, 'Red')
+			return
+		end
+	elseif url:find('deckstats%.net') then
+		site = 'Deckstats'
+		exportURL = url:gsub('%?.*', '') .. '?include_comments=1&export_txt=1'
+		broadcastToColor('Importing from Deckstats...', color, 'Yellow')
+		getJSON(exportURL, function(resp)
+			if resp.is_done and resp.text then
+				spawnDeckList(resp.text, color)
+			else
+				broadcastToColor('Error fetching Deckstats deck', color, 'Red')
+			end
+		end)
+		return
+	elseif url:find('scryfall%.com/decks') then
+		site = 'Scryfall'
+		exportURL = 'https://api.scryfall.com' .. url:match('(/decks/[^%s]+)') .. '/export/text'
+		broadcastToColor('Importing from Scryfall...', color, 'Yellow')
+		getJSON(exportURL, function(resp)
+			if resp.is_done and resp.text then
+				spawnDeckList(resp.text, color)
+			else
+				broadcastToColor('Error fetching Scryfall deck', color, 'Red')
+			end
+		end)
+		return
+	else
+		broadcastToColor('Unsupported deck site. Supported: Moxfield, Archidekt, Tappedout, MTGGoldfish, Deckstats, Scryfall', color, 'Orange')
+		return
+	end
+end
+
 -- Show Card Text/Rules
 function showCardInfo(cardname, mode, color)
 	local url = BaseURL .. '/card/' .. urlEncode(cardname)
@@ -330,6 +463,12 @@ function onChat(msg, player)
 	end
 	
 	local color = player.color
+	
+	-- Check if this is a deck site URL
+	if cmd_text:find('https?://') then
+		importDeckFromURL(cmd_text, color)
+		return false
+	end
 	
 	-- Command routing
 	local first_word = cmd_text:match('^(%S+)')
@@ -426,7 +565,7 @@ local buttons = {
 	{label = 'Rulings', func = 'eRulings'},
 	{label = 'Tokens', func = 'eTokens'},
 	{label = 'Printings', func = 'ePrintings'},
-	{label = 'Set Back', func = 'eSetBack'},
+	{label = 'Copy Back', func = 'eCopyBack'},
 	{label = 'Flip', func = 'eReverse'},
 }
 
@@ -612,6 +751,24 @@ function eSetBack(arg)
 	end)
 end
 
+function eCopyBack(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getJSON then return end
+	
+	-- Extract BackURL from card JSON
+	local cardJSON = card.getJSON()
+	local backURL = cardJSON:match('"BackURL"%s*:%s*"([^"]+)"')
+	
+	if backURL and backURL ~= '' then
+		-- Get player color (if called from Encoder, arg.color exists)
+		local color = (type(arg) == 'table' and arg.color) or 'White'
+		CARD_BACKS[color] = backURL
+		printToAll('[MTG] Card back copied for ' .. color .. ':\n' .. backURL, {0.7, 1, 0.7})
+	else
+		printToAll('[MTG] No back URL found on this card', {1, 0.5, 0.5})
+	end
+end
+
 function eReverse(arg)
 	local card = (type(arg) == 'table' and arg.obj) or arg
 	if not card or not card.getJSON then return end
@@ -627,6 +784,15 @@ function showHelp()
 	log('BASIC COMMANDS:')
 	log('  sf <cardname> - Spawn single card')
 	log('  sf <decklist> - Spawn deck (multiline)')
+	log('  sf <deck URL> - Import from deck site')
+	log(' ')
+	log('SUPPORTED DECK SITES:')
+	log('  - Moxfield')
+	log('  - Archidekt')
+	log('  - Tappedout')
+	log('  - MTGGoldfish')
+	log('  - Deckstats')
+	log('  - Scryfall')
 	log(' ')
 	log('ADVANCED COMMANDS:')
 	log('  sf random [count] [?q=query]')
@@ -644,12 +810,12 @@ function showHelp()
 	log('  sf back <url> - Set custom card back')
 	log(' ')
 	log('ENCODER BUTTONS (right-click card):')
-	log('  Oracle - Display card text')
+	log('  Oracle - Display card text (with P/T or loyalty)')
 	log('  Rulings - Show official rulings')
 	log('  Tokens - Spawn associated tokens')
 	log('  Printings - Show card printings')
-	log('  Back - Set card back image')
-	log('  Reverse - Flip front/back')
+	log('  Copy Back - Copy card back URL for future spawns')
+	log('  Flip - Flip front/back faces')
 	log(' ')
 	log('QUERY SYNTAX (Scryfall format):')
 	log('  Colors: c:w c:u c:b c:r c:g c:c c:m')
