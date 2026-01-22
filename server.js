@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 // Avoid JSON import for broad Node compatibility
 const VERSION = '0.1.0';
-import { getCard, convertToTTSCard, parseDecklist, searchCards, randomCards, convertToSpawnObject } from './lib/scryfall.js';
+import { getCard, convertToTTSCard, parseDecklist, searchCards, randomCards, convertToSpawnObject, autocompleteCards, getSets, getSet, getRulingsById, getCollection, getCatalog } from './lib/scryfall.js';
 
 dotenv.config();
 const app = express();
@@ -97,10 +97,18 @@ app.post('/build', async (req, res) => {
 
 app.get('/random', async (req, res) => {
   try {
-    const count = Math.min(parseInt(req.query.count || '1', 10), 20);
+    const count = Math.min(parseInt(req.query.count || '1', 10), 100);
     const q = req.query.q;
+    const format = String(req.query.format || 'tts');
+    const backURL = req.query.backURL || DEFAULT_CARD_BACK;
     const cards = await randomCards(count, q);
-    const list = cards.map(c => convertToTTSCard(c, DEFAULT_CARD_BACK));
+    if (format === 'raw') return res.json(cards);
+    if (format === 'spawn') {
+      const hand = req.query.hand ? JSON.parse(req.query.hand) : undefined;
+      const list = cards.map(c => convertToSpawnObject(c, backURL, hand));
+      return res.json(list);
+    }
+    const list = cards.map(c => convertToTTSCard(c, backURL));
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: 'Random fetch failed', details: err.message || String(err) });
@@ -111,11 +119,90 @@ app.get('/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q) return res.status(400).json({ error: 'Missing query param q' });
+    const format = String(req.query.format || 'tts');
+    const backURL = req.query.backURL || DEFAULT_CARD_BACK;
     const cards = await searchCards(q);
-    const list = cards.map(c => convertToTTSCard(c, DEFAULT_CARD_BACK));
+    if (format === 'raw') return res.json(cards);
+    if (format === 'spawn') {
+      const hand = req.query.hand ? JSON.parse(req.query.hand) : undefined;
+      const list = cards.map(c => convertToSpawnObject(c, backURL, hand));
+      return res.json(list);
+    }
+    const list = cards.map(c => convertToTTSCard(c, backURL));
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: 'Search failed', details: err.message || String(err) });
+  }
+});
+
+// Autocomplete
+app.get('/autocomplete', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Missing query param q' });
+    const list = await autocompleteCards(q);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: 'Autocomplete failed', details: err.message || String(err) });
+  }
+});
+
+// Sets
+app.get('/sets', async (_req, res) => {
+  try {
+    const sets = await getSets();
+    res.json(sets);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch sets', details: err.message || String(err) });
+  }
+});
+app.get('/sets/:code', async (req, res) => {
+  try {
+    const code = req.params.code;
+    const set = await getSet(code);
+    res.json(set);
+  } catch (err) {
+    res.status(404).json({ error: 'Set not found', details: err.message || String(err) });
+  }
+});
+
+// Rulings
+app.get('/rulings/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const rulings = await getRulingsById(id);
+    res.json(rulings);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch rulings', details: err.message || String(err) });
+  }
+});
+
+// Collection (identifiers)
+app.post('/collection', async (req, res) => {
+  try {
+    const identifiers = req.body.identifiers;
+    const format = String(req.query.format || 'tts');
+    const backURL = req.body.backURL || req.query.backURL || DEFAULT_CARD_BACK;
+    if (!Array.isArray(identifiers) || identifiers.length === 0) {
+      return res.status(400).json({ error: 'Missing identifiers array in body' });
+    }
+    const cards = await getCollection(identifiers);
+    if (format === 'raw') return res.json(cards);
+    const list = cards.map(c => (format === 'spawn') ? convertToSpawnObject(c, backURL, req.body.hand) : convertToTTSCard(c, backURL));
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch collection', details: err.message || String(err) });
+  }
+});
+
+// Catalog
+app.get('/catalog/:type', async (req, res) => {
+  try {
+    const type = req.params.type;
+    const items = await getCatalog(type);
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch catalog', details: err.message || String(err) });
   }
 });
 
