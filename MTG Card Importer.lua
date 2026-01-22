@@ -433,15 +433,98 @@ function registerModule()
 			visible_in_hand = 0,
 			tags = 'tool'
 		})
-		log('Encoder integration registered (Amuzet-style)')
+		-- Register a πMenu-style menu to draw our buttons along the card edge
+		enc.call('APIregisterMenu', {
+			menuID = 'MTG Importer Menu',
+			funcOwner = self,
+			activateFunc = 'createImporterMenu',
+			visible_in_hand = 1
+		})
+		log('Encoder integration registered (Amuzet-style + πMenu)')
 	end
 end
 
-function toggleMenu(card)
+-- Toggle our πMenu-style menu open/closed via Encoder
+function toggleMenu(arg)
+	local o = (type(arg) == 'table' and (arg.obj or arg)) or arg
 	local enc = Global.getVar('Encoder')
-	if enc then
-		-- Create buttons on the card
-		createButtons(card)
+	if enc and o then
+		enc.call('APIobjToggleMenu', {obj = o, menuID = 'MTG Importer Menu'})
+		enc.call('APIrebuildButtons', {obj = o})
+	end
+end
+
+-- Simple style similar to πMenu for consistent button look
+local PiStyle = {}
+PiStyle.proto = {
+	scale = {0.5, 1, 0.3},
+	height = 350,
+	font_size = 200,
+	color = {0.1, 0.1, 0.1, 1},
+	font_color = {1, 1, 1, 1},
+	hover_color = {0.1, 0.1, 0.1, 0.6}
+}
+PiStyle.mt = {}
+PiStyle.mt.__index = PiStyle.proto
+function PiStyle.new(o)
+	for k, v in pairs(PiStyle.proto) do
+		if o[k] == nil then o[k] = v end
+	end
+	return o
+end
+
+-- Draw a πMenu-like edge menu with our six actions
+function createImporterMenu(t)
+	local o = t.obj
+	local enc = Global.getVar('Encoder')
+	if not enc or not o then return end
+
+	local flip = enc.call('APIgetFlip', {obj = o}) or 1
+	local zpos = 0.3 * flip
+	local xpos = -0.875 * flip
+
+	local md = enc.call('APIobjGetMenuData', {obj = o, menuID = 'MTG Importer Menu'}) or {open = false}
+
+	if md.open == false then
+		-- Closed: show the open chevron
+		o.createButton(PiStyle.new({
+			label = '[b]<<<[/b]', click_function = 'toggleMenu', function_owner = self,
+			position = {xpos, zpos, -1.485}, scale = {0.5, 1, 0.3}, height = 0, width = 0,
+			rotation = {0, 0, 90 - 90 * flip}, color = {0, 0, 0, 0}, font_color = {0, 0, 0, 50}
+		}))
+		o.createButton(PiStyle.new({
+			label = '<<<', click_function = 'toggleMenu', function_owner = self,
+			position = {xpos, zpos, -1.485}, rotation = {0, 0, 90 - 90 * flip},
+			color = {0.1, 0.1, 0.1, 0}, font_color = {1, 1, 1, 0.8}
+		}))
+		return
+	end
+
+	-- Open: show the close chevron
+	o.createButton(PiStyle.new({
+		label = '>>>', click_function = 'toggleMenu', function_owner = self,
+		position = {xpos, zpos, -1.485}, rotation = {0, 0, 90 - 90 * flip},
+		color = {0.1, 0.1, 0.1, 1}, font_color = {1, 1, 1, 1}
+	}))
+
+	-- Our actions listed vertically along the long edge
+	local entries = {
+		{label = 'Oracle',     func = 'eOracle'},
+		{label = 'Rulings',    func = 'eRulings'},
+		{label = 'Tokens',     func = 'eTokens'},
+		{label = 'Printings',  func = 'ePrintings'},
+		{label = 'Set Back',   func = 'eSetBack'},
+		{label = 'Flip Card',  func = 'eReverse'}
+	}
+
+	local baseZ = -1.40
+	local step = 0.25
+	for i, e in ipairs(entries) do
+		o.createButton(PiStyle.new({
+			label = e.label, click_function = e.func, function_owner = self,
+			position = {xpos, zpos, baseZ + (i - 1) * step}, rotation = {0, 0, 90 - 90 * flip},
+			width = 900, font_color = {1, 1, 1, 0.85}
+		}))
 	end
 end
 
