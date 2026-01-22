@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 // Avoid JSON import for broad Node compatibility
 const VERSION = '0.1.0';
-import { getCard, convertToTTSCard, parseDecklist, searchCards, randomCards } from './lib/scryfall.js';
+import { getCard, convertToTTSCard, parseDecklist, searchCards, randomCards, convertToSpawnObject } from './lib/scryfall.js';
 
 dotenv.config();
 const app = express();
@@ -49,6 +49,50 @@ app.post('/deck', async (req, res) => {
     }
   }
   res.end();
+});
+
+// DeckDraftCube-compatible build endpoint
+// Accepts { data: string, hand: { position, rotation }, backURL?: string, useStates?: boolean, lang?: string }
+// Returns NDJSON of spawnable TTS objects
+app.post('/build', async (req, res) => {
+  try {
+    const data = req.body.data;
+    const hand = req.body.hand;
+    const set = req.body.set;
+    const backURL = req.body.backURL || DEFAULT_CARD_BACK;
+    if (!data || typeof data !== 'string') {
+      return res.status(400).json({ error: 'Missing data string in body' });
+    }
+    res.type('application/x-ndjson');
+    const isDeck = /\r?\n/.test(data.trim());
+    if (isDeck) {
+      const items = parseDecklist(data);
+      for (const item of items) {
+        for (let i = 0; i < item.count; i++) {
+          try {
+            const card = await getCard(item.name, set);
+            const obj = convertToSpawnObject(card, backURL, hand);
+            res.write(JSON.stringify(obj) + '\n');
+          } catch (err) {
+            res.write(JSON.stringify({ error: 'Card not found', name: item.name }) + '\n');
+          }
+        }
+      }
+      res.end();
+      return;
+    }
+    // Single card
+    try {
+      const card = await getCard(data.trim(), set);
+      const obj = convertToSpawnObject(card, backURL, hand);
+      res.write(JSON.stringify(obj) + '\n');
+    } catch (err) {
+      res.write(JSON.stringify({ error: 'Card not found', name: data.trim() }) + '\n');
+    }
+    res.end();
+  } catch (err) {
+    res.status(500).json({ error: 'Build failed', details: err.message || String(err) });
+  }
 });
 
 app.get('/random', async (req, res) => {
