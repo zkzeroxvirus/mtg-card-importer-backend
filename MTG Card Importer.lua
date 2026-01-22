@@ -433,18 +433,17 @@ function registerModule()
 			visible_in_hand = 0,
 			tags = 'tool'
 		})
-		-- Register a πMenu-style menu to draw our buttons along the card edge
 		enc.call('APIregisterMenu', {
 			menuID = 'MTG Importer Menu',
 			funcOwner = self,
 			activateFunc = 'createImporterMenu',
 			visible_in_hand = 1
 		})
-		log('Encoder integration registered (Amuzet-style + πMenu)')
+		log('Encoder integration registered (Amuzet-style)')
 	end
 end
 
--- Toggle our πMenu-style menu open/closed via Encoder
+-- Toggle menu (Amuzet-style)
 function toggleMenu(arg)
 	local o = (type(arg) == 'table' and (arg.obj or arg)) or arg
 	local enc = Global.getVar('Encoder')
@@ -454,117 +453,32 @@ function toggleMenu(arg)
 	end
 end
 
--- πMenu exact width logic and style
-local charWidth = {
-	['`']=2381,['~']=2381,['1']=1724,['!']=1493,['2']=2381,
-	['@']=4348,['3']=2381,['#']=3030,['4']=2564,['$']=2381,
-	['5']=2381,['%']=3846,['6']=2564,['^']=2564,['7']=2174,
-	['&']=2777,['8']=2564,['*']=2174,['9']=2564,['(']=1724,
-	['0']=2564,[')']=1724,['-']=1724,['_']=2381,['=']=2381,
-	['+']=2381,['q']=2564,['Q']=3226,['w']=3704,['W']=4167,
-	['e']=2174,['E']=2381,['r']=1724,['R']=2777,['t']=1724,
-	['T']=2381,['y']=2564,['Y']=2564,['u']=2564,['U']=3030,
-	['i']=1282,['I']=1282,['o']=2381,['O']=3226,['p']=2564,
-	['P']=2564,['[']=1724,['{']=1724,[']']=1724,['}']=1724,
-	['|']=1493,['\\']=1923,['a']=2564,['A']=2777,['s']=1923,
-	['S']=2381,['d']=2564,['D']=3030,['f']=1724,['F']=2381,
-	['g']=2564,['G']=2777,['h']=2564,['H']=3030,['j']=1075,
-	['J']=1282,['k']=2381,['K']=2777,['l']=1282,['L']=2174,
-	[';']=1282,[':']=1282,['\'']=855,['\"']=1724,['z']=1923,
-	['Z']=2564,['x']=2381,['X']=2777,['c']=1923,['C']=2564,
-	['v']=2564,['V']=2777,['b']=2564,['B']=2564,['n']=2564,
-	['N']=3226,['m']=3846,['M']=3846,[',']=1282,['<']=2174,
-	['.']=1282,['>']=2174,['/']=1923,['?']=2174,[' ']=1282,
-	['avg']=2500
-}
-local function GetStringWidth(str)
-	local len = 0
-	for i = 1, #str do
-		local c = str:sub(i,i)
-		len = len + (charWidth[c] or charWidth.avg)
-	end
-	return len
-end
-local scales = {0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1}
-local scaleR = {6143,4730,4730,4725,4760,4740,4784,4856,4685,4623}
-local scaleI = 5
-local xScale = scales[scaleI]
-local function getWidthOffset(str, align, fSize, xScale)
-	local width  = GetStringWidth(str)/scaleR[scaleI]*fSize+100/scales[scaleI]
-	local offset = width*xScale*align/2/480.8
-	return width,offset
-end
-
--- πMenu style table
-local Style = {}
-Style.proto = {
-	scale={xScale,1,xScale},
-	height=1200*0.1/xScale,
-	font_size=1000*0.1/xScale,
-	color={0.1,0.1,0.1,1},
-	font_color={1,1,1,1}
-}
-Style.mt = {}
-Style.mt.__index = Style.proto
-function Style.new(o)
-	for k,v in pairs(Style.proto) do
-		if o[k] == nil then o[k] = v end
-	end
-	return o
-end
-
--- Draw a πMenu-style edge menu with our six actions
+-- Create menu buttons (Amuzet-style - let πMenu handle layout)
 function createImporterMenu(t)
 	local o = t.obj
-	local enc = Global.getVar('Encoder')
-	if not enc or not o then return end
-
-	local flip = enc.call('APIgetFlip',{obj=o}) or 1
-	local zpos = 0.3*flip
-	local xpos = -0.875*flip
-	local md = enc.call('APIobjGetMenuData',{obj=o,menuID='MTG Importer Menu'}) or {open=false}
-
-	if md.open == false then
-		-- Closed: dual chevrons, background + visible
-		o.createButton(Style.new({
-			label='[b]<<<[/b]', click_function='toggleMenu', function_owner=self,
-			position={xpos,zpos,-1.485}, scale={0.5,1,0.3}, height=0, width=0,
-			rotation={0,0,90-90*flip}, color={0,0,0,0}, font_color={0,0,0,50}
-		}))
-		o.createButton(Style.new({
-			label='<<<', click_function='toggleMenu', function_owner=self,
-			position={xpos,zpos,-1.485}, rotation={0,0,90-90*flip},
-			color={0.1,0.1,0.1,0}, font_color={1,1,1,0.75}, hover_color={0.1,0.1,0.1,1/50}, tooltip='Open Menu'
-		}))
-		return
-	end
-
-	-- Open: close chevron
-	o.createButton(Style.new({
-		label='>>>', click_function='toggleMenu', function_owner=self,
-		position={xpos,zpos,-1.485}, rotation={0,0,90-90*flip}, color={0.1,0.1,0.1,1}, font_color={1,1,1,1}, tooltip='Close Menu'
-	}))
-
-	local entries = {
-		{label='Oracle',    func='eOracle'},
-		{label='Rulings',   func='eRulings'},
-		{label='Tokens',    func='eTokens'},
-		{label='Printings', func='ePrintings'},
-		{label='Set Back',  func='eSetBack'},
-		{label='Flip Card', func='eReverse'},
+	if not o then return end
+	
+	-- Simple button list - πMenu will handle all the positioning and styling
+	local buttons = {
+		{label = 'Oracle', click_function = 'eOracle', tooltip = 'Show oracle text'},
+		{label = 'Rulings', click_function = 'eRulings', tooltip = 'Show card rulings'},
+		{label = 'Tokens', click_function = 'eTokens', tooltip = 'Spawn tokens'},
+		{label = 'Printings', click_function = 'ePrintings', tooltip = 'Show printings'},
+		{label = 'Set Back', click_function = 'eSetBack', tooltip = 'Set card back'},
+		{label = 'Flip Card', click_function = 'eReverse', tooltip = 'Flip card'},
 	}
-
-	local baseZ = -1.40
-	local step  = 0.25
-	for idx, e in ipairs(entries) do
-		local label = e.label
-		local labelRep = label:gsub('%[sup%]%[i%]π%[/i%]%[/sup%]','p')
-		local width,xOffset = getWidthOffset(labelRep,-1,Style.proto.font_size,Style.proto.scale[1])
-		o.createButton(Style.new({
-			label=label, click_function=e.func, function_owner=self,
-			position={xpos + xOffset*flip, zpos, baseZ + (idx-1)*step}, rotation={0,0,90-90*flip}, width=width,
-			font_color={1,1,1,0.75}
-		}))
+	
+	for _, btn in ipairs(buttons) do
+		o.createButton({
+			label = btn.label,
+			click_function = btn.click_function,
+			function_owner = self,
+			position = {0, 0.2, 0},
+			height = 200,
+			width = 800,
+			font_size = 100,
+			tooltip = btn.tooltip
+		})
 	end
 end
 
