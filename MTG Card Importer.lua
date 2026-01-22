@@ -608,7 +608,6 @@ function registerModule()
 			visible_in_hand = 0,
 			tags = 'tool'
 		})
-		log('Encoder integration registered (Amuzet-style)')
 	end
 end
 
