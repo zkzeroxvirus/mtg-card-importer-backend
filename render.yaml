@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: mtg-card-importer
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: SCRYFALL_DELAY
+        value: 100
+      - key: DEFAULT_CARD_BACK
+        value: https://via.placeholder.com/512x512.png?text=Card+Back
