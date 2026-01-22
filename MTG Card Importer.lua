@@ -65,8 +65,6 @@ function spawnSingleCard(cardName, color)
 		return
 	end
 	
-	hand.position = hand.position + hand.forward:scale(2)
-	
 	broadcastToColor('Fetching ' .. cardName .. '...', color, 'Yellow')
 	
 	-- Use decklist approach for single card (more reliable)
@@ -82,8 +80,6 @@ function spawnDeckList(decktext, color)
 		broadcastToColor('[MTG Error] You need to take a seat at the table before spawning cards', color, 'Red')
 		return
 	end
-	
-	hand.position = hand.position + hand.forward:scale(2)
 	
 	broadcastToColor('[MTG] Building deck...', color, 'Yellow')
 	
@@ -135,8 +131,6 @@ function spawnRandomCards(query, color)
 		broadcastToColor('You need to take a seat for cards to be generated', color, 'Red')
 		return
 	end
-	
-	hand.position = hand.position + hand.forward:scale(2)
 	
 	-- Parse query string: "?q=r:m+id:wubrg 15" or "15 ?q=r:m" or just "?q=r:m" or just "15"
 	local count = 1
@@ -219,8 +213,6 @@ function searchCards(query, color)
 		broadcastToColor('You need to take a seat for cards to be generated', color, 'Red')
 		return
 	end
-	
-	hand.position = hand.position + hand.forward:scale(2)
 	
 	local url = BaseURL .. '/search?q=' .. urlEncode(query)
 	
