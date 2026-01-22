@@ -4,7 +4,7 @@ mod_name, version = 'MTG Card Importer', 2.2
 self.setName('[' .. mod_name .. '] v' .. version)
 
 -- Backend Configuration
-local BaseURL = 'https://importer-m7vpzqazfa-uc.a.run.app'
+local BaseURL = 'https://mtg-card-importer-backend.onrender.com'
 local CLIENT_VERSION = '2.2'
 local DEFAULT_BACK = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 local CARD_BACKS = {} -- Per-player custom card backs
