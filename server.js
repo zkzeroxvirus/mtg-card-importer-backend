@@ -129,7 +129,19 @@ app.post('/build', async (req, res) => {
         const scryfallCard = await scryfallLib.getCard(name);
         
         for (let i = 0; i < count; i++) {
-          const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
+          // Pass hand position to cards - stack them slightly in Z direction
+          let cardPosition = null;
+          if (hand && hand.position) {
+            cardPosition = {
+              x: hand.position.x || 0,
+              y: hand.position.y || 0,
+              z: (hand.position.z || 0) + (i * 0.1),  // Stack cards slightly
+              rotX: hand.rotation && hand.rotation.x || 0,
+              rotY: hand.rotation && hand.rotation.y || 0,
+              rotZ: hand.rotation && hand.rotation.z || 0
+            };
+          }
+          const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack, cardPosition);
           // Write just the TTS object (no wrapping)
           res.write(JSON.stringify(ttsCard) + '\n');
           cardCount++;
