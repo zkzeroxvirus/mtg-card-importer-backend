@@ -589,15 +589,6 @@ local Button = setmetatable({
 function registerModule()
 	local enc = Global.getVar('Encoder')
 	if enc then
-		-- Unregister any old properties first
-		enc.call('APIunregisterProperty', {propID = 'eOracle'})
-		enc.call('APIunregisterProperty', {propID = 'eRulings'})
-		enc.call('APIunregisterProperty', {propID = 'eTokens'})
-		enc.call('APIunregisterProperty', {propID = 'ePrintings'})
-		enc.call('APIunregisterProperty', {propID = 'eCopyBack'})
-		enc.call('APIunregisterProperty', {propID = 'eReverse'})
-		
-		-- Register single toggle property
 		enc.call('APIregisterProperty', {
 			propID = mod_name,
 			name = 'MTG Importer',
