@@ -52,6 +52,51 @@ app.get('/card/:name', async (req, res) => {
 });
 
 /**
+ * GET /cards/:id
+ * Get a card by Scryfall ID - returns raw Scryfall JSON
+ */
+app.get('/cards/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ error: 'Card ID required' });
+    }
+
+    const scryfallCard = await scryfallLib.getCardById(id);
+    
+    // Return raw Scryfall format
+    res.json(scryfallCard);
+  } catch (error) {
+    console.error('Error fetching card by ID:', error.message);
+    res.status(404).json({ object: 'error', details: error.message });
+  }
+});
+
+/**
+ * GET /cards/:set/:number
+ * GET /cards/:set/:number/:lang
+ * Get a card by set code and collector number - returns raw Scryfall JSON
+ */
+app.get('/cards/:set/:number/:lang?', async (req, res) => {
+  try {
+    const { set, number, lang } = req.params;
+
+    if (!set || !number) {
+      return res.status(400).json({ error: 'Set code and collector number required' });
+    }
+
+    const scryfallCard = await scryfallLib.getCardBySetNumber(set, number, lang || 'en');
+    
+    // Return raw Scryfall format
+    res.json(scryfallCard);
+  } catch (error) {
+    console.error('Error fetching card by set/number:', error.message);
+    res.status(404).json({ object: 'error', details: error.message });
+  }
+});
+
+/**
  * POST /deck
  * Build a deck from decklist
  * Returns NDJSON (newline-delimited JSON)
@@ -300,6 +345,28 @@ app.get('/printings/:name', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching printings:', error.message);
+    res.status(404).json({ object: 'error', details: error.message });
+  }
+});
+
+/**
+ * GET /sets/:code
+ * Get set information by set code - returns raw Scryfall set object
+ */
+app.get('/sets/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    if (!code) {
+      return res.status(400).json({ error: 'Set code required' });
+    }
+
+    const setData = await scryfallLib.getSet(code);
+    
+    // Return raw Scryfall set format
+    res.json(setData);
+  } catch (error) {
+    console.error('Error fetching set:', error.message);
     res.status(404).json({ object: 'error', details: error.message });
   }
 });
