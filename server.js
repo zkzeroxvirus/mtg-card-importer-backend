@@ -1,211 +1,201 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-// Avoid JSON import for broad Node compatibility
-const VERSION = '0.1.0';
-import { getCard, convertToTTSCard, parseDecklist, searchCards, randomCards, convertToSpawnObject, autocompleteCards, getSets, getSet, getRulingsById, getCollection, getCatalog } from './lib/scryfall.js';
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
 
-dotenv.config();
+const scryfallLib = require('./lib/scryfall');
+
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '1mb' }));
-
 const PORT = process.env.PORT || 3000;
-const DEFAULT_CARD_BACK = process.env.DEFAULT_CARD_BACK || 'https://via.placeholder.com/512x512.png?text=Card+Back';
+const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK;
 
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb' }));
+
+// Health check
 app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'mtg-card-importer-backend', version: VERSION, uptime: process.uptime() });
+  res.json({
+    status: 'ok',
+    service: 'MTG Card Importer Backend',
+    version: '1.0.0',
+    endpoints: {
+      card: 'GET /card/:name',
+      deck: 'POST /deck',
+      random: 'GET /random',
+      search: 'GET /search'
+    }
+  });
 });
 
+/**
+ * GET /card/:name
+ * Get a single card
+ */
 app.get('/card/:name', async (req, res) => {
   try {
-    const name = req.params.name;
-    const set = req.query.set;
-    const card = await getCard(name, set);
-    const tts = convertToTTSCard(card, DEFAULT_CARD_BACK);
-    res.json(tts);
-  } catch (err) {
-    res.status(404).json({ error: 'Card not found', details: err.message || String(err) });
+    const { name } = req.params;
+    const { set, back } = req.query;
+    const cardBack = back || DEFAULT_BACK;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Card name required' });
+    }
+
+    const scryfallCard = await scryfallLib.getCard(name, set);
+    const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
+
+    res.json(ttsCard);
+  } catch (error) {
+    console.error('Error fetching card:', error.message);
+    res.status(404).json({ error: error.message });
   }
 });
 
+/**
+ * POST /deck
+ * Build a deck from decklist
+ * Returns NDJSON (newline-delimited JSON)
+ */
 app.post('/deck', async (req, res) => {
-  const decklistText = req.body.decklist;
-  const set = req.body.set;
-  if (!decklistText || typeof decklistText !== 'string') {
-    return res.status(400).json({ error: 'Missing decklist string in body' });
-  }
-  const items = parseDecklist(decklistText);
-  res.type('application/x-ndjson');
-  for (const item of items) {
-    for (let i = 0; i < item.count; i++) {
-      try {
-        const card = await getCard(item.name, set);
-        const tts = convertToTTSCard(card, DEFAULT_CARD_BACK);
-        res.write(JSON.stringify(tts) + '\n');
-      } catch (err) {
-        res.write(JSON.stringify({ error: 'Card not found', name: item.name }) + '\n');
-      }
-    }
-  }
-  res.end();
-});
-
-// DeckDraftCube-compatible build endpoint
-// Accepts { data: string, hand: { position, rotation }, backURL?: string, useStates?: boolean, lang?: string }
-// Returns NDJSON of spawnable TTS objects
-app.post('/build', async (req, res) => {
   try {
-    const data = req.body.data;
-    const hand = req.body.hand;
-    const set = req.body.set;
-    const backURL = req.body.backURL || DEFAULT_CARD_BACK;
-    if (!data || typeof data !== 'string') {
-      return res.status(400).json({ error: 'Missing data string in body' });
+    const { decklist, back } = req.body;
+    const cardBack = back || DEFAULT_BACK;
+
+    if (!decklist) {
+      return res.status(400).json({ error: 'Decklist required' });
     }
-    res.type('application/x-ndjson');
-    const isDeck = /\r?\n/.test(data.trim());
-    if (isDeck) {
-      const items = parseDecklist(data);
-      for (const item of items) {
-        for (let i = 0; i < item.count; i++) {
-          try {
-            const card = await getCard(item.name, set);
-            const obj = convertToSpawnObject(card, backURL, hand);
-            res.write(JSON.stringify(obj) + '\n');
-          } catch (err) {
-            res.write(JSON.stringify({ error: 'Card not found', name: item.name }) + '\n');
-          }
+
+    const cards = scryfallLib.parseDecklist(decklist);
+    
+    if (cards.length === 0) {
+      return res.status(400).json({ error: 'No valid cards in decklist' });
+    }
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+
+    let cardCount = 0;
+    for (const { count, name } of cards) {
+      try {
+        const scryfallCard = await scryfallLib.getCard(name);
+        
+        for (let i = 0; i < count; i++) {
+          const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
+          res.write(JSON.stringify(ttsCard) + '\n');
+          cardCount++;
         }
+      } catch (error) {
+        console.warn(`Skipped: ${name} - ${error.message}`);
+        // Continue with next card on error
       }
-      res.end();
-      return;
     }
-    // Single card
-    try {
-      const card = await getCard(data.trim(), set);
-      const obj = convertToSpawnObject(card, backURL, hand);
-      res.write(JSON.stringify(obj) + '\n');
-    } catch (err) {
-      res.write(JSON.stringify({ error: 'Card not found', name: data.trim() }) + '\n');
-    }
+
+    console.log(`Deck spawned: ${cardCount} cards`);
     res.end();
-  } catch (err) {
-    res.status(500).json({ error: 'Build failed', details: err.message || String(err) });
+  } catch (error) {
+    console.error('Error building deck:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
+/**
+ * GET /random
+ * Get random card(s) - returns JSON array
+ */
 app.get('/random', async (req, res) => {
   try {
-    const count = Math.min(parseInt(req.query.count || '1', 10), 100);
-    const q = req.query.q;
-    const format = String(req.query.format || 'tts');
-    const backURL = req.query.backURL || DEFAULT_CARD_BACK;
-    const cards = await randomCards(count, q);
-    if (format === 'raw') return res.json(cards);
-    if (format === 'spawn') {
-      const hand = req.query.hand ? JSON.parse(req.query.hand) : undefined;
-      const list = cards.map(c => convertToSpawnObject(c, backURL, hand));
-      return res.json(list);
+    const { count = 1, back, q = '' } = req.query;
+    const cardBack = back || DEFAULT_BACK;
+    const numCards = Math.min(parseInt(count) || 1, 10); // Max 10
+
+    const ttsCards = [];
+
+    for (let i = 0; i < numCards; i++) {
+      try {
+        const scryfallCard = await scryfallLib.getRandomCard(q);
+        const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
+        ttsCards.push(ttsCard);
+      } catch (error) {
+        console.warn(`Random card failed: ${error.message}`);
+      }
     }
-    const list = cards.map(c => convertToTTSCard(c, backURL));
-    res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: 'Random fetch failed', details: err.message || String(err) });
+
+    res.json(ttsCards);
+  } catch (error) {
+    console.error('Error getting random cards:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
+/**
+ * GET /search
+ * Search for cards
+ */
 app.get('/search', async (req, res) => {
   try {
-    const q = String(req.query.q || '').trim();
-    if (!q) return res.status(400).json({ error: 'Missing query param q' });
-    const format = String(req.query.format || 'tts');
-    const backURL = req.query.backURL || DEFAULT_CARD_BACK;
-    const cards = await searchCards(q);
-    if (format === 'raw') return res.json(cards);
-    if (format === 'spawn') {
-      const hand = req.query.hand ? JSON.parse(req.query.hand) : undefined;
-      const list = cards.map(c => convertToSpawnObject(c, backURL, hand));
-      return res.json(list);
+    const { q, limit = 10, back } = req.query;
+    const cardBack = back || DEFAULT_BACK;
+
+    if (!q) {
+      return res.status(400).json({ error: 'Query required' });
     }
-    const list = cards.map(c => convertToTTSCard(c, backURL));
-    res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: 'Search failed', details: err.message || String(err) });
+
+    const scryfallCards = await scryfallLib.searchCards(q, parseInt(limit));
+    
+    if (scryfallCards.length === 0) {
+      return res.status(404).json({ error: 'No cards found' });
+    }
+
+    const ttsCards = scryfallCards.map(card => {
+      try {
+        return scryfallLib.convertToTTSCard(card, cardBack);
+      } catch (error) {
+        console.warn(`Skipped card in search: ${card.name}`);
+        return null;
+      }
+    }).filter(card => card !== null);
+
+    res.json(ttsCards);
+  } catch (error) {
+    console.error('Error searching cards:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Autocomplete
-app.get('/autocomplete', async (req, res) => {
+/**
+ * GET /rulings/:cardId
+ * Get card rulings from Scryfall
+ */
+app.get('/rulings/:cardId', async (req, res) => {
   try {
-    const q = String(req.query.q || '').trim();
-    if (!q) return res.status(400).json({ error: 'Missing query param q' });
-    const list = await autocompleteCards(q);
-    res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: 'Autocomplete failed', details: err.message || String(err) });
-  }
-});
+    const { cardId } = req.params;
 
-// Sets
-app.get('/sets', async (_req, res) => {
-  try {
-    const sets = await getSets();
-    res.json(sets);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch sets', details: err.message || String(err) });
-  }
-});
-app.get('/sets/:code', async (req, res) => {
-  try {
-    const code = req.params.code;
-    const set = await getSet(code);
-    res.json(set);
-  } catch (err) {
-    res.status(404).json({ error: 'Set not found', details: err.message || String(err) });
-  }
-});
+    if (!cardId) {
+      return res.status(400).json({ error: 'Card ID required' });
+    }
 
-// Rulings
-app.get('/rulings/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const rulings = await getRulingsById(id);
+    const rulings = await scryfallLib.getCardRulings(cardId);
     res.json(rulings);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch rulings', details: err.message || String(err) });
+  } catch (error) {
+    console.error('Error fetching rulings:', error.message);
+    res.status(404).json({ error: error.message });
   }
 });
 
-// Collection (identifiers)
-app.post('/collection', async (req, res) => {
-  try {
-    const identifiers = req.body.identifiers;
-    const format = String(req.query.format || 'tts');
-    const backURL = req.body.backURL || req.query.backURL || DEFAULT_CARD_BACK;
-    if (!Array.isArray(identifiers) || identifiers.length === 0) {
-      return res.status(400).json({ error: 'Missing identifiers array in body' });
-    }
-    const cards = await getCollection(identifiers);
-    if (format === 'raw') return res.json(cards);
-    const list = cards.map(c => (format === 'spawn') ? convertToSpawnObject(c, backURL, req.body.hand) : convertToTTSCard(c, backURL));
-    res.json(list);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch collection', details: err.message || String(err) });
-  }
+/**
+ * Error handler
+ */
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
 });
 
-// Catalog
-app.get('/catalog/:type', async (req, res) => {
-  try {
-    const type = req.params.type;
-    const items = await getCatalog(type);
-    res.json(items);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch catalog', details: err.message || String(err) });
-  }
-});
-
+// Start server
 app.listen(PORT, () => {
-  console.log(`[mtg-card-importer] listening on :${PORT}`);
+  console.log(`MTG Card Importer Backend running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Scryfall delay: ${process.env.SCRYFALL_DELAY || 100}ms`);
 });
