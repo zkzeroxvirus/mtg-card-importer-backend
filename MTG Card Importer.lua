@@ -1,6 +1,7 @@
--- MTG Card Importer via Backend (Chat Based)
+-- MTG Card Importer via Backend (Chat Based + Encoder Integration)
 -- Uses Scryfall API with proper rate limiting and attribution
-mod_name, version = 'MTG Card Importer', 2.2
+-- Integrates with Encoder mod for card buttons
+mod_name, version = 'MTG Card Importer', 2.3
 self.setName('[' .. mod_name .. '] v' .. version)
 
 -- Backend Configuration
@@ -410,6 +411,158 @@ function onLoad(data)
 		font_size = 150,
 		tooltip = 'MTG Importer Help'
 	})
+	
+	-- Register with Encoder if available
+	Wait.frames(function() registerModule() end, 1)
+end
+
+-- ============================================================================
+-- ENCODER INTEGRATION
+-- ============================================================================
+
+function registerModule()
+	local enc = Global.getVar('Encoder')
+	if enc then
+		enc.call('APIregisterProperty', {
+			propID = mod_name,
+			name = 'MTG Importer',
+			values = {},
+			funcOwner = self,
+			activateFunc = 'toggleMenu',
+			visible = true,
+			visible_in_hand = 0,
+			tags = 'tool'
+		})
+		log('Encoder integration registered')
+	end
+end
+
+function toggleMenu(card)
+	local enc = Global.getVar('Encoder')
+	if enc then
+		-- Create buttons on the card
+		createButtons(card)
+	end
+end
+
+function createButtons(card)
+	-- Get card name for button labels
+	local cardName = card.getName()
+	
+	-- Clear existing buttons first
+	card.clearButtons()
+	
+	-- Button positions (will be arranged in a grid)
+	local buttons = {
+		{ label = 'Oracle', func = 'eOracle', pos = {-0.5, 0.3, -1} },
+		{ label = 'Rulings', func = 'eRulings', pos = {0.5, 0.3, -1} },
+		{ label = 'Tokens', func = 'eTokens', pos = {-0.5, 0.3, 0} },
+		{ label = 'Printings', func = 'ePrintings', pos = {0.5, 0.3, 0} },
+		{ label = 'Back', func = 'eSetBack', pos = {-0.5, 0.3, 1} },
+		{ label = 'Reverse', func = 'eReverse', pos = {0.5, 0.3, 1} },
+	}
+	
+	for _, btn in ipairs(buttons) do
+		card.createButton({
+			label = btn.label,
+			click_function = btn.func,
+			function_owner = self,
+			position = btn.pos,
+			height = 250,
+			width = 800,
+			font_size = 80,
+			color = {0.2, 0.2, 0.2, 0.9},
+			font_color = {1, 1, 1, 1},
+			hover_color = {0.4, 0.4, 0.4, 0.9},
+			press_color = {0.6, 0.6, 0.6, 0.9}
+		})
+	end
+end
+
+function eOracle(card)
+	local cardName = card.getName():match('^([^\n]+)')
+	getJSON(BaseURL .. '/card/' .. urlEncode(cardName), function(resp)
+		if resp.is_done then
+			local success, cardData = pcall(function() return JSON.decode(resp.text) end)
+			if success and cardData then
+				local oracleText = cardData.Description or 'No oracle text'
+				printToAll('[MTG Oracle] ' .. cardName .. ':\n' .. oracleText, {0.7, 1, 0.7})
+				-- Also set it as card description
+				card.setDescription(oracleText)
+			end
+		end
+	end)
+end
+
+function eRulings(card)
+	local cardName = card.getName():match('^([^\n]+)')
+	getJSON(BaseURL .. '/rulings/' .. urlEncode(cardName), function(resp)
+		if resp.is_done then
+			local success, rulingsData = pcall(function() return JSON.decode(resp.text) end)
+			if success and rulingsData and rulingsData.data then
+				local rulingsText = ''
+				for _, ruling in ipairs(rulingsData.data) do
+					rulingsText = rulingsText .. ruling.published_at .. '\n' .. ruling.comment .. '\n\n'
+				end
+				if rulingsText ~= '' then
+					printToAll('[MTG] Rulings for ' .. cardName .. ':\n' .. rulingsText, {0, 1, 0.5})
+				end
+			end
+		end
+	end)
+end
+
+function eTokens(card)
+	local cardName = card.getName():match('^([^\n]+)')
+	printToAll('[MTG] Fetching tokens for ' .. cardName .. '...', {0.7, 0.7, 1})
+	getJSON(BaseURL .. '/tokens/' .. urlEncode(cardName), function(resp)
+		if resp.is_done then
+			local success, tokens = pcall(function() return JSON.decode(resp.text) end)
+			if success and tokens and #tokens > 0 then
+				printToAll('[MTG] Spawning ' .. #tokens .. ' token(s)...', {0.7, 1, 0.7})
+				for _, tokenCard in ipairs(tokens) do
+					spawnObjectJSON({json = JSON.encode(tokenCard)})
+				end
+			else
+				printToAll('[MTG] No tokens found for ' .. cardName, {1, 0.8, 0.5})
+			end
+		end
+	end)
+end
+
+function ePrintings(card)
+	local cardName = card.getName():match('^([^\n]+)')
+	getJSON(BaseURL .. '/printings/' .. urlEncode(cardName), function(resp)
+		if resp.is_done then
+			local success, printings = pcall(function() return JSON.decode(resp.text) end)
+			if success and printings and #printings > 0 then
+				local printText = 'Printings of ' .. cardName .. ':\n'
+				for i, p in ipairs(printings) do
+					if i <= 10 then -- Show first 10
+						printText = printText .. p.setName .. ' (' .. p.set .. ') - ' .. (p.rarity or 'U') .. '\n'
+					end
+				end
+				printToAll(printText, {0.5, 1, 0.5})
+			end
+		end
+	end)
+end
+
+function eSetBack(card)
+	local cardName = card.getName():match('^([^\n]+)')
+	getJSON(BaseURL .. '/card/' .. urlEncode(cardName), function(resp)
+		if resp.is_done then
+			local success, cardData = pcall(function() return JSON.decode(resp.text) end)
+			if success and cardData then
+				printToAll('[MTG] Back set for ' .. cardName, {0.7, 1, 0.7})
+			end
+		end
+	end)
+end
+
+function eReverse(card)
+	-- Flip the card (swap back and front)
+	spawnObjectJSON({json = card.getJSON():gsub('BackURL', 'FaceURL_TEMP'):gsub('FaceURL', 'BackURL'):gsub('FaceURL_TEMP', 'FaceURL')})
 end
 
 function showHelp()
@@ -426,8 +579,8 @@ function showHelp()
 	log('    Examples:')
 	log('      sf random')
 	log('      sf random 10')
-	log('      sf random ?q=r:m+id:wubrg 15')
-	log('      sf random 5 ?q=t:creature+cmc>=5')
+	log('      sf random ?q=r:m id:wubrg 15')
+	log('      sf random 5 ?q=t:creature cmc>=5')
 	log(' ')
 	log('  sf search <query>')
 	log('    Example: sf search t:creature r:rare')
@@ -436,6 +589,14 @@ function showHelp()
 	log('  sf rules <cardname> - Show rulings')
 	log('  sf back <url> - Set custom card back')
 	log(' ')
+	log('ENCODER BUTTONS (right-click card):')
+	log('  Oracle - Display card text')
+	log('  Rulings - Show official rulings')
+	log('  Tokens - Spawn associated tokens')
+	log('  Printings - Show card printings')
+	log('  Back - Set card back image')
+	log('  Reverse - Flip front/back')
+	log(' ')
 	log('QUERY SYNTAX (Scryfall format):')
 	log('  Colors: c:w c:u c:b c:r c:g c:c c:m')
 	log('  Rarity: r:c r:u r:r r:m')
@@ -443,14 +604,7 @@ function showHelp()
 	log('  CMC: cmc=3 cmc>=5 cmc<=2')
 	log('  Text: o:"draw a card"')
 	log('  Identity: id:wubrg (5-color)')
-	log('  Use + for AND: t:creature+r:rare+cmc>=5')
-	log(' ')
-	log('EXAMPLES:')
-	log('  sf Black Lotus')
-	log('  sf Lightning Bolt')
-	log('  sf random ?q=r:m+id:wubrg 15')
-	log('  sf search t:planeswalker')
-	log('  sf text Counterspell')
+	log('  Use spaces for AND: t:creature r:rare cmc>=5')
 	log(' ')
 	log('Powered by: github.com/zkzeroxvirus/mtg-card-importer-backend')
 	log('Card images from: Scryfall (https://scryfall.com)')
