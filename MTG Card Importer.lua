@@ -423,13 +423,17 @@ end
 function registerModule()
 	local enc = Global.getVar('Encoder')
 	if enc then
-		enc.call('APIregisterProperty', {propID='mtg_oracle', name='Oracle', values={}, funcOwner=self, activateFunc='eOracle'})
-		enc.call('APIregisterProperty', {propID='mtg_rulings', name='Rulings', values={}, funcOwner=self, activateFunc='eRulings'})
-		enc.call('APIregisterProperty', {propID='mtg_tokens', name='Tokens', values={}, funcOwner=self, activateFunc='eTokens'})
-		enc.call('APIregisterProperty', {propID='mtg_printings', name='Printings', values={}, funcOwner=self, activateFunc='ePrintings'})
-		enc.call('APIregisterProperty', {propID='mtg_back', name='Set Back', values={}, funcOwner=self, activateFunc='eSetBack'})
-		enc.call('APIregisterProperty', {propID='mtg_reverse', name='Flip Card', values={}, funcOwner=self, activateFunc='eReverse'})
-		log('MTG Importer: Registered 6 properties with Encoder')
+		enc.call('APIregisterProperty', {
+			propID = mod_name,
+			name = 'MTG Importer',
+			values = {},
+			funcOwner = self,
+			activateFunc = 'toggleMenu',
+			visible = true,
+			visible_in_hand = 0,
+			tags = 'tool'
+		})
+		log('Encoder integration registered (Amuzet-style)')
 	end
 end
 
@@ -475,9 +479,9 @@ function createButtons(card)
 	end
 end
 
-function eOracle(params)
-	local card = params.obj
-	if not card then return end
+function eOracle(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getName then return end
 	local cardName = card.getName():match('^([^\n]+)')
 	getJSON(BaseURL .. '/card/' .. urlEncode(cardName), function(resp)
 		if resp.is_done then
@@ -492,9 +496,9 @@ function eOracle(params)
 	end)
 end
 
-function eRulings(params)
-	local card = params.obj
-	if not card then return end
+function eRulings(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getName then return end
 	local cardName = card.getName():match('^([^\n]+)')
 	getJSON(BaseURL .. '/rulings/' .. urlEncode(cardName), function(resp)
 		if resp.is_done then
@@ -512,9 +516,9 @@ function eRulings(params)
 	end)
 end
 
-function eTokens(params)
-	local card = params.obj
-	if not card then return end
+function eTokens(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getName then return end
 	local cardName = card.getName():match('^([^\n]+)')
 	printToAll('[MTG] Fetching tokens for ' .. cardName .. '...', {0.7, 0.7, 1})
 	getJSON(BaseURL .. '/tokens/' .. urlEncode(cardName), function(resp)
@@ -532,9 +536,9 @@ function eTokens(params)
 	end)
 end
 
-function ePrintings(params)
-	local card = params.obj
-	if not card then return end
+function ePrintings(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getName then return end
 	local cardName = card.getName():match('^([^\n]+)')
 	getJSON(BaseURL .. '/printings/' .. urlEncode(cardName), function(resp)
 		if resp.is_done then
@@ -552,9 +556,9 @@ function ePrintings(params)
 	end)
 end
 
-function eSetBack(params)
-	local card = params.obj
-	if not card then return end
+function eSetBack(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getName then return end
 	local cardName = card.getName():match('^([^\n]+)')
 	getJSON(BaseURL .. '/card/' .. urlEncode(cardName), function(resp)
 		if resp.is_done then
@@ -566,9 +570,9 @@ function eSetBack(params)
 	end)
 end
 
-function eReverse(params)
-	local card = params.obj
-	if not card then return end
+function eReverse(arg)
+	local card = (type(arg) == 'table' and arg.obj) or arg
+	if not card or not card.getJSON then return end
 	-- Flip the card (swap back and front)
 	spawnObjectJSON({json = card.getJSON():gsub('BackURL', 'FaceURL_TEMP'):gsub('FaceURL', 'BackURL'):gsub('FaceURL_TEMP', 'FaceURL')})
 end
