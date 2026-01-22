@@ -420,6 +420,42 @@ end
 -- ENCODER INTEGRATION
 -- ============================================================================
 
+-- Button definitions for Encoder menu
+local buttons = {
+	{label = 'Oracle', func = 'eOracle'},
+	{label = 'Rulings', func = 'eRulings'},
+	{label = 'Tokens', func = 'eTokens'},
+	{label = 'Printings', func = 'ePrintings'},
+	{label = 'Set Back', func = 'eSetBack'},
+	{label = 'Flip', func = 'eReverse'},
+}
+
+-- Button creator (Amuzet-style)
+local Button = setmetatable({
+	label = 'UNDEFINED',
+	click_function = 'eOracle',
+	function_owner = self,
+	height = 400,
+	width = 2100,
+	font_size = 360,
+	scale = {0.4, 0.4, 0.4},
+	position = {0, 0.28, -1.35},
+	rotation = {0, 0, 90},
+	reset = function(t)
+		t.label = 'UNDEFINED'
+		t.position = {0, 0.28, -1.35}
+	end
+}, {
+	__call = function(t, o, btn, flip)
+		t.label = btn.label
+		t.click_function = btn.func
+		t.rotation[3] = 90 - 90 * flip
+		o.createButton(t)
+		-- Increment position for next button
+		t.position[3] = t.position[3] + 0.25
+	end
+})
+
 function registerModule()
 	local enc = Global.getVar('Encoder')
 	if enc then
@@ -433,52 +469,21 @@ function registerModule()
 			visible_in_hand = 0,
 			tags = 'tool'
 		})
-		enc.call('APIregisterMenu', {
-			menuID = 'MTG Importer Menu',
-			funcOwner = self,
-			activateFunc = 'createImporterMenu',
-			visible_in_hand = 1
-		})
 		log('Encoder integration registered (Amuzet-style)')
 	end
 end
 
--- Toggle menu (Amuzet-style)
+-- Toggle menu (Amuzet-style - creates buttons directly)
 function toggleMenu(arg)
 	local o = (type(arg) == 'table' and (arg.obj or arg)) or arg
 	local enc = Global.getVar('Encoder')
 	if enc and o then
-		enc.call('APIobjToggleMenu', {obj = o, menuID = 'MTG Importer Menu'})
 		enc.call('APIrebuildButtons', {obj = o})
-	end
-end
-
--- Create menu buttons (Amuzet-style - let πMenu handle layout)
-function createImporterMenu(t)
-	local o = t.obj
-	if not o then return end
-	
-	-- Simple button list - πMenu will handle all the positioning and styling
-	local buttons = {
-		{label = 'Oracle', click_function = 'eOracle', tooltip = 'Show oracle text'},
-		{label = 'Rulings', click_function = 'eRulings', tooltip = 'Show card rulings'},
-		{label = 'Tokens', click_function = 'eTokens', tooltip = 'Spawn tokens'},
-		{label = 'Printings', click_function = 'ePrintings', tooltip = 'Show printings'},
-		{label = 'Set Back', click_function = 'eSetBack', tooltip = 'Set card back'},
-		{label = 'Flip Card', click_function = 'eReverse', tooltip = 'Flip card'},
-	}
-	
-	for _, btn in ipairs(buttons) do
-		o.createButton({
-			label = btn.label,
-			click_function = btn.click_function,
-			function_owner = self,
-			position = {0, 0.2, 0},
-			height = 200,
-			width = 800,
-			font_size = 100,
-			tooltip = btn.tooltip
-		})
+		local flip = enc.call('APIgetFlip', {obj = o}) or 1
+		for _, btn in ipairs(buttons) do
+			Button(o, btn, flip)
+		end
+		Button:reset()
 	end
 end
 
