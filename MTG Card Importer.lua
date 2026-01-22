@@ -550,42 +550,6 @@ end
 -- ENCODER INTEGRATION
 -- ============================================================================
 
--- Button definitions for Encoder menu
-local buttons = {
-	{label = 'Oracle', func = 'eOracle'},
-	{label = 'Rulings', func = 'eRulings'},
-	{label = 'Tokens', func = 'eTokens'},
-	{label = 'Printings', func = 'ePrintings'},
-	{label = 'Copy Back', func = 'eCopyBack'},
-	{label = 'Flip', func = 'eReverse'},
-}
-
--- Button creator (Amuzet-style)
-local Button = setmetatable({
-	label = 'UNDEFINED',
-	click_function = 'eOracle',
-	function_owner = self,
-	height = 400,
-	width = 2100,
-	font_size = 360,
-	scale = {0.4, 0.4, 0.4},
-	position = {0, 0.28, -1.35},
-	rotation = {0, 0, 90},
-	reset = function(t)
-		t.label = 'UNDEFINED'
-		t.position = {0, 0.28, -1.35}
-	end
-}, {
-	__call = function(t, o, btn, flip)
-		t.label = btn.label
-		t.click_function = btn.func
-		t.rotation[3] = 90 - 90 * flip
-		o.createButton(t)
-		-- Increment position for next button
-		t.position[3] = t.position[3] + 0.25
-	end
-})
-
 function registerModule()
 	local enc = Global.getVar('Encoder')
 	if enc then

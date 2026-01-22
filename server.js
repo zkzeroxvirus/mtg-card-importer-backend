@@ -30,26 +30,24 @@ app.get('/', (req, res) => {
 
 /**
  * GET /card/:name
- * Get a single card
+ * Get a single card - returns raw Scryfall JSON
  */
 app.get('/card/:name', async (req, res) => {
   try {
     const { name } = req.params;
-    const { set, back } = req.query;
-    const cardBack = back || DEFAULT_BACK;
+    const { set } = req.query;
 
     if (!name) {
       return res.status(400).json({ error: 'Card name required' });
     }
 
     const scryfallCard = await scryfallLib.getCard(name, set);
-    const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
-
-    // Return just the TTS object (no wrapping)
-    res.json(ttsCard);
+    
+    // Return raw Scryfall format - Lua code will convert to TTS
+    res.json(scryfallCard);
   } catch (error) {
     console.error('Error fetching card:', error.message);
-    res.status(404).json({ error: error.message });
+    res.status(404).json({ object: 'error', details: error.message });
   }
 });
 
@@ -162,30 +160,37 @@ app.post('/build', async (req, res) => {
 
 /**
  * GET /random
- * Get random card(s) - returns JSON array
+ * Get random card(s) - returns raw Scryfall card or list
  */
 app.get('/random', async (req, res) => {
   try {
-    const { count = 1, back, q = '' } = req.query;
-    const cardBack = back || DEFAULT_BACK;
-    const numCards = Math.min(parseInt(count) || 1, 100); // Max 100
+    const { count, q = '' } = req.query;
+    const numCards = count ? Math.min(parseInt(count) || 1, 100) : 1;
 
-    const ttsCards = [];
-
-    for (let i = 0; i < numCards; i++) {
-      try {
-        const scryfallCard = await scryfallLib.getRandomCard(q);
-        const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
-        ttsCards.push(ttsCard);
-      } catch (error) {
-        console.warn(`Random card failed: ${error.message}`);
+    if (numCards === 1) {
+      // Single random card
+      const scryfallCard = await scryfallLib.getRandomCard(q);
+      res.json(scryfallCard);
+    } else {
+      // Multiple random cards - return as list
+      const cards = [];
+      for (let i = 0; i < numCards; i++) {
+        try {
+          const scryfallCard = await scryfallLib.getRandomCard(q);
+          cards.push(scryfallCard);
+        } catch (error) {
+          console.warn(`Random card failed: ${error.message}`);
+        }
       }
+      res.json({
+        object: 'list',
+        total_cards: cards.length,
+        data: cards
+      });
     }
-
-    res.json(ttsCards);
   } catch (error) {
     console.error('Error getting random cards:', error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ object: 'error', details: error.message });
   }
 });
 
@@ -193,10 +198,11 @@ app.get('/random', async (req, res) => {
  * GET /search
  * Search for cards
  */
+app.get('/search',  - returns Scryfall list format
+ */
 app.get('/search', async (req, res) => {
   try {
-    const { q, limit = 10, back } = req.query;
-    const cardBack = back || DEFAULT_BACK;
+    const { q, limit = 100 } = req.query;
 
     if (!q) {
       return res.status(400).json({ error: 'Query required' });
@@ -205,28 +211,20 @@ app.get('/search', async (req, res) => {
     const scryfallCards = await scryfallLib.searchCards(q, parseInt(limit));
     
     if (scryfallCards.length === 0) {
-      return res.status(404).json({ error: 'No cards found' });
+      return res.json({ 
+        object: 'list',
+        total_cards: 0,
+        data: []
+      });
     }
 
-    const ttsCards = scryfallCards.map(card => {
-      try {
-        return scryfallLib.convertToTTSCard(card, cardBack);
-      } catch (error) {
-        console.warn(`Skipped card in search: ${card.name}`);
-        return null;
-      }
-    }).filter(card => card !== null);
-
-    res.json(ttsCards);
-  } catch (error) {
-    console.error('Error searching cards:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /rulings/:name
- * Get card rulings from Scryfall
+    // Return Scryfall list format
+    res.json({
+      object: 'list',
+      total_cards: scryfallCards.length,
+      has_more: false,
+      data: scryfallCards
+    }); - returns Scryfall list format
  */
 app.get('/rulings/:name', async (req, res) => {
   try {
@@ -237,22 +235,26 @@ app.get('/rulings/:name', async (req, res) => {
     }
 
     const rulings = await scryfallLib.getCardRulings(name);
-    res.json(rulings);
+    
+    // Return Scryfall rulings format
+    res.json({
+      object: 'list',
+      has_more: false,
+      data: rulings
+    });
   } catch (error) {
     console.error('Error fetching rulings:', error.message);
-    res.status(404).json({ error: error.message });
-  }
-});
+    res.status(404).json({ object: 'error', detailsn({ error: 'Card name required' });
+    }
 
-/**
- * GET /tokens/:name
- * Get tokens associated with a card
+    const rulings = await scryfallLib.getCardRulings(name);
+    res.json(rulings);
+  } catch (error) {
+    console.error('Error fetching ru - returns array of Scryfall cards
  */
 app.get('/tokens/:name', async (req, res) => {
   try {
     const { name } = req.params;
-    const { back } = req.query;
-    const cardBack = back || DEFAULT_BACK;
 
     if (!name) {
       return res.status(400).json({ error: 'Card name required' });
@@ -260,17 +262,11 @@ app.get('/tokens/:name', async (req, res) => {
 
     const tokens = await scryfallLib.getTokens(name);
     
-    if (tokens.length === 0) {
-      return res.json({ tokens: [], message: 'No tokens found for this card' });
-    }
-
-    // Convert to TTS cards
-    const ttsTokens = tokens.map(token => {
-      try {
-        return scryfallLib.convertToTTSCard(token, cardBack);
-      } catch (error) {
-        console.warn(`Skipped token: ${token.name}`);
-        return null;
+    // Return array of Scryfall token cards
+    res.json(tokens);
+  } catch (error) {
+    console.error('Error fetching tokens:', error.message);
+    res.status(404).json({ object: 'error', details
       }
     }).filter(token => token !== null);
 
@@ -291,40 +287,28 @@ app.get('/printings/:name', async (req, res) => {
     const { back } = req.query;
     const cardBack = back || DEFAULT_BACK;
 
+    if (!name) { - returns Scryfall list format
+ */
+app.get('/printings/:name', async (req, res) => {
+  try {
+    const { name } = req.params;
+
     if (!name) {
       return res.status(400).json({ error: 'Card name required' });
     }
 
     const printings = await scryfallLib.getPrintings(name);
     
-    if (printings.length === 0) {
-      return res.json({ printings: [], message: 'No printings found' });
-    }
-
-    // Return as array of card info (not full TTS objects to keep response size reasonable)
-    const printingInfo = printings.map(card => ({
-      name: card.name,
-      set: card.set.toUpperCase(),
-      setName: card.set_name,
-      releaseDate: card.released_at,
-      rarity: card.rarity,
-      collectorNumber: card.collector_number,
-      language: card.lang,
-      image: scryfallLib.getCardImageUrl(card)
-    }));
-
-    res.json(printingInfo);
+    // Return Scryfall list format with full card data
+    res.json({
+      object: 'list',
+      total_cards: printings.length,
+      has_more: false,
+      data: printings
+    });
   } catch (error) {
     console.error('Error fetching printings:', error.message);
-    res.status(404).json({ error: error.message });
-  }
-});
-
-/**
- * Error handler
- */
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
+    res.status(404).json({ object: 'error', details:', err);
   res.status(500).json({ 
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
