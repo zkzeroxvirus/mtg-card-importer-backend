@@ -45,7 +45,15 @@ app.get('/card/:name', async (req, res) => {
     const scryfallCard = await scryfallLib.getCard(name, set);
     const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
 
-    res.json(ttsCard);
+    // Return wrapped format with card metadata + TTS object
+    res.json({
+      name: scryfallCard.name,
+      set: scryfallCard.set,
+      collector_number: scryfallCard.collector_number,
+      image_url: scryfallLib.getCardImageUrl(scryfallCard),
+      scryfall_id: scryfallCard.id,
+      tts: ttsCard
+    });
   } catch (error) {
     console.error('Error fetching card:', error.message);
     res.status(404).json({ error: error.message });
@@ -81,7 +89,18 @@ app.post('/deck', async (req, res) => {
         
         for (let i = 0; i < count; i++) {
           const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
-          res.write(JSON.stringify(ttsCard) + '\n');
+          
+          // Wrap in format with metadata + TTS
+          const cardData = {
+            name: scryfallCard.name,
+            set: scryfallCard.set,
+            collector_number: scryfallCard.collector_number,
+            image_url: scryfallLib.getCardImageUrl(scryfallCard),
+            scryfall_id: scryfallCard.id,
+            tts: ttsCard
+          };
+          
+          res.write(JSON.stringify(cardData) + '\n');
           cardCount++;
         }
       } catch (error) {
@@ -108,19 +127,28 @@ app.get('/random', async (req, res) => {
     const cardBack = back || DEFAULT_BACK;
     const numCards = Math.min(parseInt(count) || 1, 10); // Max 10
 
-    const ttsCards = [];
+    const cards = [];
 
     for (let i = 0; i < numCards; i++) {
       try {
         const scryfallCard = await scryfallLib.getRandomCard(q);
         const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
-        ttsCards.push(ttsCard);
+        
+        // Wrap in format with metadata + TTS
+        cards.push({
+          name: scryfallCard.name,
+          set: scryfallCard.set,
+          collector_number: scryfallCard.collector_number,
+          image_url: scryfallLib.getCardImageUrl(scryfallCard),
+          scryfall_id: scryfallCard.id,
+          tts: ttsCard
+        });
       } catch (error) {
         console.warn(`Random card failed: ${error.message}`);
       }
     }
 
-    res.json(ttsCards);
+    res.json(cards);
   } catch (error) {
     console.error('Error getting random cards:', error.message);
     res.status(500).json({ error: error.message });
@@ -146,16 +174,24 @@ app.get('/search', async (req, res) => {
       return res.status(404).json({ error: 'No cards found' });
     }
 
-    const ttsCards = scryfallCards.map(card => {
+    const cards = scryfallCards.map(card => {
       try {
-        return scryfallLib.convertToTTSCard(card, cardBack);
+        const ttsCard = scryfallLib.convertToTTSCard(card, cardBack);
+        return {
+          name: card.name,
+          set: card.set,
+          collector_number: card.collector_number,
+          image_url: scryfallLib.getCardImageUrl(card),
+          scryfall_id: card.id,
+          tts: ttsCard
+        };
       } catch (error) {
         console.warn(`Skipped card in search: ${card.name}`);
         return null;
       }
     }).filter(card => card !== null);
 
-    res.json(ttsCards);
+    res.json(cards);
   } catch (error) {
     console.error('Error searching cards:', error.message);
     res.status(500).json({ error: error.message });
