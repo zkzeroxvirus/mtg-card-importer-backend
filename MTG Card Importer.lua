@@ -615,40 +615,6 @@ function toggleMenu(arg)
 	end
 end
 
-function createButtons(card)
-	-- Get card name for button labels
-	local cardName = card.getName()
-	
-	-- Clear existing buttons first
-	card.clearButtons()
-	
-	-- Button positions (will be arranged in a grid)
-	local buttons = {
-		{ label = 'Oracle', func = 'eOracle', pos = {-0.5, 0.3, -1} },
-		{ label = 'Rulings', func = 'eRulings', pos = {0.5, 0.3, -1} },
-		{ label = 'Tokens', func = 'eTokens', pos = {-0.5, 0.3, 0} },
-		{ label = 'Printings', func = 'ePrintings', pos = {0.5, 0.3, 0} },
-		{ label = 'Back', func = 'eSetBack', pos = {-0.5, 0.3, 1} },
-		{ label = 'Reverse', func = 'eReverse', pos = {0.5, 0.3, 1} },
-	}
-	
-	for _, btn in ipairs(buttons) do
-		card.createButton({
-			label = btn.label,
-			click_function = btn.func,
-			function_owner = self,
-			position = btn.pos,
-			height = 250,
-			width = 800,
-			font_size = 80,
-			color = {0.2, 0.2, 0.2, 0.9},
-			font_color = {1, 1, 1, 1},
-			hover_color = {0.4, 0.4, 0.4, 0.9},
-			press_color = {0.6, 0.6, 0.6, 0.9}
-		})
-	end
-end
-
 function eOracle(arg)
 	local card = (type(arg) == 'table' and arg.obj) or arg
 	if not card or not card.getName then return end
