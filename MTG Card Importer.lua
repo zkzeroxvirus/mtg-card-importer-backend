@@ -85,8 +85,7 @@ function spawnDeckList(decktext, color)
 	
 	local req = {
 		data = decktext,
-		back = getPlayerBack(color),
-		hand = hand
+		back = getPlayerBack(color)
 	}
 	
 	postJSON(BaseURL .. '/build', req, function(resp)
