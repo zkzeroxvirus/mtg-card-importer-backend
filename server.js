@@ -196,9 +196,7 @@ app.get('/random', async (req, res) => {
 
 /**
  * GET /search
- * Search for cards
- */
-app.get('/search',  - returns Scryfall list format
+ * Search for cards - returns Scryfall list format
  */
 app.get('/search', async (req, res) => {
   try {
