@@ -222,7 +222,16 @@ app.get('/search', async (req, res) => {
       total_cards: scryfallCards.length,
       has_more: false,
       data: scryfallCards
-    }); - returns Scryfall list format
+    });
+  } catch (error) {
+    console.error('Error searching cards:', error.message);
+    res.status(500).json({ object: 'error', details: error.message });
+  }
+});
+
+/**
+ * GET /rulings/:name
+ * Get card rulings from Scryfall - returns Scryfall list format
  */
 app.get('/rulings/:name', async (req, res) => {
   try {
@@ -242,13 +251,13 @@ app.get('/rulings/:name', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching rulings:', error.message);
-    res.status(404).json({ object: 'error', detailsn({ error: 'Card name required' });
-    }
+    res.status(404).json({ object: 'error', details: error.message });
+  }
+});
 
-    const rulings = await scryfallLib.getCardRulings(name);
-    res.json(rulings);
-  } catch (error) {
-    console.error('Error fetching ru - returns array of Scryfall cards
+/**
+ * GET /tokens/:name
+ * Get tokens associated with a card - returns array of Scryfall cards
  */
 app.get('/tokens/:name', async (req, res) => {
   try {
@@ -264,28 +273,13 @@ app.get('/tokens/:name', async (req, res) => {
     res.json(tokens);
   } catch (error) {
     console.error('Error fetching tokens:', error.message);
-    res.status(404).json({ object: 'error', details
-      }
-    }).filter(token => token !== null);
-
-    res.json(ttsTokens);
-  } catch (error) {
-    console.error('Error fetching tokens:', error.message);
-    res.status(404).json({ error: error.message });
+    res.status(404).json({ object: 'error', details: error.message });
   }
 });
 
 /**
  * GET /printings/:name
- * Get all printings of a card
- */
-app.get('/printings/:name', async (req, res) => {
-  try {
-    const { name } = req.params;
-    const { back } = req.query;
-    const cardBack = back || DEFAULT_BACK;
-
-    if (!name) { - returns Scryfall list format
+ * Get all printings of a card - returns Scryfall list format
  */
 app.get('/printings/:name', async (req, res) => {
   try {
@@ -306,7 +300,15 @@ app.get('/printings/:name', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching printings:', error.message);
-    res.status(404).json({ object: 'error', details:', err);
+    res.status(404).json({ object: 'error', details: error.message });
+  }
+});
+
+/**
+ * Error handler
+ */
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
   res.status(500).json({ 
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
