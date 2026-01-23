@@ -3,10 +3,12 @@ const cors = require('cors');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
+const bulkData = require('./lib/bulk-data');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
+const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 
 // Middleware
 app.use(cors());
@@ -15,15 +17,22 @@ app.use(express.urlencoded({ limit: '10mb' }));
 
 // Health check
 app.get('/', (req, res) => {
+  const bulkStats = bulkData.getStats();
   res.json({
     status: 'ok',
     service: 'MTG Card Importer Backend',
     version: '1.0.0',
+    bulkData: {
+      enabled: USE_BULK_DATA,
+      loaded: bulkStats.loaded,
+      cardCount: bulkStats.cardCount
+    },
     endpoints: {
       card: 'GET /card/:name',
       deck: 'POST /deck',
       random: 'GET /random',
-      search: 'GET /search'
+      search: 'GET /search',
+      bulkStats: 'GET /bulk/stats'
     }
   });
 });
@@ -31,6 +40,7 @@ app.get('/', (req, res) => {
 /**
  * GET /card/:name
  * Get a single card - returns raw Scryfall JSON
+ * Uses bulk data if available (exact name match only), falls back to API for fuzzy search
  */
 app.get('/card/:name', async (req, res) => {
   try {
@@ -41,7 +51,18 @@ app.get('/card/:name', async (req, res) => {
       return res.status(400).json({ error: 'Card name required' });
     }
 
-    const scryfallCard = await scryfallLib.getCard(name, set);
+    let scryfallCard;
+    
+    // Bulk data only supports exact name matching, API supports fuzzy matching
+    if (USE_BULK_DATA && bulkData.isLoaded() && !set) {
+      scryfallCard = bulkData.getCardByName(name);
+      if (!scryfallCard) {
+        // Fall back to API for fuzzy matching
+        scryfallCard = await scryfallLib.getCard(name, set);
+      }
+    } else {
+      scryfallCard = await scryfallLib.getCard(name, set);
+    }
     
     // Return raw Scryfall format - Lua code will convert to TTS
     res.json(scryfallCard);
@@ -206,6 +227,7 @@ app.post('/build', async (req, res) => {
 /**
  * GET /random
  * Get random card(s) - returns raw Scryfall card or list
+ * Uses bulk data if available, falls back to API
  */
 app.get('/random', async (req, res) => {
   try {
@@ -214,19 +236,41 @@ app.get('/random', async (req, res) => {
 
     if (numCards === 1) {
       // Single random card
-      const scryfallCard = await scryfallLib.getRandomCard(q);
+      let scryfallCard;
+      
+      if (USE_BULK_DATA && bulkData.isLoaded()) {
+        scryfallCard = bulkData.getRandomCard(q);
+      } else {
+        scryfallCard = await scryfallLib.getRandomCard(q);
+      }
+      
       res.json(scryfallCard);
     } else {
       // Multiple random cards - return as list
       const cards = [];
-      for (let i = 0; i < numCards; i++) {
-        try {
-          const scryfallCard = await scryfallLib.getRandomCard(q);
-          cards.push(scryfallCard);
-        } catch (error) {
-          console.warn(`Random card failed: ${error.message}`);
+      
+      if (USE_BULK_DATA && bulkData.isLoaded()) {
+        // Bulk data - instant responses
+        for (let i = 0; i < numCards; i++) {
+          try {
+            const card = bulkData.getRandomCard(q);
+            cards.push(card);
+          } catch (error) {
+            console.warn(`Random card failed: ${error.message}`);
+          }
+        }
+      } else {
+        // API - rate limited
+        for (let i = 0; i < numCards; i++) {
+          try {
+            const scryfallCard = await scryfallLib.getRandomCard(q);
+            cards.push(scryfallCard);
+          } catch (error) {
+            console.warn(`Random card failed: ${error.message}`);
+          }
         }
       }
+      
       res.json({
         object: 'list',
         total_cards: cards.length,
@@ -242,6 +286,7 @@ app.get('/random', async (req, res) => {
 /**
  * GET /search
  * Search for cards - returns Scryfall list format
+ * Uses bulk data if available, falls back to API
  */
 app.get('/search', async (req, res) => {
   try {
@@ -251,7 +296,13 @@ app.get('/search', async (req, res) => {
       return res.status(400).json({ error: 'Query required' });
     }
 
-    const scryfallCards = await scryfallLib.searchCards(q, parseInt(limit));
+    let scryfallCards;
+    
+    if (USE_BULK_DATA && bulkData.isLoaded()) {
+      scryfallCards = bulkData.searchCards(q, parseInt(limit));
+    } else {
+      scryfallCards = await scryfallLib.searchCards(q, parseInt(limit));
+    }
     
     if (scryfallCards.length === 0) {
       return res.json({ 
@@ -372,6 +423,44 @@ app.get('/sets/:code', async (req, res) => {
 });
 
 /**
+ * GET /bulk/stats
+ * Get bulk data statistics
+ */
+app.get('/bulk/stats', (req, res) => {
+  const stats = bulkData.getStats();
+  res.json({
+    ...stats,
+    enabled: USE_BULK_DATA,
+    fileSizeMB: stats.fileSize ? (stats.fileSize / 1024 / 1024).toFixed(2) : 0
+  });
+});
+
+/**
+ * POST /bulk/reload
+ * Manually trigger bulk data reload
+ */
+app.post('/bulk/reload', async (req, res) => {
+  try {
+    if (!USE_BULK_DATA) {
+      return res.status(400).json({ error: 'Bulk data not enabled' });
+    }
+    
+    console.log('[API] Manual bulk data reload requested');
+    await bulkData.downloadBulkData();
+    await bulkData.loadBulkData();
+    
+    res.json({
+      success: true,
+      message: 'Bulk data reloaded',
+      stats: bulkData.getStats()
+    });
+  } catch (error) {
+    console.error('Error reloading bulk data:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Error handler
  */
 app.use((err, req, res, next) => {
@@ -382,9 +471,23 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server with bulk data initialization
+app.listen(PORT, async () => {
   console.log(`MTG Card Importer Backend running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Scryfall delay: ${process.env.SCRYFALL_DELAY || 100}ms`);
+  console.log(`Health check: http://localhost:${PORT}/`);
+  console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
+  
+  if (USE_BULK_DATA) {
+    try {
+      console.log('[Init] Loading bulk data...');
+      await bulkData.loadBulkData();
+      bulkData.startAutoUpdate();
+      console.log('[Init] Bulk data ready!');
+    } catch (error) {
+      console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);
+      console.error('[Init] Server will continue using Scryfall API');
+    }
+  } else {
+    console.log('[Init] Using Scryfall API mode');
+  }
 });
