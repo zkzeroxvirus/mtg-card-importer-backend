@@ -461,6 +461,43 @@ app.post('/bulk/reload', async (req, res) => {
 });
 
 /**
+ * GET /proxy?uri=...
+ * Proxy a Scryfall API URI through the backend
+ * Used for fetching related cards (tokens, etc.) via their API URIs
+ */
+app.get('/proxy', async (req, res) => {
+  try {
+    const { uri } = req.query;
+    
+    if (!uri) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: 'Missing uri parameter' 
+      });
+    }
+    
+    // Validate it's a Scryfall API URL
+    if (!uri.startsWith('https://api.scryfall.com/')) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: 'Invalid URI - must be a Scryfall API URL' 
+      });
+    }
+    
+    const cardData = await scryfallLib.proxyUri(uri);
+    res.json(cardData);
+    
+  } catch (error) {
+    console.error('[Proxy] Error:', error.message);
+    res.status(error.status || 500).json({
+      object: 'error',
+      status: error.status || 500,
+      details: error.message
+    });
+  }
+});
+
+/**
  * Error handler
  */
 app.use((err, req, res, next) => {
