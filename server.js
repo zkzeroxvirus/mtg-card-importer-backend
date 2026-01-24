@@ -565,7 +565,7 @@ app.listen(PORT, async () => {
     try {
       console.log('[Init] Loading bulk data...');
       await bulkData.loadBulkData();
-      bulkData.startAutoUpdate();
+      bulkData.scheduleUpdateCheck();
       console.log('[Init] Bulk data ready!');
     } catch (error) {
       console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);
