@@ -10,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
+console.log('[Debug] USE_BULK_DATA env:', process.env.USE_BULK_DATA);
 const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 
 // Rate limiters
