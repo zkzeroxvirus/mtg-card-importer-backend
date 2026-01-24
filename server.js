@@ -292,15 +292,27 @@ app.get('/random', randomLimiter, async (req, res) => {
           }
         }
       } else {
-        // API - rate limited
+        // API - fetch multiple cards in parallel with smart rate limiting
+        const cardPromises = [];
         for (let i = 0; i < numCards; i++) {
-          try {
-            const scryfallCard = await scryfallLib.getRandomCard(q);
-            cards.push(scryfallCard);
-          } catch (error) {
-            console.warn(`Random card failed: ${error.message}`);
-          }
+          // Stagger request starts slightly to spread load without blocking
+          const promise = new Promise(resolve => {
+            setTimeout(async () => {
+              try {
+                const scryfallCard = await scryfallLib.getRandomCard(q);
+                resolve(scryfallCard);
+              } catch (error) {
+                console.warn(`Random card ${i + 1} failed: ${error.message}`);
+                resolve(null);
+              }
+            }, i * 15); // 15ms stagger between request initiations
+          });
+          cardPromises.push(promise);
         }
+        const results = await Promise.all(cardPromises);
+        results.forEach(card => {
+          if (card) cards.push(card);
+        });
       }
       
       res.json({
