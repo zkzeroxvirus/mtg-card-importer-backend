@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -9,6 +10,20 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
+const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
+
+// Rate limiters
+const randomLimiter = rateLimit({
+  windowMs: 60 * 1000,      // 1 minute
+  max: 50,                  // 50 requests per minute per IP
+  keyGenerator: (req) => req.ip,
+  message: 'Too many random card requests from this IP, please try again later',
+  skip: (req) => {
+    // Allow unlimited single-card requests, only limit bulk requests
+    const count = req.query.count ? parseInt(req.query.count) : 1;
+    return count === 1;
+  }
+});
 
 // Middleware
 app.use(cors());
@@ -137,6 +152,14 @@ app.post('/deck', async (req, res) => {
       return res.status(400).json({ error: 'No valid cards in decklist' });
     }
 
+    // Validate deck size to prevent API abuse
+    const totalCards = cards.reduce((sum, card) => sum + card.count, 0);
+    if (totalCards > MAX_DECK_SIZE) {
+      return res.status(400).json({ 
+        error: `Deck too large (${totalCards} > ${MAX_DECK_SIZE} card limit)` 
+      });
+    }
+
     res.setHeader('Content-Type', 'application/x-ndjson');
 
     let cardCount = 0;
@@ -185,6 +208,14 @@ app.post('/build', async (req, res) => {
       return res.status(400).json({ error: 'No valid cards in decklist' });
     }
 
+    // Validate deck size to prevent API abuse
+    const totalCards = cards.reduce((sum, card) => sum + card.count, 0);
+    if (totalCards > MAX_DECK_SIZE) {
+      return res.status(400).json({ 
+        error: `Deck too large (${totalCards} > ${MAX_DECK_SIZE} card limit)` 
+      });
+    }
+
     res.setHeader('Content-Type', 'application/x-ndjson');
 
     let cardCount = 0;
@@ -228,8 +259,9 @@ app.post('/build', async (req, res) => {
  * GET /random
  * Get random card(s) - returns raw Scryfall card or list
  * Uses bulk data if available, falls back to API
+ * Rate limited: 50 bulk requests per minute per IP
  */
-app.get('/random', async (req, res) => {
+app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count, q = '' } = req.query;
     const numCards = count ? Math.min(parseInt(count) || 1, 100) : 1;
@@ -481,6 +513,21 @@ app.get('/proxy', async (req, res) => {
       return res.status(400).json({ 
         object: 'error', 
         details: 'Invalid URI - must be a Scryfall API URL' 
+      });
+    }
+
+    // Block expensive/abuse parameters
+    const blockedParams = [
+      'include_extras=true',
+      'include_multilingual=true',
+      'order=released',  // Can return thousands
+      'order=added',     // Can return thousands
+    ];
+    const isBlocked = blockedParams.some(param => uri.includes(param));
+    if (isBlocked) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: 'Parameter not allowed in proxied requests' 
       });
     }
     
