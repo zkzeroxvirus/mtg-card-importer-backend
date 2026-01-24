@@ -562,15 +562,15 @@ app.listen(PORT, async () => {
   console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
   
   if (USE_BULK_DATA) {
-    try {
-      console.log('[Init] Loading bulk data...');
-      await bulkData.loadBulkData();
-      bulkData.scheduleUpdateCheck();
-      console.log('[Init] Bulk data ready!');
-    } catch (error) {
-      console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);
-      console.error('[Init] Server will continue using Scryfall API');
-    }
+    console.log('[Init] Loading bulk data in background...');
+    bulkData.loadBulkData()
+      .then(() => {
+        console.log('[Init] Bulk data ready!');
+      })
+      .catch((error) => {
+        console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);
+        console.error('[Init] Server will continue using Scryfall API');
+      });
   } else {
     console.log('[Init] Using Scryfall API mode');
   }
