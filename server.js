@@ -121,6 +121,35 @@ function getQueryHint(query) {
   return '';
 }
 
+// Cache for failed queries to prevent repeated API calls for same bad query
+const failedQueryCache = new Map();
+const FAILED_QUERY_CACHE_TTL = 60000; // 1 minute
+
+function isQueryCachedAsFailed(query) {
+  const cached = failedQueryCache.get(query);
+  if (cached && Date.now() - cached.timestamp < FAILED_QUERY_CACHE_TTL) {
+    return cached.error;
+  }
+  return null;
+}
+
+function cacheFailedQuery(query, errorMessage) {
+  failedQueryCache.set(query, {
+    error: errorMessage,
+    timestamp: Date.now()
+  });
+  
+  // Clean up old entries periodically
+  if (failedQueryCache.size > 100) {
+    const now = Date.now();
+    for (const [key, value] of failedQueryCache.entries()) {
+      if (now - value.timestamp > FAILED_QUERY_CACHE_TTL) {
+        failedQueryCache.delete(key);
+      }
+    }
+  }
+}
+
 // Health check
 app.get('/', (req, res) => {
   const bulkStats = bulkData.getStats();
@@ -433,6 +462,15 @@ app.get('/random', randomLimiter, async (req, res) => {
     
     console.log(`GET /random - count: ${numCards}, query: "${q}"`);
 
+    // Check if this query recently failed
+    if (q) {
+      const cachedError = isQueryCachedAsFailed(q);
+      if (cachedError) {
+        console.log(`Returning cached error for query: "${q}"`);
+        return res.status(400).json({ object: 'error', details: cachedError });
+      }
+    }
+
     if (numCards === 1) {
       // Single random card
       let scryfallCard;
@@ -513,6 +551,13 @@ app.get('/random', randomLimiter, async (req, res) => {
       data: error.response?.data,
       query: req.query
     });
+    
+    // Cache failed queries to prevent repeated attempts
+    const { q = '' } = req.query;
+    if (q && error.message && error.message.includes('Invalid search query')) {
+      cacheFailedQuery(q, error.message);
+    }
+    
     res.status(error.response?.status || 500).json({ object: 'error', details: error.message });
   }
 });
