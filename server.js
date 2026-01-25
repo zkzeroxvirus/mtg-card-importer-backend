@@ -135,14 +135,29 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
 /**
  * POST /deck
  * Build a deck from decklist
+ * Accepts either:
+ *   - JSON body: { "decklist": "...", "back": "..." }
+ *   - Plain text body: decklist lines (back uses default)
  * Returns NDJSON (newline-delimited JSON)
  */
 app.post('/deck', async (req, res) => {
   try {
-    const { decklist, back } = req.body;
+    let decklist = null;
+    let back = null;
+
+    // Try to parse as JSON first
+    if (typeof req.body === 'object' && req.body.decklist) {
+      decklist = req.body.decklist;
+      back = req.body.back;
+    } else if (typeof req.body === 'string' && req.body.trim().length > 0) {
+      // Fall back to plain text body
+      decklist = req.body;
+    }
+
     const cardBack = back || DEFAULT_BACK;
 
     if (!decklist) {
+      console.error('POST /deck: no decklist. req.body type:', typeof req.body, 'keys:', Object.keys(req.body || {}));
       return res.status(400).json({ error: 'Decklist required' });
     }
 
