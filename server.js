@@ -29,6 +29,98 @@ const randomLimiter = rateLimit({
 app.use(cors());
 app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
 
+/**
+ * Analyzes a Scryfall query and provides helpful hints for common syntax errors
+ */
+function getQueryHint(query) {
+  const q = query.toLowerCase();
+  
+  // Common keyword mistakes - missing colons
+  const keywordPatterns = [
+    { pattern: /\bcmc\d/, correct: 'cmc:', example: 'cmc:3', desc: 'mana value' },
+    { pattern: /\bmv\d/, correct: 'mv:', example: 'mv:3', desc: 'mana value' },
+    { pattern: /\bpow(er)?\d/, correct: 'power:', example: 'power>=5', desc: 'power' },
+    { pattern: /\btou(ghness)?\d/, correct: 'toughness:', example: 'toughness<=2', desc: 'toughness' },
+    { pattern: /\bloy(alty)?\d/, correct: 'loyalty:', example: 'loyalty:3', desc: 'loyalty' },
+    { pattern: /\brarity[a-z]/, correct: 'rarity:', example: 'rarity:mythic', desc: 'rarity' },
+    { pattern: /\bcolor[wubrg]/, correct: 'color:', example: 'color:red', desc: 'color' },
+    { pattern: /\btype[a-z]/, correct: 'type:', example: 'type:creature', desc: 'type' },
+  ];
+  
+  for (const { pattern, correct, example, desc } of keywordPatterns) {
+    if (pattern.test(q)) {
+      return ` (Did you mean "${correct}" for ${desc}? Example: ${example})`;
+    }
+  }
+  
+  // Check for comparison operators without colons
+  if (/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)[<>=]/.test(q)) {
+    const match = q.match(/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)([<>=]+)/);
+    if (match) {
+      return ` (Did you mean "${match[1]}:${match[2]}"? Comparison operators need a colon)`;
+    }
+  }
+  
+  // Common misspellings
+  const misspellings = {
+    'legnedary': 'legendary',
+    'legndary': 'legendary',
+    'planeswaker': 'planeswalker',
+    'planeswalke': 'planeswalker',
+    'insant': 'instant',
+    'sorcry': 'sorcery',
+    'creautre': 'creature',
+    'enchantmnet': 'enchantment',
+    'artifcat': 'artifact',
+  };
+  
+  for (const [wrong, right] of Object.entries(misspellings)) {
+    if (q.includes(wrong)) {
+      return ` (Did you mean "${right}"?)`;
+    }
+  }
+  
+  // Check for invalid color abbreviations
+  if (/\bc:[^wubrgcm\s<>=]/.test(q)) {
+    return ' (Color codes are: w=white, u=blue, b=black, r=red, g=green, c=colorless, m=multicolor)';
+  }
+  
+  // Check for mana symbols without braces for complex symbols
+  if (/\b(m|mana):.*\d\/[wubrg]/i.test(q)) {
+    return ' (Hybrid mana symbols need braces: {2/G} not 2/G)';
+  }
+  
+  // Check for set code format errors
+  if (/\b(s|set|e|edition):[A-Z]{4,}/.test(q)) {
+    return ' (Set codes are usually 3 characters: "s:war" not "s:warof")';
+  }
+  
+  // Check for rarity abbreviations
+  if (/\br:(c|u|r|m)\b/.test(q)) {
+    return ' (Use full rarity names: rarity:common, rarity:uncommon, rarity:rare, rarity:mythic)';
+  }
+  
+  // Check for format names
+  const invalidFormats = ['edh', 'cedh', 'canlander'];
+  for (const fmt of invalidFormats) {
+    if (new RegExp(`\\bf:${fmt}\\b`).test(q)) {
+      const corrections = {
+        'edh': 'commander',
+        'cedh': 'commander',
+        'canlander': 'duel'
+      };
+      return ` (Use "f:${corrections[fmt]}" for ${fmt.toUpperCase()})`;
+    }
+  }
+  
+  // Check for missing quotes around multi-word phrases
+  if (/\bo:[a-z]+\s+[a-z]+(?!\s*\+)/.test(q) && !/"/.test(q)) {
+    return ' (Use quotes for multi-word oracle text: o:"card name" or use + between words: o:card+name)';
+  }
+  
+  return '';
+}
+
 // Health check
 app.get('/', (req, res) => {
   const bulkStats = bulkData.getStats();
@@ -376,9 +468,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         } catch (error) {
           // First request failed - likely invalid query
           if (error.response?.status === 404) {
-            const hint = q.includes('cmc') && !q.includes('cmc:') 
-              ? ' (Did you mean "cmc:" instead of "cmc"?)' 
-              : '';
+            const hint = getQueryHint(q);
             throw new Error(`Invalid search query: "${q}"${hint}. No cards match this query.`);
           }
           throw error;
