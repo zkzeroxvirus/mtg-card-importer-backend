@@ -27,8 +27,7 @@ const randomLimiter = rateLimit({
 
 // Middleware
 app.use(cors());
-app.use(express.text({ limit: '10mb' }));  // Accept plain text bodies first
-app.use(express.json({ limit: '10mb' }));  // Then try JSON
+app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
 
 // Health check
 app.get('/', (req, res) => {
@@ -145,32 +144,33 @@ app.post('/deck', async (req, res) => {
     let decklist = null;
     let back = null;
 
-    // req.body could be string (from text middleware) or object (from json middleware)
-    if (typeof req.body === 'string') {
-      // Body came as text; try to parse as JSON, else treat as plain decklist
-      if (req.body.trim().startsWith('{')) {
-        try {
-          const parsed = JSON.parse(req.body);
-          decklist = parsed.decklist;
-          back = parsed.back;
-        } catch (e) {
-          // Not valid JSON; treat entire body as plain text decklist
-          decklist = req.body;
-        }
-      } else {
-        // Not JSON-like; treat as plain text decklist
-        decklist = req.body;
+    // req.body is a Buffer from express.raw(); convert to string
+    const bodyText = req.body ? req.body.toString('utf8') : '';
+    
+    if (!bodyText || bodyText.trim().length === 0) {
+      console.error('POST /deck: empty body');
+      return res.status(400).json({ error: 'decklist required' });
+    }
+
+    // Try to parse as JSON
+    if (bodyText.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(bodyText);
+        decklist = parsed.decklist;
+        back = parsed.back;
+      } catch (e) {
+        // Not valid JSON; treat entire body as plain text decklist
+        decklist = bodyText;
       }
-    } else if (typeof req.body === 'object' && req.body !== null) {
-      // Body came as object from JSON middleware
-      decklist = req.body.decklist;
-      back = req.body.back;
+    } else {
+      // Not JSON-like; treat as plain text decklist
+      decklist = bodyText;
     }
 
     const cardBack = back || DEFAULT_BACK;
 
     if (!decklist || decklist.trim().length === 0) {
-      console.error('POST /deck: no decklist. req.body type:', typeof req.body, 'length:', req.body ? req.body.length : 0);
+      console.error('POST /deck: no decklist parsed. bodyText length:', bodyText.length);
       return res.status(400).json({ error: 'decklist required' });
     }
 
