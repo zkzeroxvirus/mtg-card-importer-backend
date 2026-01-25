@@ -495,13 +495,16 @@ app.get('/random', randomLimiter, async (req, res) => {
         console.log(`Returning cached error for query: "${q}"`);
         
         // Only show detailed error once per cooldown period to avoid spamming TTS chat
-        // When users spawn a 15-card booster with invalid query, this prevents 15 identical messages
+        // When users spawn a 15-card booster with invalid query, show error on first request only
+        // Subsequent requests within cooldown get silently suppressed (204 No Content)
         const showDetails = shouldShowDetailedError(q);
-        const errorMessage = showDetails 
-          ? cachedError 
-          : 'Invalid search query (see previous error message for details)';
         
-        return res.status(400).json({ object: 'error', details: errorMessage });
+        if (showDetails) {
+          return res.status(400).json({ object: 'error', details: cachedError });
+        } else {
+          // Silently suppress subsequent failed requests to prevent chat spam
+          return res.status(204).send();
+        }
       }
     }
 
