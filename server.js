@@ -478,7 +478,18 @@ app.get('/random', randomLimiter, async (req, res) => {
       if (USE_BULK_DATA && bulkData.isLoaded()) {
         scryfallCard = bulkData.getRandomCard(q);
       } else {
-        scryfallCard = await scryfallLib.getRandomCard(q);
+        try {
+          scryfallCard = await scryfallLib.getRandomCard(q);
+        } catch (error) {
+          // Single card request failed - add helpful hint if it's a 404
+          if (error.message && error.message.includes('Scryfall returned 404')) {
+            const hint = getQueryHint(q);
+            const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
+            cacheFailedQuery(q, enhancedError);
+            throw new Error(enhancedError);
+          }
+          throw error;
+        }
       }
       
       res.json(scryfallCard);
@@ -552,13 +563,10 @@ app.get('/random', randomLimiter, async (req, res) => {
       query: req.query
     });
     
-    // Cache failed queries to prevent repeated attempts
-    const { q = '' } = req.query;
-    if (q && error.message && error.message.includes('Invalid search query')) {
-      cacheFailedQuery(q, error.message);
-    }
+    // Note: Failed queries are now cached at the point of failure (single card or bulk)
+    // This ensures the enhanced error message is what gets cached
     
-    res.status(error.response?.status || 500).json({ object: 'error', details: error.message });
+    res.status(error.response?.status || 400).json({ object: 'error', details: error.message });
   }
 });
 
