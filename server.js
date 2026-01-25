@@ -160,7 +160,6 @@ app.post('/deck', async (req, res) => {
       try {
         const parsed = JSON.parse(bodyText);
         console.log('Parsed JSON. Type of parsed.decklist:', typeof parsed.decklist);
-        console.log('parsed.decklist value:', parsed.decklist);
         
         // Handle case where decklist is an object that should be a string
         if (typeof parsed.decklist === 'object' && parsed.decklist !== null) {
@@ -170,16 +169,17 @@ app.post('/deck', async (req, res) => {
         } else if (typeof parsed.decklist === 'string') {
           decklist = parsed.decklist;
         } else {
-          console.error('POST /deck: unexpected type for decklist:', typeof parsed.decklist);
+          console.error('POST /deck: unexpected type for decklist:', typeof parsed.decklist, 'value:', parsed.decklist);
         }
         back = parsed.back;
       } catch (e) {
-        console.error('JSON parse error:', e.message);
+        console.error('JSON parse error:', e.message, 'body was:', bodyText);
         // Not valid JSON; treat entire body as plain text decklist
         decklist = bodyText;
       }
     } else {
       // Not JSON-like; treat as plain text decklist
+      console.log('POST /deck: treating body as plain text decklist');
       decklist = bodyText;
     }
 
