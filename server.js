@@ -125,6 +125,10 @@ function getQueryHint(query) {
 const failedQueryCache = new Map();
 const FAILED_QUERY_CACHE_TTL = 60000; // 1 minute
 
+// Track when we last showed detailed error for a query (to avoid spamming TTS chat)
+const lastDetailedErrorTime = new Map();
+const DETAILED_ERROR_COOLDOWN = 5000; // 5 seconds
+
 function isQueryCachedAsFailed(query) {
   const cached = failedQueryCache.get(query);
   if (cached && Date.now() - cached.timestamp < FAILED_QUERY_CACHE_TTL) {
@@ -148,6 +152,28 @@ function cacheFailedQuery(query, errorMessage) {
       }
     }
   }
+}
+
+function shouldShowDetailedError(query) {
+  const lastShown = lastDetailedErrorTime.get(query);
+  const now = Date.now();
+  
+  if (!lastShown || now - lastShown > DETAILED_ERROR_COOLDOWN) {
+    lastDetailedErrorTime.set(query, now);
+    
+    // Clean up old entries
+    if (lastDetailedErrorTime.size > 100) {
+      for (const [key, time] of lastDetailedErrorTime.entries()) {
+        if (now - time > DETAILED_ERROR_COOLDOWN) {
+          lastDetailedErrorTime.delete(key);
+        }
+      }
+    }
+    
+    return true;
+  }
+  
+  return false;
 }
 
 // Health check
@@ -467,7 +493,15 @@ app.get('/random', randomLimiter, async (req, res) => {
       const cachedError = isQueryCachedAsFailed(q);
       if (cachedError) {
         console.log(`Returning cached error for query: "${q}"`);
-        return res.status(400).json({ object: 'error', details: cachedError });
+        
+        // Only show detailed error once per cooldown period to avoid spamming TTS chat
+        // When users spawn a 15-card booster with invalid query, this prevents 15 identical messages
+        const showDetails = shouldShowDetailedError(q);
+        const errorMessage = showDetails 
+          ? cachedError 
+          : 'Invalid search query (see previous error message for details)';
+        
+        return res.status(400).json({ object: 'error', details: errorMessage });
       }
     }
 
