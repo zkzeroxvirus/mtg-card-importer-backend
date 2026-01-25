@@ -225,6 +225,14 @@ app.get('/card/:name', async (req, res) => {
       scryfallCard = await scryfallLib.getCard(name, set);
     }
     
+    // Filter all_parts to only include tokens and emblems (for TTS token spawning)
+    if (scryfallCard.all_parts && Array.isArray(scryfallCard.all_parts)) {
+      scryfallCard.all_parts = scryfallCard.all_parts.filter(part => {
+        const typeLine = (part.type_line || '').toLowerCase();
+        return typeLine.includes('token') || typeLine.includes('emblem');
+      });
+    }
+    
     // Return raw Scryfall format - Lua code will convert to TTS
     res.json(scryfallCard);
   } catch (error) {
