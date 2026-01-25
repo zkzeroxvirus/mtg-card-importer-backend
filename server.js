@@ -243,7 +243,32 @@ app.post('/deck', async (req, res) => {
  */
 app.post('/build', async (req, res) => {
   try {
-    const { data, back, hand } = req.body;
+    let data = null;
+    let back = null;
+    let hand = null;
+
+    // req.body is a Buffer from express.raw(); parse it
+    const bodyText = req.body ? req.body.toString('utf8') : '';
+    
+    if (!bodyText || bodyText.trim().length === 0) {
+      return res.status(400).json({ error: 'Decklist required' });
+    }
+
+    // Try to parse as JSON
+    if (bodyText.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(bodyText);
+        data = parsed.data;
+        back = parsed.back;
+        hand = parsed.hand;
+      } catch (e) {
+        console.error('JSON parse error:', e.message);
+        data = bodyText;
+      }
+    } else {
+      data = bodyText;
+    }
+
     const cardBack = back || DEFAULT_BACK;
 
     if (!data) {
