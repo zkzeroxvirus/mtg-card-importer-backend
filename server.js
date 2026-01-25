@@ -27,7 +27,8 @@ const randomLimiter = rateLimit({
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ limit: '10mb' }));  // Accept plain text bodies
+app.use(express.json({ limit: '10mb' }));  // Then try JSON
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Health check
@@ -145,20 +146,34 @@ app.post('/deck', async (req, res) => {
     let decklist = null;
     let back = null;
 
-    // Try to parse as JSON first
-    if (typeof req.body === 'object' && req.body.decklist) {
+    // Handle JSON body (object)
+    if (typeof req.body === 'object' && req.body !== null && req.body.decklist) {
       decklist = req.body.decklist;
       back = req.body.back;
-    } else if (typeof req.body === 'string' && req.body.trim().length > 0) {
-      // Fall back to plain text body
-      decklist = req.body;
+    } 
+    // Handle text body (raw string)
+    else if (typeof req.body === 'string' && req.body.trim().length > 0) {
+      // Try to parse as JSON first
+      try {
+        const parsed = JSON.parse(req.body);
+        if (parsed.decklist) {
+          decklist = parsed.decklist;
+          back = parsed.back;
+        } else {
+          // Not JSON with decklist field, treat as plain text
+          decklist = req.body;
+        }
+      } catch (e) {
+        // Not valid JSON, treat entire body as plain text decklist
+        decklist = req.body;
+      }
     }
 
     const cardBack = back || DEFAULT_BACK;
 
     if (!decklist) {
-      console.error('POST /deck: no decklist. req.body type:', typeof req.body, 'keys:', Object.keys(req.body || {}));
-      return res.status(400).json({ error: 'Decklist required' });
+      console.error('POST /deck: no decklist. req.body type:', typeof req.body, 'req.body:', req.body);
+      return res.status(400).json({ error: 'decklist required' });
     }
 
     const cards = scryfallLib.parseDecklist(decklist);
