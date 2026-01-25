@@ -338,6 +338,8 @@ app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count, q = '' } = req.query;
     const numCards = count ? Math.min(parseInt(count) || 1, 100) : 1;
+    
+    console.log(`GET /random - count: ${numCards}, query: "${q}"`);
 
     if (numCards === 1) {
       // Single random card
@@ -365,27 +367,46 @@ app.get('/random', randomLimiter, async (req, res) => {
           }
         }
       } else {
-        // API - fetch multiple cards in parallel with smart rate limiting
-        const cardPromises = [];
-        for (let i = 0; i < numCards; i++) {
-          // Stagger request starts slightly to spread load without blocking
-          const promise = new Promise(resolve => {
-            setTimeout(async () => {
-              try {
-                const scryfallCard = await scryfallLib.getRandomCard(q);
-                resolve(scryfallCard);
-              } catch (error) {
-                console.warn(`Random card ${i + 1} failed: ${error.message}`);
-                resolve(null);
-              }
-            }, i * 15); // 15ms stagger between request initiations
-          });
-          cardPromises.push(promise);
+        // API - Test first request to validate query before fetching all cards
+        // If query is malformed, this fails fast instead of wasting API calls
+        let firstCard;
+        try {
+          firstCard = await scryfallLib.getRandomCard(q);
+          cards.push(firstCard);
+        } catch (error) {
+          // First request failed - likely invalid query
+          if (error.response?.status === 404) {
+            const hint = q.includes('cmc') && !q.includes('cmc:') 
+              ? ' (Did you mean "cmc:" instead of "cmc"?)' 
+              : '';
+            throw new Error(`Invalid search query: "${q}"${hint}. No cards match this query.`);
+          }
+          throw error;
         }
-        const results = await Promise.all(cardPromises);
-        results.forEach(card => {
-          if (card) cards.push(card);
-        });
+        
+        // First card succeeded, fetch the rest in parallel
+        if (numCards > 1) {
+          const cardPromises = [];
+          for (let i = 1; i < numCards; i++) {
+            // Stagger request starts slightly to spread load without blocking
+            const promise = new Promise(resolve => {
+              setTimeout(async () => {
+                try {
+                  const scryfallCard = await scryfallLib.getRandomCard(q);
+                  resolve(scryfallCard);
+                } catch (error) {
+                  console.warn(`Random card ${i + 1} failed: ${error.message}`);
+                  resolve(null);
+                }
+              }, i * 15); // 15ms stagger between request initiations
+            });
+            cardPromises.push(promise);
+          }
+          const results = await Promise.all(cardPromises);
+          results.forEach(card => {
+            if (card) cards.push(card);
+          });
+        }
       }
       
       res.json({
@@ -396,7 +417,13 @@ app.get('/random', randomLimiter, async (req, res) => {
     }
   } catch (error) {
     console.error('Error getting random cards:', error.message);
-    res.status(500).json({ object: 'error', details: error.message });
+    console.error('Error details:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      query: req.query
+    });
+    res.status(error.response?.status || 500).json({ object: 'error', details: error.message });
   }
 });
 
