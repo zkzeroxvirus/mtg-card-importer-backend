@@ -147,6 +147,9 @@ app.post('/deck', async (req, res) => {
     // req.body is a Buffer from express.raw(); convert to string
     const bodyText = req.body ? req.body.toString('utf8') : '';
     
+    console.log('POST /deck raw bodyText (first 200 chars):', bodyText.substring(0, 200));
+    console.log('POST /deck bodyText length:', bodyText.length, 'type:', typeof bodyText);
+    
     if (!bodyText || bodyText.trim().length === 0) {
       console.error('POST /deck: empty body');
       return res.status(400).json({ error: 'decklist required' });
