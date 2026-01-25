@@ -153,9 +153,6 @@ app.post('/deck', async (req, res) => {
     }
 
     // Try to parse as JSON
-    let decklist = null;
-    let back = null;
-    
     if (bodyText.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(bodyText);
