@@ -153,12 +153,25 @@ app.post('/deck', async (req, res) => {
     }
 
     // Try to parse as JSON
+    let decklist = null;
+    let back = null;
+    
     if (bodyText.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(bodyText);
-        decklist = parsed.decklist;
+        console.log('Parsed JSON. Type of decklist:', typeof parsed.decklist, 'Value:', JSON.stringify(parsed.decklist).substring(0, 100));
+        
+        // Handle case where decklist is an object that should be a string
+        if (typeof parsed.decklist === 'object' && parsed.decklist !== null) {
+          console.error('POST /deck: decklist is an object, not a string. Object keys:', Object.keys(parsed.decklist));
+          // Try to convert object to decklist lines
+          decklist = Object.keys(parsed.decklist).join('\n');
+        } else if (typeof parsed.decklist === 'string') {
+          decklist = parsed.decklist;
+        }
         back = parsed.back;
       } catch (e) {
+        console.error('JSON parse error:', e.message);
         // Not valid JSON; treat entire body as plain text decklist
         decklist = bodyText;
       }
@@ -170,7 +183,7 @@ app.post('/deck', async (req, res) => {
     const cardBack = back || DEFAULT_BACK;
 
     if (!decklist || decklist.trim().length === 0) {
-      console.error('POST /deck: no decklist parsed. bodyText length:', bodyText.length);
+      console.error('POST /deck: no decklist parsed. bodyText length:', bodyText.length, 'bodyText:', bodyText);
       return res.status(400).json({ error: 'decklist required' });
     }
 
