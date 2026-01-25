@@ -176,7 +176,11 @@ app.post('/deck', async (req, res) => {
 
     const cards = scryfallLib.parseDecklist(decklist);
     
+    console.log(`POST /deck: parsed decklist. decklist length: ${decklist.length}, cards found: ${cards.length}`);
+    console.log(`First 200 chars of decklist: ${decklist.substring(0, 200)}`);
+    
     if (cards.length === 0) {
+      console.error('POST /deck: no valid cards in decklist. Full text:', decklist);
       return res.status(400).json({ error: 'No valid cards in decklist' });
     }
 
