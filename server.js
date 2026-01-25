@@ -622,18 +622,23 @@ app.get('/random', randomLimiter, async (req, res) => {
  */
 app.get('/search', async (req, res) => {
   try {
-    const { q, limit = 100 } = req.query;
+    const { q, limit = 100, unique } = req.query;
 
     if (!q) {
       return res.status(400).json({ error: 'Query required' });
     }
 
     let scryfallCards;
+    const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
+    const limitNum = parseInt(limit);
     
-    if (USE_BULK_DATA && bulkData.isLoaded()) {
-      scryfallCards = bulkData.searchCards(q, parseInt(limit));
+    // For full printings list, prefer live API to ensure completeness
+    if (requestedUnique === 'prints') {
+      scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
+    } else if (USE_BULK_DATA && bulkData.isLoaded()) {
+      scryfallCards = bulkData.searchCards(q, limitNum);
     } else {
-      scryfallCards = await scryfallLib.searchCards(q, parseInt(limit));
+      scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
     }
     
     if (scryfallCards.length === 0) {
