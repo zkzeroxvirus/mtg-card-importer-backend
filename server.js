@@ -35,6 +35,19 @@ app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse ma
 function getQueryHint(query) {
   const q = query.toLowerCase();
   
+  // Check for equals sign used instead of colon FIRST (most common error from logs)
+  if (/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)[=]/.test(q)) {
+    const match = q.match(/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)([=])/);
+    if (match) {
+      return ` (Did you mean "${match[1]}:" instead of "${match[1]}="? Use colons for search keywords)`;
+    }
+  }
+
+  // Check for common typos in color identity
+  if (/\bid[a-z]{2,3}\b/.test(q)) {
+    return ' (Did you mean "id:" or "identity:" for color identity? Example: id:gu for Simic)';
+  }
+  
   // Common keyword mistakes - missing colons
   const keywordPatterns = [
     { pattern: /\bcmc\d/, correct: 'cmc:', example: 'cmc:3', desc: 'mana value' },
@@ -59,19 +72,6 @@ function getQueryHint(query) {
     if (match) {
       return ` (Did you mean "${match[1]}:${match[2]}"? Comparison operators need a colon)`;
     }
-  }
-
-  // Check for equals sign used instead of colon (e.g., "id=c" instead of "id:c")
-  if (/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)[=]/.test(q)) {
-    const match = q.match(/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)([=])/);
-    if (match) {
-      return ` (Did you mean "${match[1]}:" instead of "${match[1]}="? Use colons for search keywords)`;
-    }
-  }
-
-  // Check for common typos in color identity
-  if (/\bid[a-z]{2,3}\b/.test(q)) {
-    return ' (Did you mean "id:" or "identity:" for color identity? Example: id:gu for Simic)';
   }
   
   // Common misspellings
