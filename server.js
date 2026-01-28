@@ -12,6 +12,37 @@ const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 
+// Security: Input validation constants
+const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
+const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
+const MAX_CACHE_SIZE = 500; // Maximum size for failed query and error caches
+
+// Security: Validate card back URL is from allowed domains
+function isValidCardBackURL(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    // Allow common image hosting domains used by TTS community
+    const allowedDomains = [
+      'steamusercontent-a.akamaihd.net',
+      'steamusercontent.com',
+      'steamuserimages-a.akamaihd.net',
+      'i.imgur.com',
+      'imgur.com'
+    ];
+    return allowedDomains.some(domain => parsed.hostname.endsWith(domain));
+  } catch (e) {
+    return false;
+  }
+}
+
+// Validate the default card back URL on startup
+if (!isValidCardBackURL(DEFAULT_BACK)) {
+  console.error('ERROR: DEFAULT_CARD_BACK URL is not from an allowed domain. Server will not start.');
+  console.error('Allowed domains: Steam CDN, Imgur');
+  process.exit(1);
+}
+
 // Rate limiters
 const randomLimiter = rateLimit({
   windowMs: 60 * 1000,      // 1 minute
@@ -137,6 +168,18 @@ const FAILED_QUERY_CACHE_TTL = 60000; // 1 minute
 const lastDetailedErrorTime = new Map();
 const DETAILED_ERROR_COOLDOWN = 5000; // 5 seconds
 
+// Helper: Evict oldest entries from a Map (LRU-style)
+function evictOldestEntries(map, maxSize) {
+  if (map.size <= maxSize) return;
+  const entriesToRemove = map.size - maxSize;
+  let removed = 0;
+  for (const key of map.keys()) {
+    map.delete(key);
+    removed++;
+    if (removed >= entriesToRemove) break;
+  }
+}
+
 function isQueryCachedAsFailed(query) {
   const cached = failedQueryCache.get(query);
   if (cached && Date.now() - cached.timestamp < FAILED_QUERY_CACHE_TTL) {
@@ -151,13 +194,18 @@ function cacheFailedQuery(query, errorMessage) {
     timestamp: Date.now()
   });
   
-  // Clean up old entries periodically
-  if (failedQueryCache.size > 100) {
+  // Enforce maximum cache size to prevent unbounded memory growth
+  if (failedQueryCache.size > MAX_CACHE_SIZE) {
     const now = Date.now();
+    // First try to clean up expired entries
     for (const [key, value] of failedQueryCache.entries()) {
       if (now - value.timestamp > FAILED_QUERY_CACHE_TTL) {
         failedQueryCache.delete(key);
       }
+    }
+    // If still over limit, evict oldest entries
+    if (failedQueryCache.size > MAX_CACHE_SIZE) {
+      evictOldestEntries(failedQueryCache, MAX_CACHE_SIZE);
     }
   }
 }
@@ -169,12 +217,17 @@ function shouldShowDetailedError(query) {
   if (!lastShown || now - lastShown > DETAILED_ERROR_COOLDOWN) {
     lastDetailedErrorTime.set(query, now);
     
-    // Clean up old entries
-    if (lastDetailedErrorTime.size > 100) {
+    // Enforce maximum cache size to prevent unbounded memory growth
+    if (lastDetailedErrorTime.size > MAX_CACHE_SIZE) {
+      // First try to clean up expired entries
       for (const [key, time] of lastDetailedErrorTime.entries()) {
         if (now - time > DETAILED_ERROR_COOLDOWN) {
           lastDetailedErrorTime.delete(key);
         }
+      }
+      // If still over limit, evict oldest entries
+      if (lastDetailedErrorTime.size > MAX_CACHE_SIZE) {
+        evictOldestEntries(lastDetailedErrorTime, MAX_CACHE_SIZE);
       }
     }
     
@@ -218,6 +271,21 @@ app.get('/card/:name', async (req, res) => {
 
     if (!name) {
       return res.status(400).json({ object: 'error', details: 'Card name required' });
+    }
+
+    // Security: Validate input length to prevent DoS
+    if (name.length > MAX_INPUT_LENGTH) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: `Card name too long (max ${MAX_INPUT_LENGTH} characters)` 
+      });
+    }
+
+    if (set && set.length > 10) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: 'Set code too long (max 10 characters)' 
+      });
     }
 
     // Validate input: detect if query string is being passed as card name
@@ -303,7 +371,21 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
       return res.status(400).json({ error: 'Set code and collector number required' });
     }
 
-    const scryfallCard = await scryfallLib.getCardBySetNumber(set, number, lang || 'en');
+    // Security: Validate input lengths
+    if (set.length > 10) {
+      return res.status(400).json({ error: 'Set code too long' });
+    }
+    if (number.length > 10) {
+      return res.status(400).json({ error: 'Collector number too long' });
+    }
+
+    // Security: Validate language code format (2-3 letters)
+    const langCode = lang || 'en';
+    if (langCode && !/^[a-z]{2,3}$/i.test(langCode)) {
+      return res.status(400).json({ error: 'Invalid language code format' });
+    }
+
+    const scryfallCard = await scryfallLib.getCardBySetNumber(set, number, langCode);
     
     // Return raw Scryfall format
     res.json(scryfallCard);
@@ -337,6 +419,11 @@ app.post('/deck', async (req, res) => {
       return res.status(400).json({ error: 'decklist required' });
     }
 
+    // Security: Validate body size
+    if (bodyText.length > 1024 * 1024) { // 1MB limit for decklist
+      return res.status(400).json({ error: 'Decklist too large (max 1MB)' });
+    }
+
     // Try to parse as JSON
     if (bodyText.trim().startsWith('{')) {
       try {
@@ -354,6 +441,13 @@ app.post('/deck', async (req, res) => {
           console.error('POST /deck: unexpected type for decklist:', typeof parsed.decklist, 'value:', parsed.decklist);
         }
         back = parsed.back;
+        
+        // Security: Validate custom card back URL if provided
+        if (back && !isValidCardBackURL(back)) {
+          return res.status(400).json({ 
+            error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
+          });
+        }
       } catch (e) {
         console.error('JSON parse error:', e.message, 'body was:', bodyText);
         // Not valid JSON; treat entire body as plain text decklist
@@ -436,6 +530,11 @@ app.post('/build', async (req, res) => {
       return res.status(400).json({ error: 'Decklist required' });
     }
 
+    // Security: Validate body size
+    if (bodyText.length > 1024 * 1024) { // 1MB limit for decklist
+      return res.status(400).json({ error: 'Decklist too large (max 1MB)' });
+    }
+
     // Try to parse as JSON
     if (bodyText.trim().startsWith('{')) {
       try {
@@ -443,6 +542,13 @@ app.post('/build', async (req, res) => {
         data = parsed.data;
         back = parsed.back;
         hand = parsed.hand;
+        
+        // Security: Validate custom card back URL if provided
+        if (back && !isValidCardBackURL(back)) {
+          return res.status(400).json({ 
+            error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
+          });
+        }
       } catch (e) {
         console.error('JSON parse error:', e.message);
         data = bodyText;
@@ -519,9 +625,18 @@ app.post('/build', async (req, res) => {
 app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count, q = '' } = req.query;
-    const numCards = count ? Math.min(parseInt(count) || 1, 100) : 1;
+    // Security: Enforce maximum count to prevent resource exhaustion
+    const numCards = count ? Math.min(Math.max(parseInt(count) || 1, 1), 100) : 1;
     
     console.log(`GET /random - count: ${numCards}, query: "${q}"`);
+
+    // Security: Validate query length
+    if (q && q.length > MAX_INPUT_LENGTH) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: `Query too long (max ${MAX_INPUT_LENGTH} characters)` 
+      });
+    }
 
     // Check if this query recently failed
     if (q) {
@@ -657,9 +772,17 @@ app.get('/search', async (req, res) => {
       return res.status(400).json({ error: 'Query required' });
     }
 
+    // Security: Validate input length
+    if (q.length > MAX_INPUT_LENGTH) {
+      return res.status(400).json({ 
+        error: `Query too long (max ${MAX_INPUT_LENGTH} characters)` 
+      });
+    }
+
     let scryfallCards;
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
-    const limitNum = parseInt(limit);
+    // Security: Enforce maximum limit to prevent memory exhaustion
+    const limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
     
     // For full printings list, prefer live API to ensure completeness
     if (requestedUnique === 'prints') {

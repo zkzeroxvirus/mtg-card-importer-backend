@@ -1,36 +1,54 @@
+-- ============================================================================
+-- MTG Mystery Pack Generator for Tabletop Simulator
+-- ============================================================================
+-- Generates random booster packs using the backend API
+
 function onLoad()
-  --customize card-back image
-  backURL='https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+  -- ============================================================================
+  -- Configuration
+  -- ============================================================================
+  
+  -- Customize card-back image (must be from allowed domains: Steam CDN, Imgur)
+  backURL = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
   -- Backend URL - change this to your deployed backend URL
-  backendURL='https://mtg-card-importer-backend.onrender.com/'
+  -- For local testing: 'http://localhost:3000/'
+  -- For production: Your deployed URL with trailing slash
+  backendURL = 'https://mtg-card-importer-backend.onrender.com/'
 
-  setCode='Mystery'
-  -- setCode='KLM'
-  -- setCode='STX'
-  -- setCode='ZNR'
+  -- Set code for booster pack generation
+  setCode = 'Mystery'
+  -- Examples of other sets:
+  -- setCode = 'KLM'
+  -- setCode = 'STX'
+  -- setCode = 'ZNR'
 
-  cardStackName=setCode.." Booster"
-  cardStackDescription=""
+  cardStackName = setCode .. " Booster"
+  cardStackDescription = ""
 
-  -------------- don't change these
-  nBooster=0
-  boosterDats={}
+  -- Internal state (don't change these)
+  nBooster = 0
+  boosterDats = {}
 end
 
--- URL helpers
+-- ============================================================================
+-- URL Helper Functions
+-- ============================================================================
+
 local function URLencode(str)
   if str then
-    str=str:gsub("\n","\r\n")
-    str=str:gsub("([^%w %-%_%.%~])", function(c) return string.format("%%%02X", string.byte(c)) end)
-    str=str:gsub(" ", "+")
+    str = str:gsub("\n", "\r\n")
+    str = str:gsub("([^%w %-%_%.%~])", function(c)
+      return string.format("%%%02X", string.byte(c))
+    end)
+    str = str:gsub(" ", "+")
   end
   return str
 end
 
 local function makeUrl(query)
-  local base=backendURL:gsub('/$','')
-  return base..'/random?q='..URLencode(query)
+  local base = backendURL:gsub('/$', '')
+  return base .. '/random?q=' .. URLencode(query)
 end
 
 --------------------------------------------------------------------------------
