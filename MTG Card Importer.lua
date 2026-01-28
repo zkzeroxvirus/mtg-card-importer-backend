@@ -1,17 +1,55 @@
+-- ============================================================================
+-- MTG Card Importer for Tabletop Simulator
+-- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
-mod_name,version='Card Importer','1.901'
-self.setName('[854FD9]'..mod_name..' [49D54F]'..version)
-author,WorkshopID,GITURL='76561198045776458','https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922','https://raw.githubusercontent.com/Amuzet/Tabletop-Simulator-Scripts/master/Magic/Importer.lua'
-coauthor='76561197968157267'--PIE
-lang='en'
+mod_name, version = 'Card Importer', '1.902'
+self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
+-- Author Information
+author = '76561198045776458'
+coauthor = '76561197968157267' -- PIE
+WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG%20Card%20Importer.lua'
+lang = 'en'
+
+-- ============================================================================
 -- Backend Configuration
--- Change this to your backend URL (use localhost for local testing or deployed URL for production)
-BACKEND_URL='https://mtg-card-importer-backend.onrender.com'
+-- ============================================================================
+-- Change this to your backend URL:
+--   - For local testing: 'http://localhost:3000'
+--   - For production: Your deployed backend URL
+-- Example: BACKEND_URL = 'https://your-backend.onrender.com'
+BACKEND_URL = 'https://mtg-card-importer-backend.onrender.com'
 
---[[Classes]]
-local TBL={__call=function(t,k)if k then return t[k] end return t.___ end,__index=function(t,k)if type(t.___)=='table'then rawset(t,k,t.___())else rawset(t,k,t.___)end return t[k] end}
-function TBL.new(d,t)if t then t.___=d return setmetatable(t,TBL)else return setmetatable(d,TBL)end end
+-- Auto-update configuration (checks GitHub for newer version on load)
+AUTO_UPDATE_ENABLED = true
+
+-- ============================================================================
+-- Classes and Utilities
+-- ============================================================================
+local TBL = {
+  __call = function(t, k)
+    if k then return t[k] end
+    return t.___
+  end,
+  __index = function(t, k)
+    if type(t.___) == 'table' then
+      rawset(t, k, t.___())
+    else
+      rawset(t, k, t.___)
+    end
+    return t[k]
+  end
+}
+
+function TBL.new(d, t)
+  if t then
+    t.___ = d
+    return setmetatable(t, TBL)
+  else
+    return setmetatable(d, TBL)
+  end
+end
 
 textItems={}
 newText=setmetatable({
@@ -1186,56 +1224,121 @@ function uNotebook(t,b,c)local p={index=-1,title=t,body=b or'',color=c or'Grey'}
   for i,v in ipairs(getNotebookTabs())do if v.title==p.title then p.index=i end end
   if p.index<0 then addNotebookTab(p)else editNotebookTab(p)end return p.index end
 function uVersion(wr)
-  local v=wr.text:match('mod_name,version=\'Card Importer\',(%d+%p%d+)')
-  log('GITHUB Version '..v)
-  if v then v=tonumber(v) else v=version end
-  local s='\nLatest Version '..self.getName()
-  if version>v or Test then Test,s=true,'\n[fff600]Experimental Version of Importer Module'
-  elseif version<v then s='\n[77ff00]Update Ready:'..v..' Attempting Update[-]\n'..wr.url end
-  Usage=Usage..s
-  broadcastToAll(s,{1,0,1})
-  if s:find(' Attempting Update')then
-    self.setLuaScript(wr.text)
-    self.reload()
-  else
+  local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
+  
+  if not v then
+    broadcastToAll('[MTG Importer] Could not check for updates', {1, 0.5, 0})
     registerModule()
+    return
   end
+  
+  v = tonumber(v) or version
+  log('GitHub Version ' .. v .. ' | Current Version ' .. version)
+  
+  local s = '\nLatest Version ' .. self.getName()
+  
+  if version > v or Test then
+    Test = true
+    s = '\n[fff600]Experimental Version of Importer Module'
+  elseif version < v then
+    s = '\n[77ff00]Update Available: v' .. v .. ' (Current: v' .. version .. ')[-]'
+    s = s .. '\n[ffffff]Auto-updating from GitHub...'
+    broadcastToAll('[MTG Importer] ' .. s, {0.4, 1, 0.4})
+    
+    -- Update the script
+    self.setLuaScript(wr.text)
+    
+    Wait.time(function()
+      broadcastToAll('[MTG Importer] Update complete! Reloading...', {0.4, 1, 0.4})
+      self.reload()
+    end, 1)
+    return
+  else
+    s = '\n[ffffff]You have the latest version!'
+  end
+  
+  Usage = Usage .. s
+  broadcastToAll('[MTG Importer] ' .. s, {1, 1, 0.4})
+  registerModule()
+end
+
+-- Manual update check function (callable from button)
+function checkForUpdates()
+  broadcastToAll('[MTG Importer] Checking for updates from GitHub...', {0.7, 0.7, 1})
+  WebRequest.get(GITURL, self, 'uVersion')
 end
 
 --[[Tabletop Callbacks]]
 function onSave()self.script_state=JSON.encode(Back)end
 function onLoad(data)
   -- Guard against nil objects or missing properties during load
-  local objs=getObjects() or {}
-  for _,o in pairs(objs)do
-    if o and o.getName and o.getVar and o~=self then
-      local name=o.getName() or ''
-      if name:find(mod_name)then
-        local other=o.getVar('version')
-        if other and version<other then
+  local objs = getObjects() or {}
+  for _, o in pairs(objs) do
+    if o and o.getName and o.getVar and o ~= self then
+      local name = o.getName() or ''
+      if name:find(mod_name) then
+        local other = o.getVar('version')
+        if other and version < other then
           self.destruct()
-        else o.destruct()end
+        else
+          o.destruct()
+        end
         break
       end
     end
   end
 
-  -- Autoupdate disabled - uncomment to re-enable (change GITURL to point to your own repo if needed)
-  -- WebRequest.get(GITURL,self,'uVersion')
-  if data~=''then Back=JSON.decode(data)end
-  if not Back or type(Back)~='table'then Back={}end
-  Back.___=Back.___ or 'https://i.stack.imgur.com/787gj.png'
-  Back=TBL.new(Back)
-  self.createButton({label="+",click_function='registerModule',function_owner=self,position={0,0.2,-0.5},height=100,width=100,font_size=100,tooltip="Adds Oracle Look Up"})
-  Usage=Usage:format(self.getName())
-  uNotebook('SHelp',Usage)
-  -- uNotebook('SData',self.script_state)   -- pieHere, remove the debug text popping into the notebook
-  local u=Usage:gsub('\n\n.*','\nFull capabilities listed in Notebook: SHelp')
-  u=u..'\nWhats New: [990000]Importer Modified by Sirin.'
-  self.setDescription(u:gsub('[^\n]*\n','',1):gsub('%]  %[',']\n['))
-  printToAll(u,{0.9,0.9,0.9})
+  -- Auto-update check (can be disabled by setting AUTO_UPDATE_ENABLED = false)
+  if AUTO_UPDATE_ENABLED then
+    WebRequest.get(GITURL, self, 'uVersion')
+  end
+  
+  -- Load saved card back settings
+  if data ~= '' then
+    Back = JSON.decode(data)
+  end
+  if not Back or type(Back) ~= 'table' then
+    Back = {}
+  end
+  Back.___ = Back.___ or 'https://i.stack.imgur.com/787gj.png'
+  Back = TBL.new(Back)
+  
+  -- Create UI buttons
+  self.createButton({
+    label = "+",
+    click_function = 'registerModule',
+    function_owner = self,
+    position = {0, 0.2, -0.5},
+    height = 100,
+    width = 100,
+    font_size = 100,
+    tooltip = "Adds Oracle Look Up"
+  })
+  
+  self.createButton({
+    label = "🔄",
+    click_function = 'checkForUpdates',
+    function_owner = self,
+    position = {0, 0.2, -0.7},
+    height = 100,
+    width = 100,
+    font_size = 80,
+    tooltip = "Check for Updates from GitHub"
+  })
+  
+  -- Setup usage text and description
+  Usage = Usage:format(self.getName())
+  uNotebook('SHelp', Usage)
+  local u = Usage:gsub('\n\n.*', '\nFull capabilities listed in Notebook: SHelp')
+  u = u .. '\n[ffffff]What\'s New: Modified for custom backend support'
+  u = u .. '\n[77ff00]Backend: ' .. BACKEND_URL
+  u = u .. '\n[7777ff]Auto-update: ' .. (AUTO_UPDATE_ENABLED and 'Enabled' or 'Disabled')
+  self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
+  printToAll(u, {0.9, 0.9, 0.9})
+  
   registerModule()
-  onChat('Scryfall clear back')end
+  onChat('Scryfall clear back')
+end
 function onDestroy()
   for _,o in pairs(textItems) do
     if o~=nil then o.destruct() end

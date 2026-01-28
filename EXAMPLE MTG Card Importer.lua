@@ -1,14 +1,31 @@
--- MTG Card Importer (Example)
--- Minimal Tabletop Simulator script that talks to the backend
+-- ============================================================================
+-- MTG Card Importer (Example) for Tabletop Simulator
+-- ============================================================================
+-- Minimal example script that demonstrates backend integration
+-- This is a simplified version showing core functionality
 
-mod_name, version = 'MTG Card Importer (Example)', 0.1
+mod_name = 'MTG Card Importer (Example)'
+version = '0.2'
 self.setName('[' .. mod_name .. '] v' .. version)
 
--- Backend Configuration (point to your server)
-local BaseURL = 'http://localhost:3000'
+-- GitHub URL for self-updating
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/EXAMPLE%20MTG%20Card%20Importer.lua'
+AUTO_UPDATE_ENABLED = true
+
+-- ============================================================================
+-- Backend Configuration
+-- ============================================================================
+-- Point this to your backend server:
+--   - Local testing: 'http://localhost:3000'
+--   - Production: Your deployed backend URL
+local BaseURL = 'https://mtg-card-importer-backend.onrender.com'
+
+-- Default card back image (must be from allowed domains)
 local DEFAULT_BACK = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
+-- ============================================================================
 -- Utilities
+-- ============================================================================
 local function log(msg)
   printToAll('[MTG Importer] ' .. tostring(msg), {0.7, 0.9, 1})
 end
@@ -38,7 +55,42 @@ local function postJSON(url, req, cb)
   }, cb)
 end
 
--- Build and spawn from decklist (multiline "count name")
+-- ============================================================================
+-- Self-Update Functions
+-- ============================================================================
+
+function checkForUpdates()
+  log('Checking for updates from GitHub...')
+  WebRequest.get(GITURL, function(wr)
+    if wr.is_error then
+      log('Failed to check for updates: ' .. (wr.error or 'Network error'))
+      return
+    end
+    
+    local newVersion = wr.text:match("version = '([%d%.]+)'")
+    if not newVersion then
+      log('Could not parse version from GitHub')
+      return
+    end
+    
+    if newVersion > version then
+      log('Update available: v' .. newVersion .. ' (Current: v' .. version .. ')')
+      log('Updating automatically...')
+      
+      self.setLuaScript(wr.text)
+      Wait.time(function()
+        log('Update complete! Reloading...')
+        self.reload()
+      end, 1)
+    else
+      log('You have the latest version (v' .. version .. ')')
+    end
+  end)
+end
+
+-- ============================================================================
+-- Card Spawning Functions
+-- ============================================================================
 function spawnDeckList(decktext, color)
   local player = Player[color]
   local hand = player and player.getHandTransform and player:getHandTransform(1)
@@ -235,14 +287,32 @@ function onLoad()
     font_size = 150,
     tooltip = 'MTG Importer Help'
   })
+  
+  self.createButton({
+    label = '🔄',
+    click_function = 'checkForUpdates',
+    function_owner = self,
+    position = {0, 0.2, -0.7},
+    height = 200,
+    width = 200,
+    font_size = 120,
+    tooltip = 'Check for Updates from GitHub'
+  })
+  
+  -- Auto-update on load if enabled
+  if AUTO_UPDATE_ENABLED then
+    checkForUpdates()
+  end
 end
 
 function showHelp()
   log('===== MTG Card Importer (Example) =====')
+  log('Version: v' .. version)
   log('Prefix: sf')
   log('sf <card>           - spawn one card')
   log('sf <decklist...>    - spawn multiline decklist')
   log('sf random [n] [?q=] - random cards (Scryfall query optional)')
   log('sf search <query>   - spawn up to 100 results')
   log('Backend: ' .. BaseURL)
+  log('Auto-update: ' .. (AUTO_UPDATE_ENABLED and 'Enabled' or 'Disabled'))
 end
