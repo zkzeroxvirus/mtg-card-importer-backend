@@ -60,6 +60,19 @@ function getQueryHint(query) {
       return ` (Did you mean "${match[1]}:${match[2]}"? Comparison operators need a colon)`;
     }
   }
+
+  // Check for equals sign used instead of colon (e.g., "id=c" instead of "id:c")
+  if (/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)[=]/.test(q)) {
+    const match = q.match(/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)([=])/);
+    if (match) {
+      return ` (Did you mean "${match[1]}:" instead of "${match[1]}="? Use colons for search keywords)`;
+    }
+  }
+
+  // Check for common typos in color identity
+  if (/\bid[a-z]{2,3}\b/.test(q)) {
+    return ' (Did you mean "id:" or "identity:" for color identity? Example: id:gu for Simic)';
+  }
   
   // Common misspellings
   const misspellings = {
@@ -210,6 +223,22 @@ app.get('/card/:name', async (req, res) => {
 
     if (!name) {
       return res.status(400).json({ error: 'Card name required' });
+    }
+
+    // Validate input: detect if query string is being passed as card name
+    if (name.startsWith('?q=') || name.includes('?q=')) {
+      return res.status(400).json({ 
+        object: 'error',
+        details: 'Invalid card name. Did you mean to use /search or /random endpoint? Card name should not contain query parameters.'
+      });
+    }
+
+    // Detect common search syntax in card name (indicates wrong endpoint usage)
+    if (/[a-z]+[:=][a-z0-9]+/i.test(name) || name.includes('t:') || name.includes('c:') || name.includes('id:')) {
+      return res.status(400).json({ 
+        object: 'error',
+        details: 'Invalid card name. This looks like a search query. Use /search or /random endpoint for queries.'
+      });
     }
 
     let scryfallCard;
@@ -563,7 +592,9 @@ app.get('/random', randomLimiter, async (req, res) => {
           // First request failed - likely invalid query
           if (error.response?.status === 404) {
             const hint = getQueryHint(q);
-            throw new Error(`Invalid search query: "${q}"${hint}. No cards match this query.`);
+            const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
+            cacheFailedQuery(q, enhancedError);
+            throw new Error(enhancedError);
           }
           throw error;
         }
