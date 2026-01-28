@@ -35,10 +35,17 @@ app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse ma
 function getQueryHint(query) {
   const q = query.toLowerCase();
   
-  // Common keyword mistakes - missing colons
+  // Check for common typos in color identity
+  // Match "idXX" where XX are 2-3 lowercase letters (like "idgu" or "idub")
+  // But only in search context - check if query has other search operators
+  if (/\bid[a-z]{2,3}\b/.test(q) && (q.includes('t:') || q.includes('c:') || q.includes('s:') || q.includes('r:'))) {
+    return ' (Did you mean "id:" or "identity:" for color identity? Example: id:gu for Simic)';
+  }
+  
+  // Common keyword mistakes - missing colons or comparison operators
   const keywordPatterns = [
-    { pattern: /\bcmc\d/, correct: 'cmc:', example: 'cmc:3', desc: 'mana value' },
-    { pattern: /\bmv\d/, correct: 'mv:', example: 'mv:3', desc: 'mana value' },
+    { pattern: /\bcmc\d/, correct: 'cmc:', example: 'cmc:3 or cmc>=3', desc: 'mana value' },
+    { pattern: /\bmv\d/, correct: 'mv:', example: 'mv:3 or mv<=3', desc: 'mana value' },
     { pattern: /\bpow(er)?\d/, correct: 'power:', example: 'power>=5', desc: 'power' },
     { pattern: /\btou(ghness)?\d/, correct: 'toughness:', example: 'toughness<=2', desc: 'toughness' },
     { pattern: /\bloy(alty)?\d/, correct: 'loyalty:', example: 'loyalty:3', desc: 'loyalty' },
@@ -53,11 +60,12 @@ function getQueryHint(query) {
     }
   }
   
-  // Check for comparison operators without colons
-  if (/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)[<>=]/.test(q)) {
-    const match = q.match(/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)([<>=]+)/);
+  // Check for comparison operators written incorrectly (e.g., "mv=0=type" instead of "mv=0 type")
+  if (/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)=\d+=[a-z]/.test(q)) {
+    const match = q.match(/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)=(\d+)=/);
     if (match) {
-      return ` (Did you mean "${match[1]}:${match[2]}"? Comparison operators need a colon)`;
+      // "mv=0=type" should use space or + to separate: "mv=0 type:artifact" or "mv=0+type:artifact"
+      return ` (Use spaces or "+" to separate conditions: "${match[1]}=${match[2]} type:..." not "${match[1]}=${match[2]}=type")`;
     }
   }
   
@@ -209,7 +217,26 @@ app.get('/card/:name', async (req, res) => {
     const { set } = req.query;
 
     if (!name) {
-      return res.status(400).json({ error: 'Card name required' });
+      return res.status(400).json({ object: 'error', details: 'Card name required' });
+    }
+
+    // Validate input: detect if query string is being passed as card name
+    if (name.includes('?q=')) {
+      return res.status(400).json({ 
+        object: 'error',
+        details: 'Invalid card name. Did you mean to use /search or /random endpoint? Card name should not contain query parameters.'
+      });
+    }
+
+    // Detect common search syntax in card name (indicates wrong endpoint usage)
+    // Check for known search operators at word boundaries (colon, equals, comparison)
+    // Valid Scryfall syntax uses these operators, so we detect them in card names
+    const hasSearchOperator = /\b(id|c|t|type|s|set|r|rarity|cmc|mv|pow|power|tou|toughness)[:=<>]/i.test(name);
+    if (hasSearchOperator) {
+      return res.status(400).json({ 
+        object: 'error',
+        details: 'Invalid card name. This looks like a search query. Use /search or /random endpoint for queries.'
+      });
     }
 
     let scryfallCard;
@@ -563,7 +590,9 @@ app.get('/random', randomLimiter, async (req, res) => {
           // First request failed - likely invalid query
           if (error.response?.status === 404) {
             const hint = getQueryHint(q);
-            throw new Error(`Invalid search query: "${q}"${hint}. No cards match this query.`);
+            const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
+            cacheFailedQuery(q, enhancedError);
+            throw new Error(enhancedError);
           }
           throw error;
         }
