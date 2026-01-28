@@ -2,6 +2,29 @@
 
 This directory contains Lua scripts for use with Tabletop Simulator to import Magic: The Gathering cards using the backend API.
 
+## 🎨 NEW: Custom Image Proxy Feature (v1.903)
+
+You can now spawn cards with custom artwork while keeping official card data from Scryfall!
+
+**Usage:**
+```
+scryfall <cardname> <image-url>
+```
+
+**Examples:**
+```
+scryfall island https://i.imgur.com/custom-island.jpg
+scryfall "black lotus" https://example.com/art.png
+```
+
+**What you get:**
+- ✅ Card data (name, text, mana cost) from Scryfall
+- 🎨 Custom image from your URL
+
+See [CUSTOM_IMAGE_PROXY_GUIDE.md](CUSTOM_IMAGE_PROXY_GUIDE.md) for complete documentation.
+
+---
+
 ## Files Overview
 
 ### 1. MTG Card Importer.lua
@@ -10,6 +33,7 @@ This directory contains Lua scripts for use with Tabletop Simulator to import Ma
 **Features:**
 - ✅ Auto-update from GitHub on load
 - ✅ Manual update check button (🔄)
+- ✅ **Custom image proxies** - Use any artwork with official card data
 - ✅ Custom card backs per player
 - ✅ Deck import from multiple sources (Moxfield, Scryfall, etc.)
 - ✅ Random card generation with Scryfall queries
@@ -19,22 +43,23 @@ This directory contains Lua scripts for use with Tabletop Simulator to import Ma
 
 **Configuration:**
 ```lua
--- Change backend URL (line 25)
+-- Change backend URL (line 22)
 BACKEND_URL = 'https://mtg-card-importer-backend.onrender.com'
 
--- Enable/disable auto-update (line 28)
+-- Enable/disable auto-update (line 25)
 AUTO_UPDATE_ENABLED = true
 
--- GitHub URL for updates (line 14)
+-- GitHub URL for updates (line 12)
 GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG%20Card%20Importer.lua'
 ```
 
 **Usage:**
 ```
-Scryfall <card name>           - Spawn single card
-Scryfall <URL>                 - Import deck from URL
-Scryfall random <query>        - Spawn random card(s)
-Scryfall help                  - Show help
+Scryfall <card name>                    - Spawn single card
+Scryfall <card name> <image-url>        - Spawn card with custom image (NEW!)
+Scryfall <URL>                          - Import deck from URL
+Scryfall random <query>                 - Spawn random card(s)
+Scryfall help                           - Show help
 ```
 
 ---

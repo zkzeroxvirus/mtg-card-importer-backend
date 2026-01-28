@@ -2,6 +2,16 @@
 
 A Node.js backend that proxies the Scryfall API to provide Magic: The Gathering card data in Tabletop Simulator-compatible formats.
 
+## 🎨 New Feature: Custom Image Proxies!
+
+You can now spawn cards with custom artwork while keeping official card data:
+
+```
+scryfall island https://your-custom-art.com/island.jpg
+```
+
+See [CUSTOM_IMAGE_PROXY_GUIDE.md](CUSTOM_IMAGE_PROXY_GUIDE.md) for full documentation.
+
 ## Overview
 
 This backend acts as a middleware between the Amuzet Card Importer (Tabletop Simulator Lua script) and Scryfall's API. It:
