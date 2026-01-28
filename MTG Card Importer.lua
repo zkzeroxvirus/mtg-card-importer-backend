@@ -2,7 +2,7 @@
 -- MTG Card Importer for Tabletop Simulator
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
-mod_name, version = 'Card Importer', '1.902'
+mod_name, version = 'Card Importer', '1.903'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -134,19 +134,20 @@ local Card=setmetatable({n=1,image=false},
 				local f=c.card_faces[1]
 				local cmc=c.cmc or f.cmc or 0
         c.name=f.name:gsub('"','')..'\n'..f.type_line..'\n'..cmc..'CMC DFC'
-        c.oracle=setOracle(f)
-				for i,face in ipairs(c.card_faces)do
-					if face.type_line:find('Battle')or face.type_line:find('Room')then
-						orientation[i]=true
-					else
-						orientation[i]=false
-					end
-					print(i..' '..tostring(orientation[i]))
-				end
-			else--NORMAL
-        c.name=c.name:gsub('"','')..'\n'..c.type_line..'\n'..c.cmc..'CMC'
-        c.oracle=setOracle(c)
-				if('planar'):find(c.layout)then orientation[1]=true end
+        c.oracle = setOracle(f)
+        for i, face in ipairs(c.card_faces) do
+          if face.type_line:find('Battle') or face.type_line:find('Room') then
+            orientation[i] = true
+          else
+            orientation[i] = false
+          end
+        end
+			else -- NORMAL
+        c.name = c.name:gsub('"', '') .. '\n' .. c.type_line .. '\n' .. c.cmc .. 'CMC'
+        c.oracle = setOracle(c)
+        if ('planar'):find(c.layout) then
+          orientation[1] = true
+        end
       end
 
       local backDat=nil
@@ -1193,24 +1194,39 @@ Importer=setmetatable({
       elseif t.request[3]then msg=msg..'. Type `Scryfall clear queue` to Force quit the queue!'end
       Player[qTbl.color].broadcast(msg)
     elseif t.request[1]then
-      local tbl=t.request[1]
-      --If URL is not Deck list then
-      --Custom Image Replace
-      if tbl.url and tbl.mode~='Back'then
-        if not t.Deck(tbl)then
-        Card.image=tbl.url
-        t.Spawn(tbl)end
-      elseif t[tbl.mode]then t[tbl.mode](tbl)
-      else t.Spawn(tbl)end--Attempt to Spawn
+      local tbl = t.request[1]
+      -- If URL is not Deck list then
+      -- Custom Image Replace
+      if tbl.url and tbl.mode ~= 'Back' then
+        if not t.Deck(tbl) then
+          Card.image = tbl.url
+          t.Spawn(tbl)
+        end
+      elseif tbl.customImage then
+        -- NEW: Handle custom image proxy
+        Card.image = tbl.customImage
+        t.Spawn(tbl)
+      elseif t[tbl.mode] then
+        t[tbl.mode](tbl)
+      else
+        t.Spawn(tbl)  -- Attempt to Spawn
+      end
     elseif qTbl then broadcastToAll('Something went Wrong please contact Amuzet\nImporter did not get a mode. MAIN LOGIC')
   end end})
 MODES=''
 for k,v in pairs(Importer)do if not('request'):find(k)then
 MODES=MODES..' '..k end end
 --[[Functions used everywhere else]]
-local Usage=[[    [b]%s
-[b][0077ff]Scryfall[/b] [i]URL[/i]  [-][Spawn that deck list or Image]
- Hello this is Sirin, ive modified Amuzet's Card Importer to work with my own backend.]]
+local Usage = [[    [b]%s
+[b][0077ff]Scryfall[/b] [i]CardName[/i]  [-][Spawn a card by name]
+[b][0077ff]Scryfall[/b] [i]CardName URL[/i]  [-][Spawn card with custom image (proxy)]
+[b][0077ff]Scryfall[/b] [i]URL[/i]  [-][Import deck from URL]
+
+[b]Custom Image Proxy:[/b]
+Type: Scryfall island https://your-image-url.com/image.jpg
+This fetches the card data (name, text, etc.) from Scryfall but uses your custom image.
+
+Modified by Sirin to work with custom backend.]]
 function endLoop()if Importer.request[1]then Importer.request[1].text()table.remove(Importer.request,1)end Importer()end
 function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'}
   if type(tbl)=='table'then timerParams.parameters=tbl end
@@ -1340,20 +1356,15 @@ function onLoad(data)
   onChat('Scryfall clear back')
 end
 function onDestroy()
-  for _,o in pairs(textItems) do
-    if o~=nil then o.destruct() end
-end end
+  for _, o in pairs(textItems) do
+    if o ~= nil then
+      o.destruct()
+    end
+  end
+end
 
-local SMG,SMC='[b]Scryfall: [/b]',{0.5,1,0.8}
-function AP(p,s)printToAll(SMG..s:format(p.steam_name),SMC)end
-function onPlayerConnect(p)
-      if p.steam_id==author   then AP(p,'Welcome %s, creator of me. The Card Importer!')
-  elseif p.steam_id==coauthor then AP(p,'Praise be to %s!')end end
-function onPlayerDisconnect(p)
-      if p.steam_id==author   then AP(p,'Goodbye %s, take care of yur self buddy-o-pal!')
-  elseif p.steam_id==coauthor then AP(p,'𝜋 doesn\'t terminate, but %s does.')end end
-
-local chatToggle=false
+local SMG, SMC = '[b]Scryfall: [/b]', {0.5, 1, 0.8}
+local chatToggle = false
 function onChat(msg,p)
   if msg:find('!?[Ss]cryfall ')then
     local a=msg:match('!?[Ss]cryfall (.*)')or false
@@ -1376,55 +1387,83 @@ function onChat(msg,p)
 			Back=TBL.new('https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/',JSON.decode(self.script_state))
 
     elseif a then
-      --pieHere, allow using spaces instead of + when doing search syntax, also allow ( ) grouping
-      local tbl={position=p.getPointerPosition(),player=p.steam_id,color=p.color,url=a:match('(http%S+)'),mode=a:gsub('(http%S+)',''):match('(%S+)'),name=a:gsub('(http%S+)',''),full=a}
-      if tbl.color=='Grey' then
-        tbl.position={0,2,0}
+      -- Parse command: support custom image proxy
+      -- Syntax: "scryfall cardname https://custom-image-url"
+      local customImageUrl = a:match('(https?://[^%s]+)$')  -- URL at end
+      local nameWithoutUrl = a:gsub('https?://[^%s]+$', ''):gsub('%s+$', '')  -- Remove trailing URL and spaces
+      
+      -- Extract URL (for deck imports) vs custom image URL
+      local deckUrl = nil
+      if not customImageUrl then
+        -- No custom image, check if entire thing is a URL (deck import)
+        deckUrl = a:match('(https?://[^%s]+)')
+        if deckUrl and deckUrl == a:match('^%s*https?://') then
+          -- URL is at the start, it's a deck import
+          nameWithoutUrl = ''
+        else
+          nameWithoutUrl = a:gsub('https?://[^%s]+', '')
+        end
       end
+      
+      local tbl = {
+        position = p.getPointerPosition(),
+        player = p.steam_id,
+        color = p.color,
+        url = deckUrl or (not customImageUrl and a:match('(https?://[^%s]+)')),
+        customImage = customImageUrl,  -- NEW: Store custom image URL separately
+        mode = nameWithoutUrl:match('(%S+)'),
+        name = nameWithoutUrl,
+        full = a
+      }
+      
+      if tbl.color == 'Grey' then
+        tbl.position = {0, 2, 0}
+      end
+      
       if tbl.mode then
-        for k,v in pairs(Importer) do
-          if tbl.mode:lower()==k:lower() and type(v)=='function' then
-            tbl.mode,tbl.name=k,tbl.name:lower():gsub(k:lower(),'',1)
-            break end end end
+        for k, v in pairs(Importer) do
+          if tbl.mode:lower() == k:lower() and type(v) == 'function' then
+            tbl.mode, tbl.name = k, tbl.name:lower():gsub(k:lower(), '', 1)
+            break
+          end
+        end
+      end
 
-      if tbl.name:len()<1 then
-        tbl.name='blank card'
+      if tbl.name:len() < 1 then
+        tbl.name = 'blank card'
       else
-        if tbl.name:sub(1,1)==' ' then
-          tbl.name=tbl.name:sub(2,-1)   --pieHere, remove 1st space
+        if tbl.name:sub(1, 1) == ' ' then
+          tbl.name = tbl.name:sub(2, -1)  -- Remove 1st space
         end
-        --pieHere, add character encoding to be able to put in same search as on scryfall.com
-        charEncoder={ [' '] ='%%20',
-                      ['>'] ='%%3E',
-                      ['<'] ='%%3C',
-                      [':'] ='%%3A',
-                      ['%(']='%%28',
-                      ['%)']='%%29',
-                      ['%{']='%%7B',
-                      ['%}']='%%7D',
-                      ['%[']='%%5B',
-                      ['%]']='%%5D',
-                      ['%|']='%%7C',
-                      ['%/']='%%2F',
-                      ['\\']='%%5C',
-                      ['%^']='%%5E',
-                      ['%$']='%%24',
-                      ['%?']='%%3F',
-                      ['%!']='%%3F'}
-        for char,replacement in pairs(charEncoder) do
-          tbl.name=tbl.name:gsub(char,replacement)
+        -- URL encoding for special characters
+        charEncoder = {
+          [' '] = '%%20',
+          ['>'] = '%%3E',
+          ['<'] = '%%3C',
+          [':'] = '%%3A',
+          ['%('] = '%%28',
+          ['%)'] = '%%29',
+          ['%{'] = '%%7B',
+          ['%}'] = '%%7D',
+          ['%['] = '%%5B',
+          ['%]'] = '%%5D',
+          ['%|'] = '%%7C',
+          ['%/'] = '%%2F',
+          ['\\'] = '%%5C',
+          ['%^'] = '%%5E',
+          ['%$'] = '%%24',
+          ['%?'] = '%%3F',
+          ['%!'] = '%%3F'
+        }
+        for char, replacement in pairs(charEncoder) do
+          tbl.name = tbl.name:gsub(char, replacement)
         end
-
-        -- -- pieHere, this would be the smarter way to do it, but for some reason it doesn't quite work?
-        -- -- it's just the ^ sybmol? can't get that one to encode..
-        -- chars2encode={' ','>','<',':','%(','%)','%{','%}','%[','%]','%|','%/','\\','%^','%$','%?','%!'}
-        -- for _,char in pairs(chars2encode) do
-        --   tbl.name=tblname:gsub(char,'%%'..string.format("%X",string.unicode(char)))
-        -- end
-
       end
       Importer(tbl)
-      if chatToggle then uLog(msg,p.steam_name)return false end
+      if chatToggle then
+        uLog(msg, p.steam_name)
+        return false
+      end
     end
   end
 end
