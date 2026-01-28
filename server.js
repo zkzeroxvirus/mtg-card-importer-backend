@@ -44,7 +44,9 @@ function getQueryHint(query) {
   }
 
   // Check for common typos in color identity
-  if (/\bid[a-z]{2,3}\b/.test(q)) {
+  // Match "idXX" where XX are 2-3 lowercase letters (like "idgu" or "idub")
+  // But only in search context - check if query has other search operators
+  if (/\bid[a-z]{2,3}\b/.test(q) && (q.includes('t:') || q.includes('c:') || q.includes('s:') || q.includes('r:'))) {
     return ' (Did you mean "id:" or "identity:" for color identity? Example: id:gu for Simic)';
   }
   
@@ -222,11 +224,11 @@ app.get('/card/:name', async (req, res) => {
     const { set } = req.query;
 
     if (!name) {
-      return res.status(400).json({ error: 'Card name required' });
+      return res.status(400).json({ object: 'error', details: 'Card name required' });
     }
 
     // Validate input: detect if query string is being passed as card name
-    if (name.startsWith('?q=') || name.includes('?q=')) {
+    if (name.includes('?q=')) {
       return res.status(400).json({ 
         object: 'error',
         details: 'Invalid card name. Did you mean to use /search or /random endpoint? Card name should not contain query parameters.'
@@ -234,7 +236,9 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Detect common search syntax in card name (indicates wrong endpoint usage)
-    if (/[a-z]+[:=][a-z0-9]+/i.test(name) || name.includes('t:') || name.includes('c:') || name.includes('id:')) {
+    // Check for known search operators to avoid false positives
+    const hasSearchOperator = /\b(id|c|t|type|s|set|r|rarity|cmc|mv|pow|power)[:=]/i.test(name);
+    if (hasSearchOperator) {
       return res.status(400).json({ 
         object: 'error',
         details: 'Invalid card name. This looks like a search query. Use /search or /random endpoint for queries.'
