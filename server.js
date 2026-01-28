@@ -35,14 +35,6 @@ app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse ma
 function getQueryHint(query) {
   const q = query.toLowerCase();
   
-  // Check for equals sign used instead of colon FIRST (most common error from logs)
-  if (/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)[=]/.test(q)) {
-    const match = q.match(/\b(id|c|t|type|o|oracle|s|set|e|edition|f|format|r|rarity|cmc|mv)([=])/);
-    if (match) {
-      return ` (Did you mean "${match[1]}:" instead of "${match[1]}="? Use colons for search keywords)`;
-    }
-  }
-
   // Check for common typos in color identity
   // Match "idXX" where XX are 2-3 lowercase letters (like "idgu" or "idub")
   // But only in search context - check if query has other search operators
@@ -50,10 +42,10 @@ function getQueryHint(query) {
     return ' (Did you mean "id:" or "identity:" for color identity? Example: id:gu for Simic)';
   }
   
-  // Common keyword mistakes - missing colons
+  // Common keyword mistakes - missing colons or comparison operators
   const keywordPatterns = [
-    { pattern: /\bcmc\d/, correct: 'cmc:', example: 'cmc:3', desc: 'mana value' },
-    { pattern: /\bmv\d/, correct: 'mv:', example: 'mv:3', desc: 'mana value' },
+    { pattern: /\bcmc\d/, correct: 'cmc:', example: 'cmc:3 or cmc>=3', desc: 'mana value' },
+    { pattern: /\bmv\d/, correct: 'mv:', example: 'mv:3 or mv<=3', desc: 'mana value' },
     { pattern: /\bpow(er)?\d/, correct: 'power:', example: 'power>=5', desc: 'power' },
     { pattern: /\btou(ghness)?\d/, correct: 'toughness:', example: 'toughness<=2', desc: 'toughness' },
     { pattern: /\bloy(alty)?\d/, correct: 'loyalty:', example: 'loyalty:3', desc: 'loyalty' },
@@ -68,11 +60,12 @@ function getQueryHint(query) {
     }
   }
   
-  // Check for comparison operators without colons
-  if (/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)[<>=]/.test(q)) {
-    const match = q.match(/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)([<>=]+)/);
+  // Check for comparison operators written incorrectly (e.g., "mv=0=type" instead of "mv=0 type")
+  if (/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)=\d+=[a-z]/.test(q)) {
+    const match = q.match(/\b(cmc|mv|pow|power|tou|toughness|loy|loyalty)=(\d+)=/);
     if (match) {
-      return ` (Did you mean "${match[1]}:${match[2]}"? Comparison operators need a colon)`;
+      // "mv=0=type" should use space or + to separate: "mv=0 type:artifact" or "mv=0+type:artifact"
+      return ` (Use spaces or "+" to separate conditions: "${match[1]}=${match[2]} type:..." not "${match[1]}=${match[2]}=type")`;
     }
   }
   
@@ -236,8 +229,9 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Detect common search syntax in card name (indicates wrong endpoint usage)
-    // Check for known search operators to avoid false positives
-    const hasSearchOperator = /\b(id|c|t|type|s|set|r|rarity|cmc|mv|pow|power)[:=]/i.test(name);
+    // Check for known search operators at word boundaries (colon, equals, comparison)
+    // Valid Scryfall syntax uses these operators, so we detect them in card names
+    const hasSearchOperator = /\b(id|c|t|type|s|set|r|rarity|cmc|mv|pow|power|tou|toughness)[:=<>]/i.test(name);
     if (hasSearchOperator) {
       return res.status(400).json({ 
         object: 'error',
