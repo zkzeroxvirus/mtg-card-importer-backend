@@ -303,6 +303,7 @@ function setCard(wr,qTbl,originalData)
 				else
 					originalData.card_faces[2].image_uris = json.card_faces[2].image_uris
 				end
+				Card(originalData, qTbl)
 
 			elseif json.layout=='art_series'then
 				WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
@@ -313,6 +314,7 @@ function setCard(wr,qTbl,originalData)
             setCard(request, qTbl, json)
           end
         end)
+			end
 
       elseif json.lang==lang then
         Card(json, qTbl)
@@ -1349,15 +1351,24 @@ function uVersion(wr)
     return
   end
   
-  v = tonumber(v) or version
+  -- Convert both to numbers for comparison
+  local vNum = tonumber(v)
+  local versionNum = tonumber(version)
+  
+  if not vNum or not versionNum then
+    log('[MTG Importer] Update check failed - Invalid version format')
+    registerModule()
+    return
+  end
+  
   log('GitHub Version ' .. v .. ' | Current Version ' .. version)
   
   local s = '\nLatest Version ' .. self.getName()
   
-  if version > v or Test then
+  if versionNum > vNum or Test then
     Test = true
     s = '\n[fff600]Experimental Version of Importer Module'
-  elseif version < v then
+  elseif versionNum < vNum then
     s = '\n[77ff00]Update Available: v' .. v .. ' (Current: v' .. version .. ')[-]'
     s = s .. '\n[ffffff]Auto-updating from GitHub...'
     broadcastToAll('[MTG Importer] ' .. s, {0.4, 1, 0.4})
@@ -1395,8 +1406,14 @@ function onLoad(data)
       local name = o.getName() or ''
       if name:find(mod_name) then
         local other = o.getVar('version')
-        if other and version < other then
-          self.destruct()
+        if other then
+          local otherNum = tonumber(other)
+          local versionNum = tonumber(version)
+          if otherNum and versionNum and versionNum < otherNum then
+            self.destruct()
+          else
+            o.destruct()
+          end
         else
           o.destruct()
         end
@@ -1483,7 +1500,7 @@ function onChat(msg,p)
     elseif a=='promote me' and p.steam_id==author then
       p.promote()
     elseif a=='clear queue'then
-      version=version-1
+      -- Clear the queue by reloading the object
       printToAll(SMG..'Respawning Importer!',SMC)
       self.reload()
     elseif a=='clear back'then
