@@ -1226,6 +1226,12 @@ local Usage = [[    [b]%s
 Type: Scryfall island https://your-image-url.com/image.jpg
 This fetches the card data (name, text, etc.) from Scryfall but uses your custom image.
 
+[b]Additional Commands:[/b]
+[b][0077ff]Scryfall help[/b]  [-][Show this help message]
+[b][0077ff]Scryfall hide[/b]  [-][Toggle chat message visibility (admin only)]
+[b][0077ff]Scryfall clear queue[/b]  [-][Reload importer and clear queue]
+[b][0077ff]Scryfall clear back[/b]  [-][Reset card back to default]
+
 Modified by Sirin to work with custom backend.]]
 function endLoop()if Importer.request[1]then Importer.request[1].text()table.remove(Importer.request,1)end Importer()end
 function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'}
@@ -1243,7 +1249,7 @@ function uVersion(wr)
   local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
   
   if not v then
-    broadcastToAll('[MTG Importer] Could not check for updates', {1, 0.5, 0})
+    -- Silently fail update check - no need to notify users
     registerModule()
     return
   end
@@ -1347,8 +1353,7 @@ function onLoad(data)
   uNotebook('SHelp', Usage)
   local u = Usage:gsub('\n\n.*', '\nFull capabilities listed in Notebook: SHelp')
   u = u .. '\n[ffffff]What\'s New: Modified for custom backend support'
-  u = u .. '\n[77ff00]Backend: ' .. BACKEND_URL
-  u = u .. '\n[7777ff]Auto-update: ' .. (AUTO_UPDATE_ENABLED and 'Enabled' or 'Disabled')
+  -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   printToAll(u, {0.9, 0.9, 0.9})
   
