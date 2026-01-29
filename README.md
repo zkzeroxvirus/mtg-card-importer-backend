@@ -2,6 +2,8 @@
 
 A Node.js backend that proxies the Scryfall API to provide Magic: The Gathering card data in Tabletop Simulator-compatible formats.
 
+**✅ Fully compliant with [Scryfall API guidelines](https://scryfall.com/docs/api)** - See [SCRYFALL_API_COMPLIANCE.md](SCRYFALL_API_COMPLIANCE.md) for details.
+
 ## 🎨 New Feature: Custom Image Proxies!
 
 You can now spawn cards with custom artwork while keeping official card data:
@@ -189,6 +191,19 @@ DEFAULT_CARD_BACK=https://steamusercontent-a.akamaihd.net/ugc/164772010376268246
 USE_BULK_DATA=true
 BULK_DATA_PATH=./data
 ```
+
+## Scryfall API Compliance
+
+This backend is fully compliant with [Scryfall's API guidelines](https://scryfall.com/docs/api):
+
+- ✅ **Rate Limiting**: Enforces 50-100ms delay between requests (configurable via `SCRYFALL_DELAY`)
+- ✅ **User-Agent Header**: Includes descriptive application name and version
+- ✅ **Accept Header**: Properly set for all API requests
+- ✅ **Retry Logic**: Respects `Retry-After` header for 429 responses
+- ✅ **Bulk Data Mode**: Optional caching to minimize API calls (recommended for self-hosted)
+- ✅ **Data Usage**: Creates additional value through TTS format conversion
+
+See [SCRYFALL_API_COMPLIANCE.md](SCRYFALL_API_COMPLIANCE.md) for detailed technical documentation.
 
 ## Decklist Format
 
