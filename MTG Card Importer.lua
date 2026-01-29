@@ -92,6 +92,11 @@ newText=setmetatable({
 --[[Variables]]
 local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new('https://i.stack.imgur.com/787gj.png',{})
 
+-- Request timeout tracking
+local requestStartTime = nil
+local REQUEST_TIMEOUT = 60  -- seconds before considering a request hung
+local TIMEOUT_CHECK_INTERVAL = 10  -- seconds between timeout checks
+
 --Image Handler
 function trunkateURI(uri,q,s)
   if q=='png' then uri=uri:gsub('.jpg','.png')end
@@ -1195,6 +1200,8 @@ Importer=setmetatable({
       Player[qTbl.color].broadcast(msg)
     elseif t.request[1]then
       local tbl = t.request[1]
+      -- Set start time for timeout detection
+      requestStartTime = os.time()
       -- If URL is not Deck list then
       -- Custom Image Replace
       if tbl.url and tbl.mode ~= 'Back' then
@@ -1232,8 +1239,48 @@ This fetches the card data (name, text, etc.) from Scryfall but uses your custom
 [b][0077ff]Scryfall clear queue[/b]  [-][Reload importer and clear queue]
 [b][0077ff]Scryfall clear back[/b]  [-][Reset card back to default]
 
+[b]Auto-Recovery:[/b]
+The importer now automatically detects and recovers from hung requests.
+If a request takes longer than 60 seconds, it will automatically timeout and move to the next request.
+
 Modified by Sirin to work with custom backend.]]
-function endLoop()if Importer.request[1]then Importer.request[1].text()table.remove(Importer.request,1)end Importer()end
+
+-- Check for hung requests and auto-recover
+function checkRequestTimeout()
+  if Importer.request[1] and requestStartTime then
+    local currentTime = os.time()
+    local elapsed = currentTime - requestStartTime
+    
+    if elapsed > REQUEST_TIMEOUT then
+      local failedRequest = Importer.request[1]
+      local playerColor = failedRequest.color or 'White'
+      local requestInfo = failedRequest.full or failedRequest.name or 'Unknown'
+      
+      log('[MTG Importer] Request timeout detected after ' .. elapsed .. 's: ' .. requestInfo)
+      broadcastToAll('[FF7700]Importer: Request timed out after ' .. elapsed .. 's[-]\n[FFFFFF]' .. requestInfo .. '[-]\n[77FF77]Moving to next request...[-]', {1, 0.5, 0})
+      
+      -- Clear the hung request and move to next
+      if failedRequest.text then
+        failedRequest.text()  -- Clean up the text indicator
+      end
+      table.remove(Importer.request, 1)
+      requestStartTime = nil
+      
+      -- Process next request
+      Importer()
+    end
+  end
+end
+
+-- Start the timeout monitor
+function startTimeoutMonitor()
+  Wait.time(function()
+    checkRequestTimeout()
+    startTimeoutMonitor()  -- Reschedule next check
+  end, TIMEOUT_CHECK_INTERVAL)
+end
+
+function endLoop()if Importer.request[1]then Importer.request[1].text()table.remove(Importer.request,1)end requestStartTime=nil Importer()end
 function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'}
   if type(tbl)=='table'then timerParams.parameters=tbl end
   if type(tbl)=='number'then timerParams.delay=tbl*Tick
@@ -1372,6 +1419,9 @@ function onLoad(data)
   -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   printToAll(u, {0.9, 0.9, 0.9})
+  
+  -- Start the timeout monitor for hung requests
+  startTimeoutMonitor()
   
   registerModule()
   onChat('Scryfall clear back')
