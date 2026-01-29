@@ -64,7 +64,7 @@ When timeouts or network errors occurred, the error status was shown as "undefin
 
 **After (Fixed):**
 ```
-Scryfall API error (Timeout), retrying in 500ms (attempt 1/2)
+Scryfall API error (Timeout), retrying in 500ms (attempt 1/3)
 ```
 
 Now shows:
@@ -72,6 +72,7 @@ Now shows:
 - "HTTP 429" or "HTTP 503" for rate limit/server errors
 - "Network error" for other network issues
 - More detailed error context in logs
+- Correct retry attempt counter (1/3, 2/3, 3/3)
 
 #### 3. Log Spam (Fixed)
 
@@ -155,8 +156,8 @@ Invalid query, error cached to prevent repeated failed requests
 
 ### Timeout Pattern
 ```
-Scryfall API error (Timeout), retrying in 500ms (attempt 1/2)
-Scryfall API error (Timeout), retrying in 1000ms (attempt 2/2)
+Scryfall API error (Timeout), retrying in 500ms (attempt 1/3)
+Scryfall API error (Timeout), retrying in 1000ms (attempt 2/3)
 Scryfall timeout: https://api.scryfall.com/cards/random?q=... - timeout of 10000ms exceeded
 Random card 5 failed: Request timeout (timeout of 10000ms exceeded)
 ```
