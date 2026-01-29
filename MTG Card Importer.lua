@@ -9,7 +9,7 @@ self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 author = '76561198045776458'
 coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
-GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG%20Card%20Importer.lua'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/master/MTG%20Card%20Importer.lua'
 lang = 'en'
 
 -- ============================================================================
@@ -91,6 +91,12 @@ newText=setmetatable({
 
 --[[Variables]]
 local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new('https://i.stack.imgur.com/787gj.png',{})
+
+-- Request timeout tracking
+local requestStartTime = nil
+local REQUEST_TIMEOUT = 120  -- seconds before considering a request hung (increased for slow networks/large decks)
+local TIMEOUT_CHECK_INTERVAL = 15  -- seconds between timeout checks
+local timeoutMonitorActive = false  -- Prevents multiple monitor chains
 
 --Image Handler
 function trunkateURI(uri,q,s)
@@ -1195,6 +1201,8 @@ Importer=setmetatable({
       Player[qTbl.color].broadcast(msg)
     elseif t.request[1]then
       local tbl = t.request[1]
+      -- Set start time for timeout detection
+      requestStartTime = os.time()
       -- If URL is not Deck list then
       -- Custom Image Replace
       if tbl.url and tbl.mode ~= 'Back' then
@@ -1226,8 +1234,85 @@ local Usage = [[    [b]%s
 Type: Scryfall island https://your-image-url.com/image.jpg
 This fetches the card data (name, text, etc.) from Scryfall but uses your custom image.
 
+[b]Additional Commands:[/b]
+[b][0077ff]Scryfall help[/b]  [-][Show this help message]
+[b][0077ff]Scryfall hide[/b]  [-][Toggle chat message visibility (admin only)]
+[b][0077ff]Scryfall clear queue[/b]  [-][Reload importer and clear queue]
+[b][0077ff]Scryfall clear back[/b]  [-][Reset card back to default]
+
+[b]Auto-Recovery:[/b]
+The importer now automatically detects and recovers from hung requests.
+If a request takes longer than 2 minutes, it will automatically timeout and move to the next request.
+
 Modified by Sirin to work with custom backend.]]
-function endLoop()if Importer.request[1]then Importer.request[1].text()table.remove(Importer.request,1)end Importer()end
+
+-- Check for hung requests and auto-recover
+function checkRequestTimeout()
+  if Importer.request[1] and requestStartTime then
+    -- Capture timestamp locally to avoid race condition
+    local startTime = requestStartTime
+    local currentTime = os.time()
+    local elapsed = currentTime - startTime
+    
+    if elapsed >= REQUEST_TIMEOUT then
+      local failedRequest = Importer.request[1]
+      local playerColor = failedRequest.color or 'White'
+      local requestInfo = failedRequest.full or failedRequest.name or 'Unknown'
+      
+      log('[MTG Importer] Request timeout detected after ' .. elapsed .. 's: ' .. requestInfo)
+      broadcastToAll('[FF7700]Importer: Request timed out after ' .. elapsed .. 's[-]\n[FFFFFF]' .. requestInfo .. '[-]\n[77FF77]Moving to next request...[-]', {1, 0.5, 0})
+      
+      -- Clear the hung request and move to next
+      if failedRequest.text and type(failedRequest.text) == 'function' then
+        failedRequest.text()  -- Clean up the text indicator
+      end
+      table.remove(Importer.request, 1)
+      requestStartTime = nil
+      
+      -- Process next request
+      Importer()
+    end
+  end
+end
+
+-- Start the timeout monitor (only one instance)
+function startTimeoutMonitor()
+  if timeoutMonitorActive then
+    return  -- Already running, don't start another chain
+  end
+  
+  timeoutMonitorActive = true
+  
+  local function monitorLoop()
+    if not timeoutMonitorActive then
+      return  -- Stop if deactivated
+    end
+    
+    checkRequestTimeout()
+    
+    -- Schedule next check
+    Wait.time(monitorLoop, TIMEOUT_CHECK_INTERVAL)
+  end
+  
+  -- Start the monitoring loop
+  Wait.time(monitorLoop, TIMEOUT_CHECK_INTERVAL)
+end
+
+-- Stop the timeout monitor
+function stopTimeoutMonitor()
+  timeoutMonitorActive = false
+end
+
+function endLoop()
+  if Importer.request[1] then 
+    if Importer.request[1].text and type(Importer.request[1].text) == 'function' then
+      Importer.request[1].text()
+    end
+    table.remove(Importer.request,1)
+  end 
+  requestStartTime=nil 
+  Importer()
+end
 function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'}
   if type(tbl)=='table'then timerParams.parameters=tbl end
   if type(tbl)=='number'then timerParams.delay=tbl*Tick
@@ -1240,10 +1325,26 @@ function uNotebook(t,b,c)local p={index=-1,title=t,body=b or'',color=c or'Grey'}
   for i,v in ipairs(getNotebookTabs())do if v.title==p.title then p.index=i end end
   if p.index<0 then addNotebookTab(p)else editNotebookTab(p)end return p.index end
 function uVersion(wr)
+  -- Check if WebRequest failed
+  if wr.is_error then
+    log('[MTG Importer] Update check failed - WebRequest error: ' .. tostring(wr.error))
+    registerModule()
+    return
+  end
+  
+  -- Check if we got valid text response
+  if not wr.text or wr.text == '' then
+    log('[MTG Importer] Update check failed - Empty response from GitHub')
+    registerModule()
+    return
+  end
+  
+  -- Try to parse version from response
   local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
   
   if not v then
-    broadcastToAll('[MTG Importer] Could not check for updates', {1, 0.5, 0})
+    log('[MTG Importer] Update check failed - Could not parse version from GitHub response')
+    log('Response preview: ' .. wr.text:sub(1, 200))
     registerModule()
     return
   end
@@ -1347,15 +1448,20 @@ function onLoad(data)
   uNotebook('SHelp', Usage)
   local u = Usage:gsub('\n\n.*', '\nFull capabilities listed in Notebook: SHelp')
   u = u .. '\n[ffffff]What\'s New: Modified for custom backend support'
-  u = u .. '\n[77ff00]Backend: ' .. BACKEND_URL
-  u = u .. '\n[7777ff]Auto-update: ' .. (AUTO_UPDATE_ENABLED and 'Enabled' or 'Disabled')
+  -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   printToAll(u, {0.9, 0.9, 0.9})
+  
+  -- Start the timeout monitor for hung requests
+  startTimeoutMonitor()
   
   registerModule()
   onChat('Scryfall clear back')
 end
 function onDestroy()
+  -- Stop the timeout monitor to prevent orphaned callbacks
+  stopTimeoutMonitor()
+  
   for _, o in pairs(textItems) do
     if o ~= nil then
       o.destruct()
