@@ -717,7 +717,6 @@ app.get('/random', randomLimiter, async (req, res) => {
           console.log(`Fetching ${numCards - 1} additional random cards (logs suppressed)...`);
           const cardPromises = [];
           const fetchStartTime = Date.now();
-          let failedCount = 0;
           
           for (let i = 1; i < numCards; i++) {
             // Stagger request starts slightly to spread load without blocking
@@ -728,7 +727,6 @@ app.get('/random', randomLimiter, async (req, res) => {
                   const scryfallCard = await scryfallLib.getRandomCard(q, true);
                   resolve(scryfallCard);
                 } catch (error) {
-                  failedCount++;
                   console.warn(`Random card ${i + 1} failed: ${error.message}`);
                   resolve(null);
                 }
@@ -737,6 +735,10 @@ app.get('/random', randomLimiter, async (req, res) => {
             cardPromises.push(promise);
           }
           const results = await Promise.all(cardPromises);
+          
+          // Calculate failures from results
+          const failedCount = results.filter(card => card === null).length;
+          
           results.forEach(card => {
             if (card) cards.push(card);
           });
