@@ -314,7 +314,6 @@ function setCard(wr,qTbl,originalData)
             setCard(request, qTbl, json)
           end
         end)
-			end
 
       elseif json.lang==lang then
         Card(json, qTbl)
