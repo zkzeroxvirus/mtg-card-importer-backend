@@ -94,8 +94,8 @@ local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new('http
 
 -- Request timeout tracking
 local requestStartTime = nil
-local REQUEST_TIMEOUT = 120  -- seconds before considering a request hung (increased for slow networks/large decks)
-local TIMEOUT_CHECK_INTERVAL = 15  -- seconds between timeout checks
+local REQUEST_TIMEOUT = 7  -- seconds before considering a request hung
+local TIMEOUT_CHECK_INTERVAL = 5  -- seconds between timeout checks
 local timeoutMonitorActive = false  -- Prevents multiple monitor chains
 
 --Image Handler
