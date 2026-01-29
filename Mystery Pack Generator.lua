@@ -1,703 +1,555 @@
--- ============================================================================
--- MTG Mystery Pack Generator for Tabletop Simulator
--- ============================================================================
--- Generates random booster packs using the backend API
+-----------------------------------------------------------------------
+-- Global variable for the card back image URL:
+backURL = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
+-- Backend Configuration
+BACKEND_URL = "https://mtg-card-importer-backend.onrender.com"
 
+-- Relative anchor reused from Start Token
+SPAWN_BUTTON_LOCAL = Vector{-4.2, 0, -3.9}
+SPAWN_HEIGHT_OFFSET = 2
+
+-- Anchor state
+lastAnchorPos = nil
+lastAnchorRot = nil
+lastAnchorWorld = nil
+
+-- Spawning state to prevent duplicate requests
+isSpawning = false
+spawnIndicator = nil
+
+-- Helper to show spawning feedback
+function showSpawningText(pos, text, rot)
+    if spawnIndicator then
+        spawnIndicator.destruct()
+    end
+    spawnIndicator = spawnObject({
+        type = '3DText',
+        position = pos,
+        rotation = rot or {90, 0, 0}
+    })
+    spawnIndicator.TextTool.setValue(text)
+    spawnIndicator.TextTool.setFontSize(100)
+end
+
+-- Helper to clean up spawning text
+function clearSpawningText()
+    if spawnIndicator then
+        spawnIndicator.destruct()
+        spawnIndicator = nil
+    end
+end
+
+--------------------------------------------------------------------------
 function onLoad()
-  -- ============================================================================
-  -- Configuration
-  -- ============================================================================
-  
-  -- Customize card-back image (must be from allowed domains: Steam CDN, Imgur)
-  backURL = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
-  -- Backend URL - change this to your deployed backend URL
-  -- For local testing: 'http://localhost:3000/'
-  -- For production: Your deployed URL with trailing slash
-  backendURL = 'https://mtg-card-importer-backend.onrender.com/'
+    local item = self
 
-  -- Set code for booster pack generation
-  setCode = 'Mystery'
-  -- Examples of other sets:
-  -- setCode = 'KLM'
-  -- setCode = 'STX'
-  -- setCode = 'ZNR'
 
-  cardStackName = setCode .. " Booster"
-  cardStackDescription = ""
-
-  -- Internal state (don't change these)
-  nBooster = 0
-  boosterDats = {}
+    item.createButton({
+        label = "Spawn Commanders",  -- Button text
+        click_function = "spawnRandomCommanders",  -- Function to call when clicked
+        function_owner = self,  -- The owner of this button
+        position = {4.2, 0, -3.9},  -- Position of the button relative to the item (adjust as needed)
+        rotation = {0, 0, 0},  -- Rotation (if necessary)
+        width = 2000,  -- Width of the button (adjust based on item size)
+        height = 450,  -- Height of the button (adjust based on item size)
+        font_size = 225,  -- Font size for the button label
+        scale = {1, 1, 1}  -- Scale of the button (optional)
+    })
 end
 
--- ============================================================================
--- URL Helper Functions
--- ============================================================================
+-----------------------------------------------------------------------
+-- SPAWN ANCHOR
+-----------------------------------------------------------------------
+function getSpawnAnchor()
+    local pos = self.getPosition()
+    local rot = self.getRotation()
 
-local function URLencode(str)
-  if str then
-    str = str:gsub("\n", "\r\n")
-    str = str:gsub("([^%w %-%_%.%~])", function(c)
-      return string.format("%%%02X", string.byte(c))
-    end)
-    str = str:gsub(" ", "+")
-  end
-  return str
-end
+    local moved = (not lastAnchorPos) or math.abs(pos.x - lastAnchorPos.x) > 0.001 or math.abs(pos.y - lastAnchorPos.y) > 0.001 or math.abs(pos.z - lastAnchorPos.z) > 0.001
+    local rotated = (not lastAnchorRot) or math.abs(rot.x - lastAnchorRot.x) > 0.001 or math.abs(rot.y - lastAnchorRot.y) > 0.001 or math.abs(rot.z - lastAnchorRot.z) > 0.001
 
-local function makeUrl(query)
-  local base = backendURL:gsub('/$', '')
-  return base .. '/random?q=' .. URLencode(query)
-end
-
---------------------------------------------------------------------------------
----- Booster Set Lookup Function
----- should be correct for all sets?
----- if not add special cases e.g. using the set:lower()=='mystery' example
---------------------------------------------------------------------------------
-local function apiSet(set)
-  return makeUrl('is:booster s:'..set..' game:paper')
-end
-function rarity(m,r,u)
-  if math.random(1,m or 36)==1 then return'r:mythic'
-  elseif math.random(1,r or 8)==1 then return'r:rare'
-  elseif math.random(1,u or 4)==1 then return'r:uncommon'
-  else return'r:common'end end
-function typeCo(p,t)local n=math.random(#p-1,#p)for i=13,#p do if n==i then p[i]=p[i]..'+'..t else p[i]=p[i]..'+-('..t..')'end end return p end
-
-local Booster=setmetatable({
-  dom=function(p)return typeCo(p,'t:legendary')end,
-  war=function(p)return typeCo(p,'t:planeswalker')end,
-  znr=function(p)return typeCo(p,'t:land+(is:spell+or+pathway)')end,
-  tsp='tsb',mb1='fmb1',mh2='h1r',bfz='exp',ogw='exp',kld='mps',aer='mps',akh='mp2',hou='mp2',stx='sta'
-},{__call=function(t,set,n)
-  local pack,u={},apiSet(set)
-  u=u:gsub('%+s:%(','+(')
-  if not n and t[set]and type(t[set])=='function'then
-    return t[set](t(set,true))
-  else
-    for c in('wubrg'):gmatch('.')do table.insert(pack,u..'r:common+c>='..c)end
-    for i=1,6 do table.insert(pack,u..'r:common+-t:basic')end
-    --masterpiece math
-    if not n and((t[set]and math.random(1,144)==1)or('tsp mb1 mh2'):find(set))then
-      pack[#pack]=backendURL..'/random?q=is:booster+s:'..t[set]end
-    for i=1,3 do table.insert(pack,u..'r:uncommon')end
-    table.insert(pack,u..rarity(8,1))
-    return pack
-  end
-end})
-
---ReplacementSlot
-function rSlot(p,s,a,b)for i,v in pairs(p)do if i~=6 then p[i]=v..a else p[i]=backendURL..'/random?q=is:booster+s:'..s..'+'..rarity()..b end end return p end
-
---Weird Boosters
-Booster['mystery']=function()
-  urlTable={}
-  -- MYSTERY BOOSTER (set mb1)
-  local base='set:mb1'
-  -- slot 1-10: each Convention pack has 2 commons/uncommons of each color
-  for _,c in pairs({'w','u','b','r','g'}) do
-    table.insert(urlTable,makeUrl(base..' r<rare c='..c))
-    table.insert(urlTable,makeUrl(base..' r<rare c='..c))
-  end
-  -- slot 11: 1 multicolored common/uncommon
-  table.insert(urlTable,makeUrl(base..' c:m r<rare'))
-  -- slot 12: 1 common/uncommon artifact/land
-  table.insert(urlTable,makeUrl(base..' c:c r<rare'))
-  -- slot 13: 1 rare/mythic rare with the M15 card frame
-  table.insert(urlTable,makeUrl(base..' r>=rare frame:2015'))
-  -- slot 14: one pre-M15 card in its original frame
-  table.insert(urlTable,makeUrl(base..' r>=rare -frame:2015'))
-  -- slot 15: a pretend "playtest card" in the special slot that seems more like part of an Un-set
-  table.insert(urlTable,makeUrl('set:cmb1'))
-  return urlTable
-end
-
-Booster['stx']=function()
-  local pack,u={},apiSet('stx')
-  -- 1 mystical archive card  (Uncommon, Rare, or Mythic Rare, 50% chance japanese)
-  if math.random(2)==1 then table.insert(pack,backendURL..'/random?q=set:sta+r>common+lang:en')
-  else table.insert(pack,backendURL..'/random?q=set:sta+r>common+lang:ja') end
-  table.insert(pack,u..'t:lesson+-r:u')             -- 1 lesson card (Common, Rare, or Mythic Rare)
-  table.insert(pack,u..rarity(8,1))                 -- 1 rare (7/8 chance) or mythic rare (1/8 chance)
-  for i=1,3 do table.insert(pack,u..'r:u') end      -- 3 uncommons
-  for _,c in pairs({'w','u','b','r','g'}) do table.insert(pack,u..'r:c+c:'..c) end              -- 8 commons
-  for i=1,3 do table.insert(pack,u..'r:c+-t:basic') end
-  if math.random(3)==1 then table.insert(pack,u) else table.insert(pack,u..'r:c+-t:basic') end  -- 33% chance foil of any rarity (66% chance another common)
-  return pack
-end
-
-Booster['2xm']=function(p)p[11]=p[#p]for i=9,10 do p[i]=backendURL..'/random?q=is:booster+s:2xm'..'+'..rarity()end return p end
-for s in('isd dka soi emn'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-is:transform','+is:transform')end end
-for s in('mid'):gmatch('%S+')do--Crimson Moon
-  Booster[s]=function(p)local n=math.random(#p-1,#p)for i,v in pairs(p)do if i==6 or i==n then p[i]=p[i]..'+is:transform'else p[i]=p[i]..'+-is:transform'end end return p end end
-for s in('cns cn2'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-wm:conspiracy','+wm:conspiracy')end end
-for s in('rav gpt dis rtr gtc dgm grn rna'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-t:land','+t:land+-t:basic')end end
-for s in('ice all csp mh1 khm'):gmatch('%S+')do
-  Booster[s]=function(p)p[6]=backendURL..'/random?q=is:booster+s:'..s..'+t:basic+t:snow'return p end end
-
---Custom Booster Packs
-Booster.standard=function(qTbl)
-  local pack,u={},backendURL..'/random?q=f:standard+'
-  for c in ('wubrg'):gmatch('.')do
-    table.insert(pack,u..'r:common+c:'..c)end
-  for i=1,5 do table.insert(pack,u..'r:common+-t:basic')end
-  for i=1,3 do table.insert(pack,u..'r:uncommon')end
-  table.insert(pack,u..rarity(8,1))
-  table.insert(pack,u..'t:basic')
-  table.insert(pack,backendURL..'/random?q=(set:tafr+or+set:tstx+or+set:tkhm+or+set:tznr+or+set:sznr+or+set:tm21+or+set:tiko+or+set:tthb+or+set:teld)')
-  for i=#pack-1,#pack do
-    if math.random(1,2)==1 then
-      pack[i]=u..'(border:borderless+or+frame:showcase+or+frame:extendedart+or+set:plist+or+set:sta)'
-    end end
-  return pack end
-Booster.conspiracy=function(qTbl)--wubrgCCCCCTUUURT
-  local p=Booster('(s:cns+or+s:cn2)')
-  local z=p[#p]:gsub('r:%S+',rarity(9,6,3))
-  table.insert(p,z)
-  p[6]=p[math.random(11,12)]
-  for i,s in pairs(p)do
-    if i==6 or i==#p then
-      p[i]=p[i]..'+wm:conspiracy'
-    else p[i]=p[i]..'+-wm:conspiracy'end end
-  return p end
-Booster.innistrad=function(qTbl)--wubrgDCCCCUUUDRD
-  local p=Booster('(s:isd+or+s:dka+or+s:avr+or+s:soi+or+s:emn+or+s:mid)')
-  local z=p[#p]:gsub('r:%S+',rarity(8,1))
-  table.insert(p,z)
-  p[11]=p[12]
-  for i,s in pairs(p)do
-    if i==6 or i==#p or i==#p-2 then
-      p[i]=p[i]..'+is:transform'
-    else p[i]=p[i]..'+-is:transform'end end
-  return p end
-Booster.ravnica=function(qTbl)--wubrgLmmmCCUUURL
-  local l,p='t:land+-t:basic',Booster('(s:rav+or+s:gpt+or+s:dis+or+s:rtr+or+s:gtc+or+s:dgm+or+s:grn+or+s:rna)')
-  table.insert(p,p[#p])
-  for i=7,9 do p[i]=p[6]..'+id>=2'end
-  for i,s in pairs(p)do
-    if i==6 or i==#p then
-      p[i]=p[i]:gsub('r:%S+',rarity(9,6,3))..'+'..l
-    else p[i]=p[i]..'+-'..l end end
-  return p end
-
-function getScryfallQueryTable()
-  urlTable=Booster(setCode:lower())
-  return urlTable
-end
-
---------------------------------------------------------------------------------
---------------------------------------------------------------------------------
--- when a booster is taken out from the box, start scryfall query and replace booster contents
-function onObjectLeaveContainer(container, leave_object)
-  if container ~= self then return end
-
-  leave_object.setName(cardStackName)
-
-  nBooster=nBooster+1
-  local boosterN=nBooster
-
-  urlTable=getScryfallQueryTable()
-  getDeckDat(urlTable,boosterN)
-
-  leave_object.createButton({
-    click_function='null',
-    function_owner=self,
-    label='generating\ncards',
-    position={0,0.5,0},
-    rotation={0,90,0},
-    scale={0.5,0.5,0.5},
-    width=0,
-    height=0,
-    font_size=1000,
-    color={0,0,0,0},
-    font_color={1,1,1,100},
-  })
-
-  Wait.condition(function()
-    leave_object.clearButtons()
-    Wait.condition(function()
-      bDat = leave_object.getData()
-      bDat.ContainedObjects={boosterDats[boosterN]}
-      leave_object.destruct()
-      spawnObjectData({data=bDat})
-    end,
-    function()
-      -- print('obj resting')
-      return leave_object.resting
-    end)
-  end,function()
-    -- print('nil data')
-    return boosterDats[boosterN]~=nil
-  end)
+    if moved or rotated or not lastAnchorWorld then
+        local anchorLocal = Vector{SPAWN_BUTTON_LOCAL.x, SPAWN_BUTTON_LOCAL.y + SPAWN_HEIGHT_OFFSET, SPAWN_BUTTON_LOCAL.z}
+        lastAnchorWorld = self.positionToWorld(anchorLocal)
+        lastAnchorPos = pos
+        lastAnchorRot = rot
+    end
+    return lastAnchorWorld
 end
 
 
--- takes in a table of scryfall query url's
--- queries scryfall for the data
--- generates TTS deckData object with the cards (saved to boosterDats[boosterN])
-function getDeckDat(urlTable,boosterN)
 
-  deckDat={
-    Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=180,rotZ=180,scaleX=1,scaleY=1,scaleZ=1},
-    Name="Deck",
-    Nickname=cardStackName,
-    Description=cardStackDescription,
-    DeckIDs={},
-    CustomDeck={},
-    ContainedObjects={},
-  }
 
-  local nLoading=0
-  local nLoaded=0
+---------------------------------------------------------------------------
+-- spawnRandomCommanders spawns 5 random commander cards with a 1-second delay each.
+-- All cards are spawned at the same position (startPos) to form a pile.
+---------------------------------------------------------------------------
+function spawnRandomCommanders()
+    if isSpawning then
+        printToAll("Already spawning commanders... please wait!", {1, 1, 0})
+        return
+    end
+    
+    isSpawning = true
+    self.removeButton(0)  -- removes the button with index 0
+    local commanderCount = 5
+    local startPos = getSpawnAnchor()
+    
+    local rot = self.getRotation()
+    showSpawningText(startPos + Vector{0, 3, 0}, "Spawning\nCommanders...", {0, rot.y + 180, 0})
+    
+    for i = 1, commanderCount do
+        local delay = (i - 1) * 1.0
+        Wait.time(function()
+            fetchRandomCommander(startPos, i)
+        end, delay)
+    end
 
-  for n,url in ipairs(urlTable) do
-    nLoading=nLoading+1
+    -- Create button after all commanders have spawned
+    Wait.time(function()
+        clearSpawningText()
+        isSpawning = false
+        createSpawnButton()
+    end, commanderCount)  -- Waits 5 seconds (since last spawn is at 4s)
+end
+function spawnRandomCommandersWO()
+    local commanderCount = 5
+    local startPos = getSpawnAnchor()
+    
+    for i = 1, commanderCount do
+        local delay = (i - 1) * 1.0
+        Wait.time(function()
+            fetchRandomCommander(startPos, i)
+        end, delay)
+    end
 
-    local attempts=0
-    local function fetchSlot()
-      WebRequest.get(url,function(wr)
-        if wr.is_error or not wr.text or wr.text:sub(1,1)=='<' then
-          if attempts<1 then
-            attempts=attempts+1
-            Wait.time(fetchSlot,0.5)
+    -- Create button after all commanders have spawned
+    Wait.time(function()
+        createSpawnButton()
+    end, commanderCount)  -- Waits 5 seconds (since last spawn is at 4s)
+end
+function createSpawnButton()
+    -- Clear any existing buttons to avoid duplicates after mulligans
+    self.clearButtons()
+
+    self.createButton({
+        label="Mulligan/50 Essence",
+        click_function="spawnRandomCommandersWO",
+        function_owner=self,
+        position={.9, 0, -1.9},
+        rotation={0, 0, 0},
+        width=1275,
+        height=200,
+        font_size=125
+    })
+
+    self.createButton({
+        click_function = "destroySelf",
+        function_owner = self,
+        label          = "X",
+        position       = {8.1, 0, -1.9},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 200,
+        height         = 200,
+        font_size      = 150,
+        color          = Color.Red
+
+    })
+    -- Color toggle buttons.
+    self.createButton({
+        click_function = "tB",
+        function_owner = self,
+        label          = "B",
+        position       = {8, 0, -1.4},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 300,
+        height         = 200,
+        font_size      = 150,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tW",
+        function_owner = self,
+        label          = "W",
+        position       = {7.3, 0, -1.4},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 300,
+        height         = 200,
+        font_size      = 150,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tU",
+        function_owner = self,
+        label          = "U",
+        position       = {6.6, 0, -1.4},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 300,
+        height         = 200,
+        font_size      = 150,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tG",
+        function_owner = self,
+        label          = "G",
+        position       = {5.9, 0, -1.4},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 300,
+        height         = 200,
+        font_size      = 150,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tR",
+        function_owner = self,
+        label          = "R",
+        position       = {5.2, 0, -1.4},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 300,
+        height         = 200,
+        font_size      = 150,
+        color          = Color.Grey
+    })
+    -- Create 22 numbered buttons arranged in two rows under the Random Cards button.
+    local buttonWidth = 325   -- button width in pixels
+    local buttonHeight = 325  -- button height in pixels
+    local numPerRow = 11      -- two rows of 11 buttons each
+    local startX = 1.65      -- adjust to center the row (for 11 buttons)
+    local startZ = -0.1        -- first row directly under Random Cards button
+    local spacingX = 0.65      -- horizontal spacing so buttons are touching
+    local spacingZ = -0.65     -- vertical spacing for second row
+    for i = 1, 22 do
+        local row = math.floor((i - 1) / numPerRow)
+        local col = (i - 1) % numPerRow
+        local posX = startX + col * spacingX
+        local posZ = startZ + row * spacingZ
+        self.createButton({
+            click_function = "spawnRandomCards" .. i,
+            function_owner = self,
+            label = tostring(i),
+            position = { posX, 0, posZ },
+            rotation = {0, 0, 0},
+            scale = {1, 1, 1},
+            width = buttonWidth,
+            height = buttonHeight,
+            font_size = 150,
+            color = Color.Grey
+        })
+        _G["spawnRandomCards" .. i] = function()
+            spawnRandomCardsByNumber(i)
+        end
+    end
+end
+
+
+   
+------------------------------------------------------------------------------------------
+
+function fetchRandomCommander(spawnPos, n)
+    local query = "is:commander game:paper"
+    local url = BACKEND_URL .. "/random?q=" .. URLencode(query)
+    WebRequest.get(url, function(response)
+        if response.is_error or not response.text then
+            print("Error fetching commander from backend.")
             return
-          end
-          print("Booster slot "..tostring(n).." fetch failed; url="..url)
-          nLoaded=nLoaded+1
-          return
         end
-
-        local cardDat=getCardDatFromJSON(wr.text,n)
-        if not cardDat then
-          if attempts<1 then
-            attempts=attempts+1
-            Wait.time(fetchSlot,0.5)
+        -- Check if response is valid JSON (not HTML)
+        if response.text:match("^%s*<") or response.text:match("<!DOCTYPE") then
+            print("Error: Backend returned HTML instead of JSON. Check backend URL.")
             return
-          end
-          print("Booster slot "..tostring(n).." decode failed; url="..url)
-          nLoaded=nLoaded+1
-          return
         end
-
-        deckDat.ContainedObjects[n]=cardDat
-        deckDat.DeckIDs[n]=cardDat.CardID      -- add card info into deckDat
-        deckDat.CustomDeck[n]=cardDat.CustomDeck[n]
-        nLoaded=nLoaded+1
-      end)
-    end
-
-    fetchSlot()
-  end
-
-  Wait.condition(function()   -- once all the queries come back from scryfall
-
-    -- check for doubles
-    local doubles=false
-    local names={}
-    for _,card in pairs(deckDat.ContainedObjects) do
-      for _,prevName in pairs(names) do
-        if card.Nickname==prevName then
-          doubles=true
+        local cardDat = getCardDatFromJSON(response.text, n)
+        if cardDat then
+            spawnObjectData({ data = cardDat, position = spawnPos, rotation = self.getRotation() })
+        else
+            print("Error processing commander card data: " .. tostring(response.text))
         end
-      end
-      table.insert(names,card.Nickname)
-    end
-
-    local missing=false
-    for i=1,nLoading do
-      if not deckDat.ContainedObjects[i] then
-        missing=true
-        break
-      end
-    end
-
-    if doubles or missing then   -- just redo the search
-      getDeckDat(urlTable,boosterN)
-    else              -- update the boosterDats
-      boosterDats[boosterN]=deckDat
-    end
-  end,
-  function() return nLoading==nLoaded end)
-
+    end)
 end
 
---------------------------------------------------------------------------------
---------------------------------------------------------------------------------
---------------------------------------------------------------------------------
-
-function getCardDatFromJSON(json,n)
-
-  local c=JSONdecode(json)
-
-  c.face=''
-  c.oracle=''
-  local qual='large'
-
-  local imagesuffix=''
-  if c.image_status~='highres_scan' then      -- cache buster for low quality images
-    imagesuffix='?'..tostring(os.date("%x")):gsub('/', '')
-  end
-
-  --Check for card's spoiler image quality
-  --Oracle text Handling for Split then DFC then Normal
-  if c.card_faces and c.image_uris then
-    for i,f in ipairs(c.card_faces) do
-      if c.cmc then
-        f.name=f.name:gsub('"','')..'\n'..f.type_line..' '..c.cmc..'CMC'
-      else
-        f.name=f.name:gsub('"','')..'\n'..f.type_line..' '..f.cmc..'CMC'
-      end
-      if i==1 then cardName=f.name end
-      c.oracle=c.oracle..f.name..'\n'..setOracle(f)..(i==#c.card_faces and''or'\n')
-    end
-  elseif c.card_faces then
-    local f=c.card_faces[1]
-    if c.cmc then
-      cardName=f.name:gsub('"','')..'\n'..f.type_line..' '..c.cmc..'CMC DFC'
+---------------------------------------------------------------------------
+-- getCardDatFromJSON converts Scryfall JSON into a TTS card data table.
+-- Includes error checking for missing fields and Scryfall error objects.
+---------------------------------------------------------------------------
+function getCardDatFromJSON(json, n)
+    local c
+    if type(json) == "table" then
+        c = json
     else
-      cardName=f.name:gsub('"','')..'\n'..f.type_line..' '..f.cmc..'CMC DFC'
+        -- Check if string is HTML before attempting to decode
+        if type(json) == "string" and (json:match("^%s*<") or json:match("<!DOCTYPE")) then
+            print("Error: Received HTML instead of JSON. Backend may be unreachable.")
+            return nil
+        end
+        c = JSONdecode(json)
     end
-    c.oracle=setOracle(f)
-  else
-    cardName=c.name:gsub('"','')..'\n'..c.type_line..' '..c.cmc..'CMC'
-    c.oracle=setOracle(c)
-  end
-  local backDat=nil
-  --Image Handling
-  if c.card_faces and not c.image_uris then --DFC REWORKED for STATES!
-    local faceAddress=c.card_faces[1].image_uris.normal:gsub('%?.*',''):gsub('normal',qual)..imagesuffix
-    local backAddress=c.card_faces[2].image_uris.normal:gsub('%?.*',''):gsub('normal',qual)..imagesuffix
-    if faceAddress:find('/back/') and backAddress:find('/front/') then
-      local temp=faceAddress;faceAddress=backAddress;backAddress=temp
+    if not c then
+        print("Error: JSON decode returned nil for json: " .. tostring(json))
+        return nil
     end
-    c.face=faceAddress
-    local f=c.card_faces[2]
-    local name
-    if c.cmc then
-      name=f.name:gsub('"','')..'\n'..f.type_line..' '..c.cmc..'CMC DFC'
+    if c.object == "error" then
+        print("Error from Scryfall: " .. (c.details or "unknown error"))
+        return nil
+    end
+    if not (c.name or (c.card_faces and c.card_faces[1] and c.card_faces[1].name)) then
+        print("Error: Card data missing name field. JSON: " .. json)
+        return nil
+    end
+    local cardName = ""
+    c.face = ''
+    c.oracle = ''
+    local qual = 'large'
+    local imagesuffix = ''
+    if c.image_status ~= 'highres_scan' then
+        imagesuffix = '?' .. tostring(os.date("%x")):gsub('/', '')
+    end
+    if c.card_faces and c.image_uris then
+        for i, f in ipairs(c.card_faces) do
+            if c.cmc then
+                f.name = f.name:gsub('"', '') .. "\n" .. f.type_line .. ' ' .. c.cmc .. 'CMC'
+            else
+                f.name = f.name:gsub('"', '') .. "\n" .. f.type_line .. ' ' .. f.cmc .. 'CMC'
+            end
+            if i == 1 then
+                cardName = f.name
+            end
+            c.oracle = c.oracle .. f.name .. "\n" .. setOracle(f) .. (i == #c.card_faces and "" or "\n")
+        end
+    elseif c.card_faces then
+        local f = c.card_faces[1]
+        if c.cmc then
+            cardName = f.name:gsub('"', '') .. "\n" .. f.type_line .. ' ' .. c.cmc .. 'CMC DFC'
+        else
+            cardName = f.name:gsub('"', '') .. "\n" .. f.type_line .. ' ' .. f.cmc .. 'CMC DFC'
+        end
+        c.oracle = setOracle(f)
     else
-      name=f.name:gsub('"','')..'\n'..f.type_line..' '..f.cmc..'CMC DFC'
+        cardName = c.name:gsub('"', '') .. "\n" .. c.type_line .. ' ' .. c.cmc .. 'CMC'
+        c.oracle = setOracle(c)
     end
-    local oracle=setOracle(f)
-    local b=n+100
-    backDat={
-      Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,scaleX=1,scaleY=1,scaleZ=1},
-      Name="Card",
-      Nickname=name,
-      Description=oracle,
-      Memo=c.oracle_id,
-      CardID=b*100,
-      CustomDeck={[b]={FaceURL=backAddress,BackURL=backURL,NumWidth=1,NumHeight=1,Type=0,BackIsHidden=true,UniqueBack=false}},
+    local backDat = nil
+    if c.card_faces and not c.image_uris then
+        local faceAddress = c.card_faces[1].image_uris.normal:gsub('%?.*', ''):gsub('normal', qual) .. imagesuffix
+        local backAddress = c.card_faces[2].image_uris.normal:gsub('%?.*', ''):gsub('normal', qual) .. imagesuffix
+        if faceAddress:find('/back/') and backAddress:find('/front/') then
+            local temp = faceAddress; faceAddress = backAddress; backAddress = temp
+        end
+        c.face = faceAddress
+        local f = c.card_faces[2]
+        local name
+        if c.cmc then
+            name = f.name:gsub('"', '') .. "\n" .. f.type_line .. "\nCMC: " .. c.cmc .. " DFC"
+        else
+            name = f.name:gsub('"', '') .. "\n" .. f.type_line .. "\nCMC: " .. f.cmc .. " DFC"
+        end
+        local oracle = setOracle(f)
+        local b = n + 100
+        backDat = {
+            Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
+            Name = "Card",
+            Nickname = name,
+            Description = oracle,
+            Memo = c.oracle_id,
+            CardID = b * 100,
+            CustomDeck = { [b] = { FaceURL = backAddress, BackURL = backURL, NumWidth = 1, NumHeight = 1, Type = 0, BackIsHidden = true, UniqueBack = false } },
+        }
+    elseif c.image_uris then
+        c.face = c.image_uris.normal:gsub('%?.*', ''):gsub('normal', qual) .. imagesuffix
+        if cardName:lower():match('geralf') then
+            c.face = c.image_uris.normal:gsub('%?.*', ''):gsub('normal', 'png'):gsub('jpg', 'png') .. imagesuffix
+        end
+    end
+    local cardDat = {
+        Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
+        Name = "Card",
+        Nickname = cardName,
+        Description = c.oracle,
+        Memo = c.oracle_id,
+        CardID = n * 100,
+        CustomDeck = { [n] = { FaceURL = c.face, BackURL = backURL, NumWidth = 1, NumHeight = 1, Type = 0, BackIsHidden = true, UniqueBack = false } },
     }
-  elseif c.image_uris then
-    c.face=c.image_uris.normal:gsub('%?.*',''):gsub('normal',qual)..imagesuffix
-    if cardName:lower():match('geralf') then
-      c.face=c.image_uris.normal:gsub('%?.*',''):gsub('normal','png'):gsub('jpg','png')..imagesuffix
+    if backDat then
+        cardDat.States = { [2] = backDat }
     end
-  end
-
-  local cardDat={
-    Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,scaleX=1,scaleY=1,scaleZ=1},
-    Name="Card",
-    Nickname=cardName,
-    Description=c.oracle,
-    Memo=c.oracle_id,
-    CardID=n*100,
-    CustomDeck={[n]={FaceURL=c.face,BackURL=backURL,NumWidth=1,NumHeight=1,Type=0,BackIsHidden=true,UniqueBack=false}},
-  }
-
-  if backDat then
-    cardDat.States={[2]=backDat}
-  end
-  return cardDat
+    return cardDat
 end
 
-
-function setOracle(c)local n='\n[b]'
-  if c.power then
-    n=n..c.power..'/'..c.toughness
-  elseif c.loyalty then
-    n=n..tostring(c.loyalty)
-  else
-    n=false
-  end
-  return c.oracle_text..(n and n..'[/b]'or'')
+---------------------------------------------------------------------------
+-- setOracle appends power/toughness or loyalty to the oracle text.
+---------------------------------------------------------------------------
+function setOracle(c)
+    local n = "\n[b]"
+    if c.power then
+        n = n .. c.power .. '/' .. c.toughness
+    elseif c.loyalty then
+        n = n .. tostring(c.loyalty)
+    else
+        n = false
+    end
+    return (c.oracle_text or "") .. (n and n .. "[/b]" or "")
 end
 
---------------------------------------------------------------------------------
--- pie's manual "JSONdecode" for scryfall's "object":"card"
---------------------------------------------------------------------------------
-
-normal_card_keys={
-  'object',
-  'id',
-  'oracle_id',
-  'name',
-  'lang',
-  'layout',
-  'image_status',
-  'image_uris',
-  'mana_cost',
-  'cmc',
-  'type_line',
-  'oracle_text',
-  'loyalty',
-  'power',
-  'toughness',
-  'loyalty',
-  'legalities',
-  'set',
-  'rulings_uri',
-  'prints_search_uri',
-  'collector_number'
-}
-
-image_uris_keys={    -- "image_uris":{
-  'small',
-  'normal',
-  'large',
-  'png',
-  'art_crop',
-  'border_crop',
-}
-
-legalities_keys={    -- "legalities":{
-  'standard',
-  'future',
-  'historic',
-  'gladiator',
-  'pioneer',
-  'modern',
-  'legacy',
-  'pauper',
-  'vintage',
-  'penny',
-  'commander',
-  'brawl',
-  'duel',
-  'oldschool',
-  'premodern',
-}
-
-related_card_keys={     -- "all_parts":[{"object":"related_card",
-  'id',
-  'component',
-  'name',
-  'type_line',
-  'uri',
-}
-
-card_face_keys={        -- "card_faces":[{"object":"card_face",
-  'name',
-  'mana_cost',
-  'cmc',
-  'type_line',
-  'oracle_text',
-  'power',
-  'toughness',
-  'loyalty',
-  'image_uris',
-}
-
---------------------------------------------------------------------------------
---------------------------------------------------------------------------------
+---------------------------------------------------------------------------
+-- Simple JSONdecode wrapper.
+---------------------------------------------------------------------------
 function JSONdecode(txt)
-  local txtBeginning = txt:sub(1,16)
-  local jsonType = txtBeginning:match('{"object":"(%w+)"')
-
-  -- not scryfall? use normal JSON.decode
-  if not(jsonType=='card' or jsonType=='list') then
     return JSON.decode(txt)
-  end
+end
 
-  ------------------------------------------------------------------------------
-  -- parse list: extract each card, and parse it separately
-  -- used when one wants to decode a whole list
-  if jsonType=='list' then
-    local txtBeginning = txt:sub(1,80)
-    local nCards=txtBeginning:match('"total_cards":(%d+)')
-    if nCards==nil then
-      return JSON.decode(txt)
+---------------------------------------------------------------------------
+-- URLencode helper function.
+---------------------------------------------------------------------------
+function URLencode(str)
+    if (str) then
+        str = str:gsub("\n", "\r\n")
+        str = str:gsub("([^%w ])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+        str = str:gsub(" ", "+")
     end
-    local cardStart=0
-    local cardEnd=0
-    local cardDats = {}
-    for i=1,nCards do     -- could insert max number cards to parse here
-      cardStart=string.find(txt,'{"object":"card"',cardEnd+1)
-      cardEnd = findClosingBracket(txt,cardStart)
-      local cardDat = JSONdecode(txt:sub(cardStart,cardEnd))
-      table.insert(cardDats,cardDat)
+    return str    
+end
+-------------------------------------------------------------
+---------------------------------------------------------------------------
+-- Color toggle functions
+---------------------------------------------------------------------------
+function tB()
+    Black = not Black
+    local newColor = Black and Color.Black or Color.Grey
+    self.editButton({ index = 2, color = newColor })
+    printToAll("Black is now " .. tostring(Black))
+end
+
+function tW()
+    White = not White
+    local newColor = White and Color.White or Color.Grey
+    self.editButton({ index = 3, color = newColor })
+    printToAll("White is now " .. tostring(White))
+end
+
+function tU()
+    Blue = not Blue
+    local newColor = Blue and Color.Blue or Color.Grey
+    self.editButton({ index = 4, color = newColor })
+    printToAll("Blue is now " .. tostring(Blue))
+end
+
+function tG()
+    Green = not Green
+    local newColor = Green and Color.Green or Color.Grey
+    self.editButton({ index = 5, color = newColor })
+    printToAll("Green is now " .. tostring(Green))
+end
+
+function tR()
+    Red = not Red
+    local newColor = Red and Color.Red or Color.Grey
+    self.editButton({ index = 6, color = newColor })
+    printToAll("Red is now " .. tostring(Red))
+end
+
+---------------------------------------------------------------------------
+-- spawnRandomCards spawns 22 random cards (default) using the strict card identity query.
+---------------------------------------------------------------------------
+function spawnRandomCards()
+    spawnRandomCardsByNumber(22)
+end
+
+---------------------------------------------------------------------------
+-- spawnRandomCardsByNumber spawns n random cards from any set that match the active card identity.
+-- It builds an OR query using the "id=" operator (for strictly mono-colored cards)
+-- and adds a clause "colorless type:artifact" so that only colorless artifacts are included.
+-- All cards are spawned at the same position (startPos) to form a pile.
+---------------------------------------------------------------------------
+function spawnRandomCardsByNumber(n)
+    if isSpawning then
+        printToAll("Already spawning cards... please wait!", {1, 1, 0})
+        return
     end
-    local dat = {object="list",total_cards=nCards,data=cardDats}    --ignoring has_more...
-    return dat
-  end
+    
+    isSpawning = true
+    local spawnPos = getSpawnAnchor()
+    local id = ""
+    if White then id = id .. "W" end
+    if Blue  then id = id .. "U" end
+    if Black then id = id .. "B" end
+    if Red   then id = id .. "R" end
+    if Green then id = id .. "G" end
+    if id == "" then id = "C" end
+printToAll(id)
+    
+    local rot = self.getRotation()
+    showSpawningText(spawnPos + Vector{0, 3, 0}, "Spawning\n" .. n .. " Cards...", {0, rot.y + 180, 0})
+    
+    local query = "id:" .. id .. " game:paper"
+    local url = BACKEND_URL .. "/random?q=" .. URLencode(query) .. "&count=" .. tostring(n)
 
-  ------------------------------------------------------------------------------
-  -- parse card
-
-  txt=txt:gsub('}',',}')    -- comma helps parsing last element in an array
-
-  local cardDat={}
-  local all_parts_i=string.find(txt,'"all_parts":')
-  local card_faces_i=string.find(txt,'"card_faces":')
-
-  -- if all_parts exist
-  if all_parts_i~=nil then
-    local st=string.find(txt,'%[',all_parts_i)
-    local en=findClosingBracket(txt,st)
-    local all_parts_txt = txt:sub(all_parts_i,en)
-    local all_parts={}
-    -- remove all_parts snip from the main text
-    txt=txt:sub(1,all_parts_i-1)..txt:sub(en+2,-1)
-    -- parse all_parts_txt for each related_card
-    st=1
-    local cardN=0
-    while st~=nil do
-      st=string.find(all_parts_txt,'{"object":"related_card"',st)
-      if st~=nil then
-        cardN=cardN+1
-        en=findClosingBracket(all_parts_txt,st)
-        local related_card_txt=all_parts_txt:sub(st,en)
-        st=en
-        local s,e=1,1
-        local related_card={}
-        for i,key in ipairs(related_card_keys) do
-          val,s=getKeyValue(related_card_txt,key,s)
-          related_card[key]=val
+    WebRequest.get(url, function(response)
+        if response.is_error or not response.text then
+            print("Error fetching card from backend.")
+            clearSpawningText()
+            isSpawning = false
+            return
         end
-        table.insert(all_parts,related_card)
-        if cardN>100 then break end   -- avoid inf loop if something goes strange
-      end
-      cardDat.all_parts=all_parts
-    end
-  end
 
-  -- if card_faces exist
-  if card_faces_i~=nil then
-    local st=string.find(txt,'%[',card_faces_i)
-    local en=findClosingBracket(txt,st)
-    local card_faces_txt = txt:sub(card_faces_i,en)
-    local card_faces={}
-    -- remove card_faces snip from the main text
-    txt=txt:sub(1,card_faces_i-1)..txt:sub(en+2,-1)
-
-    -- parse card_faces_txt for each card_face
-    st=1
-    local cardN=0
-    while st~=nil do
-      st=string.find(card_faces_txt,'{"object":"card_face"',st)
-      if st~=nil then
-        cardN=cardN+1
-        en=findClosingBracket(card_faces_txt,st)
-        local card_face_txt=card_faces_txt:sub(st,en)
-        st=en
-        local s,e=1,1
-        local card_face={}
-        for i,key in ipairs(card_face_keys) do
-          val,s=getKeyValue(card_face_txt,key,s)
-          card_face[key]=val
+        -- Check if response is valid JSON (not HTML)
+        if response.text:match("^%s*<") or response.text:match("<!DOCTYPE") then
+            print("Error: Backend returned HTML instead of JSON. Check backend URL.")
+            clearSpawningText()
+            isSpawning = false
+            return
         end
-        table.insert(card_faces,card_face)
-        if cardN>4 then break end   -- avoid inf loop if something goes strange
-      end
-      cardDat.card_faces=card_faces
-    end
-  end
 
-  -- normal card (or what's left of it after removing card_faces and all_parts)
-  st=1
-  for i,key in ipairs(normal_card_keys) do
-    val,st=getKeyValue(txt,key,st)
-    cardDat[key]=val
-  end
+        local decoded = JSONdecode(response.text)
+        if not decoded then
+            print("Error: Invalid JSON from backend")
+            clearSpawningText()
+            isSpawning = false
+            return
+        end
 
-  return cardDat
+        local list = nil
+        if decoded.object == "list" and decoded.data and type(decoded.data) == "table" then
+            list = decoded.data
+        elseif decoded.object == "card" or decoded.name then
+            list = { decoded }
+        elseif type(decoded) == "table" and decoded[1] then
+            list = decoded
+        else
+            print("Error: Invalid response format from backend")
+            clearSpawningText()
+            isSpawning = false
+            return
+        end
+
+        for i, cardData in ipairs(list) do
+            local delay = (i - 1) * 0.2
+            Wait.time(function()
+                local cardDat = getCardDatFromJSON(cardData, 1000 + i)
+                if cardDat then
+                    spawnObjectData({ data = cardDat, position = spawnPos, rotation = self.getRotation() })
+                else
+                    print("Error processing card data for card " .. tostring(i))
+                end
+                
+                -- Clear spawning text and flag on last card
+                if i == #list then
+                    Wait.time(function()
+                        clearSpawningText()
+                        isSpawning = false
+                    end, 0.5)
+                end
+            end, delay)
+        end
+    end)
 end
-
---------------------------------------------------------------------------------
--- returns data for one card at a time from a scryfall's "object":"list"
-function getNextCardDatFromList(txt,startHere)
-
-  if startHere==nil then
-    startHere=1
-  end
-
-  local cardStart=string.find(txt,'{"object":"card"',startHere)
-  if cardStart==nil then
-    -- print('error: no more cards in list')
-    startHere=nil
-    return nil,nil,nil
-  end
-
-  local cardEnd = findClosingBracket(txt,cardStart)
-  if cardEnd==nil then
-    -- print('error: no more cards in list')
-    startHere=nil
-    return nil,nil,nil
-  end
-
-  -- startHere is not a local variable, so it's possible to just do:
-  -- getNextCardFromList(txt) and it will keep giving the next card or nil if there's no more
-  startHere=cardEnd+1
-
-  local cardDat = JSONdecode(txt:sub(cardStart,cardEnd))
-
-  return cardDat,cardStart,cardEnd
-end
-
---------------------------------------------------------------------------------
-function findClosingBracket(txt,st)   -- find paired {} or []
-  if st==nil then return nil end
-  local ob,cb='{','}'
-  local pattern='[{}]'
-  if txt:sub(st,st)=='[' then
-    ob,cb='[',']'
-    pattern='[%[%]]'
-  end
-  local txti=st
-  local nopen=1
-  while nopen>0 do
-    if txti==nil then return nil end
-    txti=string.find(txt,pattern,txti+1)
-    if txt:sub(txti,txti)==ob then
-      nopen=nopen+1
-    elseif txt:sub(txti,txti)==cb then
-      nopen=nopen-1
-    end
-  end
-  return txti
-end
-
---------------------------------------------------------------------------------
-function getKeyValue(txt,key,st)
-  local str='"'..key..'":'
-  local st=string.find(txt,str,st)
-  local en=nil
-  local value=nil
-  if st~=nil then
-    if key=='image_uris' then     -- special case for scryfall's image_uris table
-      value={}
-      local s=st
-      for i,k in ipairs(image_uris_keys) do
-        local val,s=getKeyValue(txt,k,s)
-        value[k]=val
-      end
-      en=s
-    elseif txt:sub(st+#str,st+#str)~='"' then      -- not a string
-      en=string.find(txt,',"',st+#str+1)
-      value=tonumber(txt:sub(st+#str,en-1))
-    else                                           -- a string
-      en=string.find(txt,'",',st+#str+1)
-      value=txt:sub(st+#str+1,en-1):gsub('\\"','"'):gsub('\\n','\n'):gsub("\\u(%x%x%x%x)",function (x) return string.char(tonumber(x,16)) end)
-    end
-  end
-  if type(value)=='string' then
-    value=value:gsub(',}','}')    -- get rid of the previously inserted comma
-  end
-  return value,en
+function destroySelf()
+    self.destroy()
 end
