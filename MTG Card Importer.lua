@@ -1249,10 +1249,12 @@ Modified by Sirin to work with custom backend.]]
 -- Check for hung requests and auto-recover
 function checkRequestTimeout()
   if Importer.request[1] and requestStartTime then
+    -- Capture timestamp locally to avoid race condition
+    local startTime = requestStartTime
     local currentTime = os.time()
-    local elapsed = currentTime - requestStartTime
+    local elapsed = currentTime - startTime
     
-    if elapsed > REQUEST_TIMEOUT then
+    if elapsed >= REQUEST_TIMEOUT then
       local failedRequest = Importer.request[1]
       local playerColor = failedRequest.color or 'White'
       local requestInfo = failedRequest.full or failedRequest.name or 'Unknown'
