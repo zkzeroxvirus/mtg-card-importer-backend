@@ -280,6 +280,13 @@ function setOracle(c)local n='\n[b]'
 
 function setCard(wr,qTbl,originalData)
   if wr.text and wr.text ~= '' then
+    -- Check if response is HTML before attempting to decode
+    if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
+      Player[qTbl.color].broadcast('Backend returned HTML error. Check connection.',{1,0,0})
+      endLoop()
+      return
+    end
+    
     local json=JSON.decode(wr.text)
     
     if json and json.object=='card' then
@@ -307,6 +314,10 @@ function setCard(wr,qTbl,originalData)
 
 			elseif json.layout=='art_series'then
 				WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
+          if request.text:match('^%s*<') or request.text:match('<!DOCTYPE') then
+            Card(json,qTbl)
+            return
+          end
           local locale_json = JSON.decode(request.text)
           if locale_json.object=='error' then
             Card(json,qTbl)
@@ -319,6 +330,10 @@ function setCard(wr,qTbl,originalData)
         Card(json, qTbl)
       elseif json.lang=='en' then
         WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/'..lang,function(request)
+          if request.text:match('^%s*<') or request.text:match('<!DOCTYPE') then
+            Card(json,qTbl)
+            return
+          end
           local locale_json = JSON.decode(request.text)
           if locale_json.object=='error' then
             Card(json,qTbl)
@@ -376,6 +391,12 @@ function spawnList(wr,qTbl)
   uLog(wr.url)
   local txt=wr.text
   if txt then --PIE's Rework
+    -- Check if response is HTML
+    if txt:match('^%s*<') or txt:match('<!DOCTYPE') then
+      Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
+      endLoop()
+      return
+    end
     local jsonType = txt:sub(1,20):match('{"object":"(%w+)"')
     if jsonType=='list' then
       local nCards=txt:match('"total_cards":(%d+)')
@@ -514,7 +535,10 @@ function spawnDeckFromScryfall(wr,qTbl)
   qTbl.deck=#deck
   for i,u in ipairs(deck)do
     Wait.time(function()WebRequest.get(BACKEND_URL..'/cards/'..u,function(c)
-
+					if c.text:match('^%s*<') or c.text:match('<!DOCTYPE') then
+						WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
+						return
+					end
 					local t=JSON.decode(c.text)
 					if t.object~='card'then
 						WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
@@ -558,6 +582,10 @@ function spawnCSV(wr,qTbl)
   for i,u in ipairs(deck)do
     Wait.time(function()
                 WebRequest.get(u,function(c)
+                                   if c.text:match('^%s*<') or c.text:match('<!DOCTYPE') then
+                                     WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
+                                     return
+                                   end
                                    local t=JSON.decode(c.text)
                                    if t.object~='card'then
                                      if u:find('%?') then
@@ -891,6 +919,11 @@ Importer=setmetatable({
       encodedName = encodedName:gsub(' ','%%20')
     end
     WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
+        if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
+          Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
+          endLoop()
+          return
+        end
         local obj=JSON.decode(wr.text)
         if obj.object=='card' and obj.type_line and obj.type_line:match('Token') then
           -- Card is a token, find all unique tokens of this type (e.g., all Bird tokens)
@@ -912,6 +945,11 @@ Importer=setmetatable({
     -- Fetch the card via generic endpoint (all_parts already filtered to tokens/emblems)
     WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
       if wr.text and wr.text ~= '' then
+        if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
+          Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
+          endLoop()
+          return
+        end
         local json=JSON.decode(wr.text)
         
         -- Check if card has all_parts (tokens/emblems)
@@ -1026,6 +1064,11 @@ Importer=setmetatable({
 
   Rules=function(qTbl)
     WebRequest.get(BACKEND_URL..'/card/'..qTbl.name,function(wr)
+      if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
+        Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
+        endLoop()
+        return
+      end
       local cardDat=JSON.decode(wr.text)
       if cardDat.object=="error" then
         broadcastToAll(cardDat.details,{0.9,0.9,0.9})
@@ -1039,6 +1082,11 @@ Importer=setmetatable({
         end)
 
         WebRequest.get(proxyUrl,function(wr)
+          if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
+            broadcastToAll('Failed to fetch rulings.',{0.9,0.9,0.9})
+            endLoop()
+            return
+          end
           local data,text=JSON.decode(wr.text),'[00cc88]'
           if data.object=='list' then data=data.data end
 
@@ -1108,6 +1156,11 @@ Importer=setmetatable({
 		elseif #qTbl.name<5 then
       if qTbl.name==''then qTbl.name='ori'end
       WebRequest.get(BACKEND_URL..'/sets/'..qTbl.name,function(w)
+        if w.text:match('^%s*<') or w.text:match('<!DOCTYPE') then
+          Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
+          endLoop()
+          return
+        end
         local j=JSON.decode(w.text)
         if j.object=='set'then
           qTbl.url='Booster '..j.name
