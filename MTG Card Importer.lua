@@ -94,8 +94,9 @@ local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new('http
 
 -- Request timeout tracking
 local requestStartTime = nil
-local REQUEST_TIMEOUT = 60  -- seconds before considering a request hung
-local TIMEOUT_CHECK_INTERVAL = 10  -- seconds between timeout checks
+local REQUEST_TIMEOUT = 120  -- seconds before considering a request hung (increased for slow networks/large decks)
+local TIMEOUT_CHECK_INTERVAL = 15  -- seconds between timeout checks
+local timeoutMonitorActive = false  -- Prevents multiple monitor chains
 
 --Image Handler
 function trunkateURI(uri,q,s)
@@ -1241,7 +1242,7 @@ This fetches the card data (name, text, etc.) from Scryfall but uses your custom
 
 [b]Auto-Recovery:[/b]
 The importer now automatically detects and recovers from hung requests.
-If a request takes longer than 60 seconds, it will automatically timeout and move to the next request.
+If a request takes longer than 2 minutes, it will automatically timeout and move to the next request.
 
 Modified by Sirin to work with custom backend.]]
 
@@ -1260,7 +1261,7 @@ function checkRequestTimeout()
       broadcastToAll('[FF7700]Importer: Request timed out after ' .. elapsed .. 's[-]\n[FFFFFF]' .. requestInfo .. '[-]\n[77FF77]Moving to next request...[-]', {1, 0.5, 0})
       
       -- Clear the hung request and move to next
-      if failedRequest.text then
+      if failedRequest.text and type(failedRequest.text) == 'function' then
         failedRequest.text()  -- Clean up the text indicator
       end
       table.remove(Importer.request, 1)
@@ -1272,15 +1273,44 @@ function checkRequestTimeout()
   end
 end
 
--- Start the timeout monitor
+-- Start the timeout monitor (only one instance)
 function startTimeoutMonitor()
-  Wait.time(function()
+  if timeoutMonitorActive then
+    return  -- Already running, don't start another chain
+  end
+  
+  timeoutMonitorActive = true
+  
+  local function monitorLoop()
+    if not timeoutMonitorActive then
+      return  -- Stop if deactivated
+    end
+    
     checkRequestTimeout()
-    startTimeoutMonitor()  -- Reschedule next check
-  end, TIMEOUT_CHECK_INTERVAL)
+    
+    -- Schedule next check
+    Wait.time(monitorLoop, TIMEOUT_CHECK_INTERVAL)
+  end
+  
+  -- Start the monitoring loop
+  Wait.time(monitorLoop, TIMEOUT_CHECK_INTERVAL)
 end
 
-function endLoop()if Importer.request[1]then Importer.request[1].text()table.remove(Importer.request,1)end requestStartTime=nil Importer()end
+-- Stop the timeout monitor
+function stopTimeoutMonitor()
+  timeoutMonitorActive = false
+end
+
+function endLoop()
+  if Importer.request[1] then 
+    if Importer.request[1].text and type(Importer.request[1].text) == 'function' then
+      Importer.request[1].text()
+    end
+    table.remove(Importer.request,1)
+  end 
+  requestStartTime=nil 
+  Importer()
+end
 function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'}
   if type(tbl)=='table'then timerParams.parameters=tbl end
   if type(tbl)=='number'then timerParams.delay=tbl*Tick
@@ -1427,6 +1457,9 @@ function onLoad(data)
   onChat('Scryfall clear back')
 end
 function onDestroy()
+  -- Stop the timeout monitor to prevent orphaned callbacks
+  stopTimeoutMonitor()
+  
   for _, o in pairs(textItems) do
     if o ~= nil then
       o.destruct()
