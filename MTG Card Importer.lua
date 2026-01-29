@@ -9,7 +9,7 @@ self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 author = '76561198045776458'
 coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
-GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG%20Card%20Importer.lua'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/master/MTG%20Card%20Importer.lua'
 lang = 'en'
 
 -- ============================================================================
@@ -1246,10 +1246,26 @@ function uNotebook(t,b,c)local p={index=-1,title=t,body=b or'',color=c or'Grey'}
   for i,v in ipairs(getNotebookTabs())do if v.title==p.title then p.index=i end end
   if p.index<0 then addNotebookTab(p)else editNotebookTab(p)end return p.index end
 function uVersion(wr)
+  -- Check if WebRequest failed
+  if wr.is_error then
+    log('[MTG Importer] Update check failed - WebRequest error: ' .. tostring(wr.error))
+    registerModule()
+    return
+  end
+  
+  -- Check if we got valid text response
+  if not wr.text or wr.text == '' then
+    log('[MTG Importer] Update check failed - Empty response from GitHub')
+    registerModule()
+    return
+  end
+  
+  -- Try to parse version from response
   local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
   
   if not v then
-    -- Silently fail update check - no need to notify users
+    log('[MTG Importer] Update check failed - Could not parse version from GitHub response')
+    log('Response preview: ' .. wr.text:sub(1, 200))
     registerModule()
     return
   end
