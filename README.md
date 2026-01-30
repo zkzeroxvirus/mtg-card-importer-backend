@@ -104,7 +104,7 @@ Example: `GET /sets/dom`
 - Consumes: `{ "decklist": "2 Black Lotus\n4 Mountain", "back": "URL" }`
 - Returns: NDJSON (one TTS card object per line)
 
-**POST /build`**
+**POST `/build`**
 - Build deck with optional hand position (TTS spawning)
 - Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
 - Returns: NDJSON (one TTS card object per line)
@@ -150,7 +150,7 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 50)
 - `DEFAULT_CARD_BACK` — Default card back URL when not specified in requests
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
-- `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data; in Docker: /app/data)
+- `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data)
 
 ## Configuration
 
