@@ -22,65 +22,38 @@ This backend acts as a middleware between the Amuzet Card Importer (Tabletop Sim
 - Converts card data to Tabletop Simulator object formats
 - Provides convenient endpoints for deck building and card searching
 
-## Deployment Options
+## Deployment
 
-Two ready-to-use setups:
+### Quick Start
 
-### A) Render (API mode, no bulk data)
-- Best for quick cloud hosting; uses Scryfall API directly with rate limiting.
-- Steps (PowerShell on Windows):
-```powershell
-# Copy env template and set cloud-friendly defaults
-Copy-Item .env.example .env
-
-# For Render API mode, set USE_BULK_DATA=false
-(Get-Content .env) -replace 'USE_BULK_DATA=true','USE_BULK_DATA=false' | Set-Content .env
-
-# Commit and push; create a new Web Service on Render pointing at your repo
-# Env vars to set in Render Dashboard:
-# NODE_ENV=production
-# SCRYFALL_DELAY=50
-# USE_BULK_DATA=false
-# DEFAULT_CARD_BACK=<optional image URL>
+1. Copy the environment template:
+```bash
+cp .env.example .env
 ```
-- Render free tier may sleep after inactivity; bulk data is disabled to keep memory low.
 
-### B) Docker / Unraid (Bulk data mode)
-- Best for LAN speed or heavy usage; loads Scryfall Oracle bulk (~161MB compressed) into memory (~500MB).
-- Steps (PowerShell):
-```powershell
-# Copy env template
-Copy-Item .env.example .env
+2. Customize settings in `.env` as needed (see Configuration section below)
 
-# Ensure bulk data is enabled and stored in /app/data
-(Get-Content .env) -replace 'USE_BULK_DATA=true','USE_BULK_DATA=true' | Set-Content .env
-
-# Build and run with docker compose
-docker compose up -d
-
-# Watch logs for the first bulk download (1-2 minutes)
-docker logs -f mtg-card-importer-backend
+3. Install dependencies and start the server:
+```bash
+npm install
+npm start
 ```
-- For Unraid, place the repo in appdata, map ./data to /app/data, and expose port 3000 (or your chosen port).
-- First start downloads the bulk file once; subsequent restarts reuse the cached file.
 
-Minimal docker-compose.yml:
-```yaml
-services:
-	mtg-card-importer-backend:
-		build: .
-		container_name: mtg-card-importer-backend
-		ports:
-			- "3000:3000"
-		environment:
-			- NODE_ENV=production
-			- USE_BULK_DATA=true
-			- BULK_DATA_PATH=/app/data
-			- SCRYFALL_DELAY=50
-		volumes:
-			- ./data:/app/data
-		restart: unless-stopped
-```
+### Deployment Options
+
+**API Mode (No Bulk Data)**
+- Best for quick cloud hosting (e.g., Render, Heroku)
+- Uses Scryfall API directly with rate limiting
+- Set `USE_BULK_DATA=false` in environment variables
+- Lower memory usage
+- Note: Render free tier may sleep after inactivity
+
+**Bulk Data Mode**
+- Best for heavy usage or local hosting
+- Loads Scryfall Oracle bulk (~161MB compressed) into memory (~500MB)
+- Set `USE_BULK_DATA=true` in environment variables
+- Faster response times
+- First start downloads the bulk file once (1-2 minutes); subsequent restarts reuse the cached file
 
 ## API Endpoints
 
@@ -131,7 +104,7 @@ Example: `GET /sets/dom`
 - Consumes: `{ "decklist": "2 Black Lotus\n4 Mountain", "back": "URL" }`
 - Returns: NDJSON (one TTS card object per line)
 
-**POST /build`**
+**POST `/build`**
 - Build deck with optional hand position (TTS spawning)
 - Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
 - Returns: NDJSON (one TTS card object per line)
@@ -177,7 +150,7 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 50)
 - `DEFAULT_CARD_BACK` — Default card back URL when not specified in requests
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
-- `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data; in Docker: /app/data)
+- `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data)
 
 ## Configuration
 
