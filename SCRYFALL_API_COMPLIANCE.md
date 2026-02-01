@@ -34,8 +34,9 @@ Per Scryfall's requirements (enforced since August 2024), all API requests must 
 #### Global Request Queue
 - **Location**: `lib/scryfall.js` lines 7-46
 - All API requests go through a global queue that ensures sequential execution
-- Default delay: 50ms (configurable via `SCRYFALL_DELAY` environment variable)
+- Default delay: 100ms (configurable via `SCRYFALL_DELAY` environment variable)
 - Queue processes requests one at a time with enforced delays
+- Recommended minimum: 100ms (Scryfall suggests 50-100ms between requests)
 
 #### Retry Logic with Exponential Backoff
 - **Location**: `lib/scryfall.js` lines 64-97
@@ -143,7 +144,7 @@ async function test() {
 
 Environment variables for API compliance:
 
-- `SCRYFALL_DELAY`: Milliseconds between requests (default: 50)
+- `SCRYFALL_DELAY`: Milliseconds between requests (default: 100, recommended minimum: 100)
 - `USE_BULK_DATA`: Enable bulk data mode to reduce API calls (default: true)
 - `BULK_DATA_PATH`: Where to store bulk data files (default: ./data)
 
@@ -156,9 +157,10 @@ Scryfall API error (429), retrying in XXXms (attempt X/X)
 ```
 
 If you see frequent 429 errors, consider:
-1. Increasing `SCRYFALL_DELAY` to 100ms or higher
+1. Increasing `SCRYFALL_DELAY` to 150ms or higher
 2. Enabling bulk data mode (`USE_BULK_DATA=true`)
 3. Implementing additional caching at the application level
+4. Reducing the number of parallel requests in bulk operations
 
 ## Version History
 

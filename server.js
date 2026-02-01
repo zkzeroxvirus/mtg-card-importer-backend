@@ -717,9 +717,13 @@ app.get('/random', randomLimiter, async (req, res) => {
           console.log(`Fetching ${numCards - 1} additional random cards (logs suppressed)...`);
           const cardPromises = [];
           const fetchStartTime = Date.now();
+          const baseDelay = 100; // Base delay in ms between request starts
           
           for (let i = 1; i < numCards; i++) {
-            // Stagger request starts slightly to spread load without blocking
+            // Stagger request starts to spread load and avoid overwhelming rate limits
+            // Use linear staggering to space out requests evenly
+            const staggerDelay = i * baseDelay;
+            
             const promise = new Promise(resolve => {
               setTimeout(async () => {
                 try {
@@ -730,7 +734,7 @@ app.get('/random', randomLimiter, async (req, res) => {
                   console.warn(`Random card ${i + 1} failed: ${error.message}`);
                   resolve(null);
                 }
-              }, i * 15); // 15ms stagger between request initiations
+              }, staggerDelay);
             });
             cardPromises.push(promise);
           }
