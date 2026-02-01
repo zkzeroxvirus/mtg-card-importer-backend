@@ -60,6 +60,28 @@ const randomLimiter = rateLimit({
 app.use(cors());
 app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
 
+// Normalize errors from Scryfall/API calls into consistent JSON for the importer
+function normalizeError(error, defaultStatus = 502) {
+  let status = error?.response?.status;
+  if (!status) {
+    if (error?.code === 'ECONNABORTED') {
+      status = 504; // Gateway Timeout
+    } else if (error?.message && /not found/i.test(error.message)) {
+      status = 404;
+    } else {
+      status = defaultStatus;
+    }
+  }
+
+  const details =
+    error?.response?.data?.details ||
+    error?.response?.data?.error ||
+    error?.message ||
+    'Request failed';
+
+  return { status, details };
+}
+
 /**
  * Analyzes a Scryfall query and provides helpful hints for common syntax errors
  */
@@ -332,7 +354,45 @@ app.get('/card/:name', async (req, res) => {
     res.json(scryfallCard);
   } catch (error) {
     console.error('Error fetching card:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+
+    // Fuzzy recovery: if card not found, try autocomplete and fetch best suggestion
+    if (status === 404) {
+      try {
+        const suggestions = await scryfallLib.autocompleteCardName(name);
+        if (suggestions && suggestions.length > 0) {
+          const suggestion = suggestions[0];
+          try {
+            const corrected = await scryfallLib.getCard(suggestion, set || null);
+            corrected._corrected_name = suggestion;
+            corrected._original_name = name;
+            return res.json(corrected);
+          } catch (fallbackError) {
+            // If set-specific lookup failed, try without set
+            if (set) {
+              try {
+                const corrected = await scryfallLib.getCard(suggestion, null);
+                corrected._corrected_name = suggestion;
+                corrected._original_name = name;
+                return res.json(corrected);
+              } catch (e) {
+                // fall through to error response
+              }
+            }
+          }
+
+          const suggestionList = suggestions.slice(0, 5).join(', ');
+          return res.status(404).json({
+            object: 'error',
+            details: `Card not found: ${name}. Did you mean: ${suggestionList}?`
+          });
+        }
+      } catch (e) {
+        // Ignore autocomplete failures and return original error
+      }
+    }
+
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -354,7 +414,8 @@ app.get('/cards/:id', async (req, res) => {
     res.json(scryfallCard);
   } catch (error) {
     console.error('Error fetching card by ID:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -391,7 +452,8 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
     res.json(scryfallCard);
   } catch (error) {
     console.error('Error fetching card by set/number:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -770,7 +832,8 @@ app.get('/random', randomLimiter, async (req, res) => {
     // Note: Failed queries are now cached at the point of failure (single card or bulk)
     // This ensures the enhanced error message is what gets cached
     
-    res.status(error.response?.status || 400).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -825,7 +888,8 @@ app.get('/search', async (req, res) => {
     });
   } catch (error) {
     console.error('Error searching cards:', error.message);
-    res.status(500).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -851,7 +915,8 @@ app.get('/rulings/:name', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching rulings:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -873,7 +938,8 @@ app.get('/tokens/:name', async (req, res) => {
     res.json(tokens);
   } catch (error) {
     console.error('Error fetching tokens:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -900,7 +966,8 @@ app.get('/printings/:name', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching printings:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -922,7 +989,8 @@ app.get('/sets/:code', async (req, res) => {
     res.json(setData);
   } catch (error) {
     console.error('Error fetching set:', error.message);
-    res.status(404).json({ object: 'error', details: error.message });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
   }
 });
 
@@ -1008,11 +1076,8 @@ app.get('/proxy', async (req, res) => {
     
   } catch (error) {
     console.error('[Proxy] Error:', error.message);
-    res.status(error.status || 500).json({
-      object: 'error',
-      status: error.status || 500,
-      details: error.message
-    });
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details, status });
   }
 });
 
