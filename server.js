@@ -13,6 +13,10 @@ const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 
+// User-Agent for external API requests (version should match package.json)
+const packageVersion = require('./package.json').version;
+const USER_AGENT = `MTGCardImporterTTS/${packageVersion}`;
+
 // Security: Input validation constants
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
@@ -705,6 +709,7 @@ function extractDeckId(url, platform) {
       return match ? match[1] : null;
     } else if (platform === 'scryfall') {
       // https://scryfall.com/@{username}/decks/{deck-id}
+      // The username is matched but not captured (/@[^/]+/) as it's not needed for API calls
       const match = urlObj.pathname.match(/\/@[^/]+\/decks\/([a-zA-Z0-9-]+)/);
       return match ? match[1] : null;
     }
@@ -735,13 +740,29 @@ function detectPlatform(url) {
 }
 
 /**
+ * Helper function to parse Moxfield deck section (mainboard, commanders, companions)
+ * @param {Object} section - Moxfield section object with card names as keys
+ * @returns {Array} Array of {count, name} objects
+ */
+function parseMoxfieldSection(section) {
+  const cards = [];
+  if (section) {
+    for (const [cardName, cardData] of Object.entries(section)) {
+      const count = cardData.quantity || 1;
+      cards.push({ count, name: cardName });
+    }
+  }
+  return cards;
+}
+
+/**
  * Fetch deck from Moxfield
  */
 async function fetchMoxfieldDeck(deckId) {
   const url = `https://api.moxfield.com/v2/decks/all/${deckId}`;
   const response = await axios.get(url, {
     headers: {
-      'User-Agent': 'MTGCardImporterTTS/0.1.0',
+      'User-Agent': USER_AGENT,
       'Accept': 'application/json'
     },
     timeout: 15000
@@ -750,29 +771,10 @@ async function fetchMoxfieldDeck(deckId) {
   const data = response.data;
   const cards = [];
   
-  // Parse mainboard
-  if (data.mainboard) {
-    for (const [cardName, cardData] of Object.entries(data.mainboard)) {
-      const count = cardData.quantity || 1;
-      cards.push({ count, name: cardName });
-    }
-  }
-  
-  // Parse commanders
-  if (data.commanders) {
-    for (const [cardName, cardData] of Object.entries(data.commanders)) {
-      const count = cardData.quantity || 1;
-      cards.push({ count, name: cardName });
-    }
-  }
-  
-  // Parse companion
-  if (data.companions) {
-    for (const [cardName, cardData] of Object.entries(data.companions)) {
-      const count = cardData.quantity || 1;
-      cards.push({ count, name: cardName });
-    }
-  }
+  // Parse mainboard, commanders, and companions
+  cards.push(...parseMoxfieldSection(data.mainboard));
+  cards.push(...parseMoxfieldSection(data.commanders));
+  cards.push(...parseMoxfieldSection(data.companions));
   
   return cards;
 }
@@ -784,7 +786,7 @@ async function fetchArchidektDeck(deckId) {
   const url = `https://archidekt.com/api/decks/${deckId}/`;
   const response = await axios.get(url, {
     headers: {
-      'User-Agent': 'MTGCardImporterTTS/0.1.0',
+      'User-Agent': USER_AGENT,
       'Accept': 'application/json'
     },
     timeout: 15000
@@ -823,7 +825,7 @@ async function fetchTappedOutDeck(deckSlug) {
   const url = `https://tappedout.net/mtg-decks/${deckSlug}/?fmt=txt`;
   const response = await axios.get(url, {
     headers: {
-      'User-Agent': 'MTGCardImporterTTS/0.1.0'
+      'User-Agent': USER_AGENT
     },
     timeout: 15000
   });
@@ -841,7 +843,7 @@ async function fetchScryfallDeck(deckId) {
   const url = `https://api.scryfall.com/decks/${deckId}/export/text`;
   const response = await axios.get(url, {
     headers: {
-      'User-Agent': 'MTGCardImporterTTS/0.1.0',
+      'User-Agent': USER_AGENT,
       'Accept': 'text/plain'
     },
     timeout: 15000
