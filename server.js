@@ -63,7 +63,12 @@ const randomLimiter = rateLimit({
 
 // Middleware
 app.use(cors());
-app.use(express.raw({ limit: '10mb', type: '*/*' }));  // Accept all content types as raw Buffer
+// Accept both JSON and plain text as raw Buffer for maximum compatibility
+// This allows endpoints to handle both {"key":"value"} and plain text decklists
+app.use(express.raw({ 
+  limit: '10mb', 
+  type: ['application/json', 'text/plain', 'application/octet-stream'] 
+}));
 
 // Normalize errors from Scryfall/API calls into consistent JSON for the importer
 function normalizeError(error, defaultStatus = 502) {
@@ -709,7 +714,8 @@ function extractDeckId(url, platform) {
       return match ? match[1] : null;
     } else if (platform === 'scryfall') {
       // https://scryfall.com/@{username}/decks/{deck-id}
-      // The username is matched but not captured (/@[^/]+/) as it's not needed for API calls
+      // Pattern explanation: /@[^/]+/ matches "@username" where [^/]+ captures any non-slash characters
+      // The username is matched but not captured as it's not needed for deck API calls
       const match = urlObj.pathname.match(/\/@[^/]+\/decks\/([a-zA-Z0-9-]+)/);
       return match ? match[1] : null;
     }
