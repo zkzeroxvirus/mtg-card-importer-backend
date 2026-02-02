@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const axios = require('axios');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -58,7 +59,7 @@ const randomLimiter = rateLimit({
 
 // Middleware
 app.use(cors());
-app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
+app.use(express.raw({ limit: '10mb', type: '*/*' }));  // Accept all content types as raw Buffer
 
 // Normalize errors from Scryfall/API calls into consistent JSON for the importer
 function normalizeError(error, defaultStatus = 502) {
@@ -274,6 +275,7 @@ app.get('/', (req, res) => {
     endpoints: {
       card: 'GET /card/:name',
       deck: 'POST /deck',
+      fetchDeck: 'POST /fetch-deck',
       random: 'GET /random',
       search: 'GET /search',
       bulkStats: 'GET /bulk/stats'
@@ -674,6 +676,329 @@ app.post('/build', async (req, res) => {
     res.end();
   } catch (error) {
     console.error('Error building deck:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Helper functions for fetching decks from various platforms
+ */
+
+/**
+ * Extract deck ID from URL
+ */
+function extractDeckId(url, platform) {
+  try {
+    const urlObj = new URL(url);
+    
+    if (platform === 'moxfield') {
+      // https://www.moxfield.com/decks/{PUBLIC_ID}
+      const match = urlObj.pathname.match(/\/decks\/([a-zA-Z0-9_-]+)/);
+      return match ? match[1] : null;
+    } else if (platform === 'archidekt') {
+      // https://archidekt.com/decks/{DECK_ID}
+      const match = urlObj.pathname.match(/\/decks\/(\d+)/);
+      return match ? match[1] : null;
+    } else if (platform === 'tappedout') {
+      // https://tappedout.net/mtg-decks/{deck-slug}/
+      const match = urlObj.pathname.match(/\/mtg-decks\/([a-zA-Z0-9_-]+)/);
+      return match ? match[1] : null;
+    } else if (platform === 'scryfall') {
+      // https://scryfall.com/@{username}/decks/{deck-id}
+      const match = urlObj.pathname.match(/\/@[^/]+\/decks\/([a-zA-Z0-9-]+)/);
+      return match ? match[1] : null;
+    }
+    
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Detect platform from URL
+ */
+function detectPlatform(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    if (hostname.includes('moxfield.com')) return 'moxfield';
+    if (hostname.includes('archidekt.com')) return 'archidekt';
+    if (hostname.includes('tappedout.net')) return 'tappedout';
+    if (hostname.includes('scryfall.com')) return 'scryfall';
+    
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Fetch deck from Moxfield
+ */
+async function fetchMoxfieldDeck(deckId) {
+  const url = `https://api.moxfield.com/v2/decks/all/${deckId}`;
+  const response = await axios.get(url, {
+    headers: {
+      'User-Agent': 'MTGCardImporterTTS/0.1.0',
+      'Accept': 'application/json'
+    },
+    timeout: 15000
+  });
+  
+  const data = response.data;
+  const cards = [];
+  
+  // Parse mainboard
+  if (data.mainboard) {
+    for (const [cardName, cardData] of Object.entries(data.mainboard)) {
+      const count = cardData.quantity || 1;
+      cards.push({ count, name: cardName });
+    }
+  }
+  
+  // Parse commanders
+  if (data.commanders) {
+    for (const [cardName, cardData] of Object.entries(data.commanders)) {
+      const count = cardData.quantity || 1;
+      cards.push({ count, name: cardName });
+    }
+  }
+  
+  // Parse companion
+  if (data.companions) {
+    for (const [cardName, cardData] of Object.entries(data.companions)) {
+      const count = cardData.quantity || 1;
+      cards.push({ count, name: cardName });
+    }
+  }
+  
+  return cards;
+}
+
+/**
+ * Fetch deck from Archidekt
+ */
+async function fetchArchidektDeck(deckId) {
+  const url = `https://archidekt.com/api/decks/${deckId}/`;
+  const response = await axios.get(url, {
+    headers: {
+      'User-Agent': 'MTGCardImporterTTS/0.1.0',
+      'Accept': 'application/json'
+    },
+    timeout: 15000
+  });
+  
+  const data = response.data;
+  const cards = [];
+  
+  // Parse cards array
+  if (data.cards && Array.isArray(data.cards)) {
+    for (const card of data.cards) {
+      // Skip sideboard and maybeboard
+      if (card.categories && (
+        card.categories.includes('Sideboard') || 
+        card.categories.includes('Maybeboard')
+      )) {
+        continue;
+      }
+      
+      const count = card.quantity || 1;
+      const name = card.card && card.card.oracleCard && card.card.oracleCard.name;
+      if (name) {
+        cards.push({ count, name });
+      }
+    }
+  }
+  
+  return cards;
+}
+
+/**
+ * Fetch deck from TappedOut (via text export)
+ */
+async function fetchTappedOutDeck(deckSlug) {
+  // TappedOut doesn't have a clean JSON API, so we fetch the plain text export
+  const url = `https://tappedout.net/mtg-decks/${deckSlug}/?fmt=txt`;
+  const response = await axios.get(url, {
+    headers: {
+      'User-Agent': 'MTGCardImporterTTS/0.1.0'
+    },
+    timeout: 15000
+  });
+  
+  const decklistText = response.data;
+  
+  // Parse using the existing parseDecklist function
+  return scryfallLib.parseDecklist(decklistText);
+}
+
+/**
+ * Fetch deck from Scryfall
+ */
+async function fetchScryfallDeck(deckId) {
+  const url = `https://api.scryfall.com/decks/${deckId}/export/text`;
+  const response = await axios.get(url, {
+    headers: {
+      'User-Agent': 'MTGCardImporterTTS/0.1.0',
+      'Accept': 'text/plain'
+    },
+    timeout: 15000
+  });
+  
+  const decklistText = response.data;
+  
+  // Parse using the existing parseDecklist function
+  return scryfallLib.parseDecklist(decklistText);
+}
+
+/**
+ * POST /fetch-deck
+ * Fetch a deck from an external URL (Moxfield, Archidekt, TappedOut, Scryfall)
+ * Consumes: { "url": "https://moxfield.com/decks/...", "back": "URL" }
+ * Returns: NDJSON (one TTS card object per line)
+ */
+app.post('/fetch-deck', async (req, res) => {
+  try {
+    let deckUrl = null;
+    let back = null;
+    
+    // req.body is a Buffer from express.raw(); convert to string
+    const bodyText = req.body ? req.body.toString('utf8') : '';
+    
+    console.log('POST /fetch-deck bodyText (first 100):', bodyText.substring(0, 100));
+    
+    if (!bodyText || bodyText.trim().length === 0) {
+      return res.status(400).json({ error: 'URL required' });
+    }
+    
+    // Security: Validate body size
+    if (bodyText.length > MAX_INPUT_LENGTH) {
+      return res.status(400).json({ error: 'Request too large' });
+    }
+    
+    // Try to parse as JSON
+    if (bodyText.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(bodyText);
+        deckUrl = parsed.url;
+        back = parsed.back;
+        
+        console.log('Parsed JSON - deckUrl:', deckUrl);
+      } catch (e) {
+        console.error('JSON parse error:', e.message);
+        return res.status(400).json({ error: 'Invalid JSON body' });
+      }
+    } else {
+      // Treat as plain URL
+      deckUrl = bodyText.trim();
+    }
+    
+    if (!deckUrl) {
+      return res.status(400).json({ error: 'URL required' });
+    }
+    
+    // Security: Validate URL format
+    try {
+      new URL(deckUrl);
+    } catch (e) {
+      console.error('URL validation failed:', e.message);
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+    
+    // Security: Validate custom card back URL if provided
+    if (back && !isValidCardBackURL(back)) {
+      return res.status(400).json({ 
+        error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
+      });
+    }
+    
+    const cardBack = back || DEFAULT_BACK;
+    
+    // Detect platform
+    const platform = detectPlatform(deckUrl);
+    if (!platform) {
+      return res.status(400).json({ 
+        error: 'Unsupported deck platform. Supported: Moxfield, Archidekt, TappedOut, Scryfall' 
+      });
+    }
+    
+    console.log(`POST /fetch-deck: Fetching ${platform} deck from ${deckUrl}`);
+    
+    // Extract deck ID
+    const deckId = extractDeckId(deckUrl, platform);
+    if (!deckId) {
+      return res.status(400).json({ 
+        error: `Could not extract deck ID from ${platform} URL` 
+      });
+    }
+    
+    // Fetch deck based on platform
+    let cards = [];
+    try {
+      if (platform === 'moxfield') {
+        cards = await fetchMoxfieldDeck(deckId);
+      } else if (platform === 'archidekt') {
+        cards = await fetchArchidektDeck(deckId);
+      } else if (platform === 'tappedout') {
+        cards = await fetchTappedOutDeck(deckId);
+      } else if (platform === 'scryfall') {
+        cards = await fetchScryfallDeck(deckId);
+      }
+    } catch (error) {
+      console.error(`Error fetching ${platform} deck:`, error.message);
+      
+      if (error.response) {
+        const status = error.response.status;
+        if (status === 404) {
+          return res.status(404).json({ error: 'Deck not found or is private' });
+        } else if (status === 403) {
+          return res.status(403).json({ error: 'Deck is private or access denied' });
+        }
+      }
+      
+      return res.status(502).json({ 
+        error: `Failed to fetch deck from ${platform}: ${error.message}` 
+      });
+    }
+    
+    if (cards.length === 0) {
+      return res.status(400).json({ error: 'No valid cards found in deck' });
+    }
+    
+    // Validate deck size to prevent API abuse
+    const totalCards = cards.reduce((sum, card) => sum + card.count, 0);
+    if (totalCards > MAX_DECK_SIZE) {
+      return res.status(400).json({ 
+        error: `Deck too large (${totalCards} > ${MAX_DECK_SIZE} card limit)` 
+      });
+    }
+    
+    console.log(`POST /fetch-deck: Found ${cards.length} unique cards, ${totalCards} total`);
+    
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    
+    let cardCount = 0;
+    for (const { count, name } of cards) {
+      try {
+        const scryfallCard = await scryfallLib.getCard(name);
+        
+        for (let i = 0; i < count; i++) {
+          const ttsCard = scryfallLib.convertToTTSCard(scryfallCard, cardBack);
+          res.write(JSON.stringify(ttsCard) + '\n');
+          cardCount++;
+        }
+      } catch (error) {
+        console.warn(`Skipped: ${name} - ${error.message}`);
+        // Continue with next card on error
+      }
+    }
+    
+    console.log(`Deck fetched and spawned: ${cardCount} cards`);
+    res.end();
+  } catch (error) {
+    console.error('Error in /fetch-deck:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

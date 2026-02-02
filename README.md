@@ -109,6 +109,19 @@ Example: `GET /sets/dom`
 - Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
 - Returns: NDJSON (one TTS card object per line)
 
+**POST `/fetch-deck`** 🆕
+- Fetch and import a deck from external platforms
+- Consumes: `{ "url": "https://moxfield.com/decks/...", "back": "URL" }`
+- Supported platforms:
+  - **Moxfield**: `https://www.moxfield.com/decks/{deck-id}`
+  - **Archidekt**: `https://archidekt.com/decks/{deck-id}`
+  - **TappedOut**: `https://tappedout.net/mtg-decks/{deck-slug}/`
+  - **Scryfall**: `https://scryfall.com/@{username}/decks/{deck-id}`
+- Returns: NDJSON (one TTS card object per line)
+- Note: Deck must be public to fetch
+
+Example: `POST /fetch-deck` with body `{"url": "https://www.moxfield.com/decks/abc123"}`
+
 ### System
 
 **GET `/`**
@@ -186,6 +199,47 @@ Supported formats:
 - Deckstats format with brackets
 - TappedOut CSV format
 - Scryfall deck exports
+- **Deck URLs** (via `/fetch-deck` endpoint):
+  - Moxfield: `https://www.moxfield.com/decks/{deck-id}`
+  - Archidekt: `https://archidekt.com/decks/{deck-id}`
+  - TappedOut: `https://tappedout.net/mtg-decks/{deck-slug}/`
+  - Scryfall: `https://scryfall.com/@{username}/decks/{deck-id}`
+
+## Using the Lua Importer
+
+The included `EXAMPLE MTG Card Importer.lua` script provides an easy way to spawn cards in Tabletop Simulator:
+
+### Basic Commands
+
+```
+sf <card name>              # Spawn a single card
+sf black lotus              # Spawn Black Lotus
+
+sf <multiline decklist>     # Spawn a deck from text
+sf 4 Lightning Bolt
+3 Mountain
+
+sf <deck URL>               # Fetch and spawn deck from URL
+sf https://www.moxfield.com/decks/abc123
+sf deck https://archidekt.com/decks/12345
+
+sf random [n] [?q=query]    # Spawn random cards
+sf random 5                 # 5 random cards
+sf random 3 ?q=t:creature   # 3 random creatures
+
+sf search <query>           # Search and spawn up to 100 cards
+sf search t:dragon pow>5    # All dragons with power > 5
+```
+
+### Installation
+
+1. In Tabletop Simulator, create a new object (e.g., a tablet or notebook)
+2. Right-click the object → Scripting
+3. Copy the contents of `EXAMPLE MTG Card Importer.lua` into the script editor
+4. Save
+5. Use the chat commands with prefix `sf`
+
+The script will auto-update from GitHub when new versions are available.
 
 ## License
 

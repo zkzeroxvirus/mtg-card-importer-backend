@@ -5,7 +5,7 @@
 -- This is a simplified version showing core functionality
 
 mod_name = 'MTG Card Importer (Example)'
-version = '0.2'
+version = '0.3'
 self.setName('[' .. mod_name .. '] v' .. version)
 
 -- GitHub URL for self-updating
@@ -240,6 +240,40 @@ function searchCards(query, color)
   end)
 end
 
+-- Fetch deck from URL (Moxfield, Archidekt, TappedOut, Scryfall)
+function fetchDeckFromURL(url, color)
+  local player = Player[color]
+  local hand = player and player.getHandTransform and player:getHandTransform(1)
+  if hand == nil then
+    broadcastToColor('Sit at the table to spawn cards.', color, 'Red')
+    return
+  end
+
+  broadcastToColor('[MTG] Fetching deck from URL...', color, 'Yellow')
+
+  postJSON(BaseURL .. '/fetch-deck', { url = url, back = DEFAULT_BACK }, function(resp)
+    if resp.error then
+      broadcastToColor('[MTG Error] ' .. (resp.error or 'Server unreachable'), color, 'Red')
+      return
+    end
+    if not resp.is_done then return end
+
+    local cardCount = 0
+    for _, line in ipairs(split_lines(resp.text or '')) do
+      if line ~= '' then
+        spawnObjectJSON({ json = line })
+        cardCount = cardCount + 1
+      end
+    end
+
+    if cardCount > 0 then
+      broadcastToColor('[MTG] Spawned ' .. cardCount .. ' card(s) from deck.', color, 'Green')
+    else
+      broadcastToColor('[MTG] No cards spawned. Check if deck is public.', color, 'Orange')
+    end
+  end)
+end
+
 -- Chat command router
 function onChat(msg, player)
   local lower_msg = msg:lower()
@@ -263,6 +297,22 @@ function onChat(msg, player)
   elseif first_lower == 'search' then
     searchCards(rest, color)
     return false
+  elseif first_lower == 'deck' or first_lower == 'url' then
+    -- sf deck <URL> or sf url <URL>
+    fetchDeckFromURL(rest, color)
+    return false
+  end
+
+  -- Check if input is a URL (Moxfield, Archidekt, TappedOut, Scryfall)
+  if cmd_text:match('^https?://') then
+    local url_lower = cmd_text:lower()
+    if url_lower:match('moxfield%.com') or 
+       url_lower:match('archidekt%.com') or 
+       url_lower:match('tappedout%.net') or 
+       url_lower:match('scryfall%.com.*decks') then
+      fetchDeckFromURL(cmd_text, color)
+      return false
+    end
   end
 
   -- Multiline input = decklist
@@ -311,6 +361,8 @@ function showHelp()
   log('Prefix: sf')
   log('sf <card>           - spawn one card')
   log('sf <decklist...>    - spawn multiline decklist')
+  log('sf <deck_url>       - fetch deck from Moxfield, Archidekt, TappedOut, Scryfall')
+  log('sf deck <url>       - fetch deck from URL')
   log('sf random [n] [?q=] - random cards (Scryfall query optional)')
   log('sf search <query>   - spawn up to 100 results')
   log('Backend: ' .. BaseURL)
