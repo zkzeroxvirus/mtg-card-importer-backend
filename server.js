@@ -728,10 +728,12 @@ function detectPlatform(url) {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname.toLowerCase();
     
-    if (hostname.includes('moxfield.com')) return 'moxfield';
-    if (hostname.includes('archidekt.com')) return 'archidekt';
-    if (hostname.includes('tappedout.net')) return 'tappedout';
-    if (hostname.includes('scryfall.com')) return 'scryfall';
+    // Use endsWith to ensure the hostname actually ends with the expected domain
+    // This prevents attacks like evil-moxfield.com.attacker.com
+    if (hostname === 'moxfield.com' || hostname.endsWith('.moxfield.com')) return 'moxfield';
+    if (hostname === 'archidekt.com' || hostname.endsWith('.archidekt.com')) return 'archidekt';
+    if (hostname === 'tappedout.net' || hostname.endsWith('.tappedout.net')) return 'tappedout';
+    if (hostname === 'scryfall.com' || hostname.endsWith('.scryfall.com')) return 'scryfall';
     
     return null;
   } catch (e) {
