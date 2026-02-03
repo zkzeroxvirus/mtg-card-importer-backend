@@ -679,6 +679,217 @@ app.post('/build', async (req, res) => {
 });
 
 /**
+ * POST /deck/parse
+ * Parse deck from any format and return structured response
+ * Accepts: plain text, CSV, JSON, or HTML decklist
+ * Returns: { total, detected_format, mainboard, sideboard, metadata }
+ */
+app.post('/deck/parse', async (req, res) => {
+  try {
+    const bodyText = req.body ? req.body.toString('utf8') : '';
+    
+    if (!bodyText || bodyText.trim().length === 0) {
+      return res.status(400).json({ error: 'Decklist required' });
+    }
+
+    // Security: Validate body size
+    if (bodyText.length > 1024 * 1024) {
+      return res.status(400).json({ error: 'Decklist too large (max 1MB)' });
+    }
+
+    // Detect format
+    let detectedFormat = 'unknown';
+    let parsedCards = [];
+    let sideboard = [];
+    
+    // Try JSON first (most structured)
+    if (bodyText.trim().startsWith('{')) {
+      try {
+        const json = JSON.parse(bodyText);
+        
+        // Moxfield format: { main: [...], sideboard: [...] }
+        if (json.main || json.mainboard) {
+          detectedFormat = 'moxfield_json';
+          const mainArray = json.main || json.mainboard;
+          if (Array.isArray(mainArray)) {
+            for (const card of mainArray) {
+              parsedCards.push({
+                count: card.quantity || 1,
+                name: card.card?.name || card.name || 'Unknown',
+                scryfall_id: card.card?.scryfall_id || card.scryfall_id
+              });
+            }
+          }
+          const sideArray = json.sideboard;
+          if (Array.isArray(sideArray)) {
+            for (const card of sideArray) {
+              sideboard.push({
+                count: card.quantity || 1,
+                name: card.card?.name || card.name || 'Unknown'
+              });
+            }
+          }
+        }
+        // CubeCobra format: { deck: [...] }
+        else if (json.deck && Array.isArray(json.deck)) {
+          detectedFormat = 'cubecobra_json';
+          for (const card of json.deck) {
+            parsedCards.push({
+              count: card.count || 1,
+              name: card.name || 'Unknown'
+            });
+          }
+        }
+        // Generic JSON array format
+        else if (Array.isArray(json)) {
+          detectedFormat = 'json_array';
+          for (const card of json) {
+            parsedCards.push({
+              count: card.count || card.quantity || 1,
+              name: card.name || 'Unknown'
+            });
+          }
+        }
+      } catch (e) {
+        // Not valid JSON, fall through to other formats
+      }
+    }
+
+    // Try CSV format if not JSON
+    if (parsedCards.length === 0 && bodyText.includes('\n') && bodyText.includes(',')) {
+      detectedFormat = 'csv';
+      const lines = bodyText.split('\n');
+      
+      for (const line of lines) {
+        if (!line.trim() || line.startsWith('#')) continue;
+        
+        const parts = line.split(',').map(p => p.trim());
+        if (parts.length >= 2 && parts[0].match(/^\d+$/)) {
+          parsedCards.push({
+            count: parseInt(parts[0]),
+            name: parts[1],
+            set: parts[2] || null,
+            collector_number: parts[3] || null
+          });
+        }
+      }
+    }
+
+    // Try plain text format if not JSON or CSV
+    if (parsedCards.length === 0) {
+      const isMainboardFormat = bodyText.includes('[Main]') || bodyText.includes('[Sideboard]');
+      detectedFormat = isMainboardFormat ? 'deckstats_text' : 'plain_text';
+      
+      const lines = bodyText.split('\n');
+      let isMainboard = true;
+      
+      for (let line of lines) {
+        line = line.trim();
+        
+        // Check for section headers
+        if (line.match(/^\[Sideboard\]|^Sideboard:/i)) {
+          isMainboard = false;
+          continue;
+        }
+        
+        // Skip empty lines and comments
+        if (!line || line.startsWith('//') || line.startsWith('#')) {
+          continue;
+        }
+        
+        // Parse: "4x Island" or "4 Island" or "4x Island (DOM) 264"
+        const match = line.match(/^(\d+)x?\s+(.+?)(?:\s*\(([^)]+)\))?(?:\s+\d+)?$/i);
+        if (match) {
+          const [_, count, name, set] = match;
+          const card = {
+            count: parseInt(count),
+            name: name.trim()
+          };
+          if (set) card.set = set;
+          
+          (isMainboard ? parsedCards : sideboard).push(card);
+        }
+      }
+    }
+
+    if (parsedCards.length === 0) {
+      return res.status(400).json({ 
+        error: 'No valid cards found', 
+        details: 'Unable to parse decklist. Expected format: 4x Card Name or 4,Card Name,SET'
+      });
+    }
+
+    // Validate all cards exist in Scryfall
+    const warnings = [];
+    const validatedMainboard = [];
+    
+    for (const card of parsedCards) {
+      try {
+        await scryfallLib.getCard(card.name, card.set || null);
+        validatedMainboard.push({
+          count: card.count,
+          name: card.name,
+          cardUrl: `/card/${encodeURIComponent(card.name)}`,
+          error: null
+        });
+      } catch (error) {
+        warnings.push(`Card not found: ${card.name}`);
+        validatedMainboard.push({
+          count: card.count,
+          name: card.name,
+          cardUrl: null,
+          error: error.message
+        });
+      }
+    }
+
+    // Validate sideboard cards
+    const validatedSideboard = [];
+    for (const card of sideboard) {
+      try {
+        await scryfallLib.getCard(card.name);
+        validatedSideboard.push({
+          count: card.count,
+          name: card.name,
+          cardUrl: `/card/${encodeURIComponent(card.name)}`,
+          error: null
+        });
+      } catch (error) {
+        warnings.push(`Sideboard card not found: ${card.name}`);
+        validatedSideboard.push({
+          count: card.count,
+          name: card.name,
+          cardUrl: null,
+          error: error.message
+        });
+      }
+    }
+
+    // Calculate totals
+    const mainboardTotal = validatedMainboard.reduce((sum, c) => sum + c.count, 0);
+    const sideboardTotal = validatedSideboard.reduce((sum, c) => sum + c.count, 0);
+
+    res.json({
+      total: mainboardTotal + sideboardTotal,
+      mainboard_count: mainboardTotal,
+      sideboard_count: sideboardTotal,
+      detected_format: detectedFormat,
+      mainboard: validatedMainboard,
+      sideboard: validatedSideboard,
+      metadata: {
+        warnings,
+        invalid_cards: validatedMainboard.filter(c => c.error).length + 
+                       validatedSideboard.filter(c => c.error).length
+      }
+    });
+  } catch (error) {
+    console.error('Error parsing deck:', error.message);
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ error: details });
+  }
+});
+
+/**
  * GET /random
  * Get random card(s) - returns raw Scryfall card or list
  * Uses bulk data if available, falls back to API
@@ -722,11 +933,14 @@ app.get('/random', randomLimiter, async (req, res) => {
 
     if (numCards === 1) {
       // Single random card
-      let scryfallCard;
+      let scryfallCard = null;
       
       if (USE_BULK_DATA && bulkData.isLoaded()) {
-        scryfallCard = bulkData.getRandomCard(q);
-      } else {
+        scryfallCard = await bulkData.getRandomCard(q);
+      }
+      
+      // Fallback to API if bulk data not loaded or returned null
+      if (!scryfallCard) {
         try {
           scryfallCard = await scryfallLib.getRandomCard(q);
         } catch (error) {
@@ -747,13 +961,30 @@ app.get('/random', randomLimiter, async (req, res) => {
       const cards = [];
       
       if (USE_BULK_DATA && bulkData.isLoaded()) {
-        // Bulk data - instant responses
+        // Bulk data - instant responses (with logging suppressed)
         for (let i = 0; i < numCards; i++) {
           try {
-            const card = bulkData.getRandomCard(q);
-            cards.push(card);
+            const card = await bulkData.getRandomCard(q, true);  // suppressLog=true
+            if (card) {
+              cards.push(card);
+            }
           } catch (error) {
-            console.warn(`Random card failed: ${error.message}`);
+            console.warn(`Skipped: ${error.message}`);
+          }
+        }
+        
+        // Fallback to API if bulk data didn't return enough cards
+        if (cards.length < numCards) {
+          console.log(`[Fallback] Bulk data returned ${cards.length} cards, switching to API for remaining ${numCards - cards.length}`);
+          try {
+            // Get remaining cards from API
+            const remaining = numCards - cards.length;
+            for (let i = 0; i < remaining; i++) {
+              const card = await scryfallLib.getRandomCard(q, true);
+              if (card) cards.push(card);
+            }
+          } catch (error) {
+            console.warn(`API fallback failed: ${error.message}`);
           }
         }
       } else {
@@ -767,6 +998,7 @@ app.get('/random', randomLimiter, async (req, res) => {
           // First request failed - likely invalid query
           if (error.response?.status === 404) {
             const hint = getQueryHint(q);
+
             const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
             cacheFailedQuery(q, enhancedError);
             throw new Error(enhancedError);
@@ -857,18 +1089,30 @@ app.get('/search', async (req, res) => {
       });
     }
 
-    let scryfallCards;
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
     // Security: Enforce maximum limit to prevent memory exhaustion
     const limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
+    
+    let scryfallCards = null;
     
     // For full printings list, prefer live API to ensure completeness
     if (requestedUnique === 'prints') {
       scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
     } else if (USE_BULK_DATA && bulkData.isLoaded()) {
-      scryfallCards = bulkData.searchCards(q, limitNum);
+      scryfallCards = await bulkData.searchCards(q, limitNum);
+      
+      // Fallback to API if bulk data returned null (no matches)
+      if (!scryfallCards) {
+        console.log(`[Fallback] Bulk data returned no results for "${q}", using API`);
+        scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
+      }
     } else {
       scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
+    }
+    
+    // Ensure scryfallCards is an array
+    if (!scryfallCards) {
+      scryfallCards = [];
     }
     
     if (scryfallCards.length === 0) {
@@ -1093,7 +1337,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with bulk data initialization
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`MTG Card Importer Backend running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/`);
   console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
