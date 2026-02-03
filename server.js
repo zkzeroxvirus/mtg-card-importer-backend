@@ -332,13 +332,12 @@ app.get('/card/:name', async (req, res) => {
     let scryfallCard;
     
     // Bulk data only supports exact name matching, API supports fuzzy matching
-    if (USE_BULK_DATA && bulkData.isLoaded() && !set) {
-      scryfallCard = bulkData.getCardByName(name);
-      if (!scryfallCard) {
-        // Fall back to API for fuzzy matching
-        scryfallCard = await scryfallLib.getCard(name, set);
-      }
-    } else {
+    if (USE_BULK_DATA && bulkData.isLoaded()) {
+      scryfallCard = bulkData.getCardByName(name, set || null);
+    }
+
+    if (!scryfallCard) {
+      // Fall back to API for fuzzy matching
       scryfallCard = await scryfallLib.getCard(name, set);
     }
     
@@ -408,7 +407,13 @@ app.get('/cards/:id', async (req, res) => {
       return res.status(400).json({ error: 'Card ID required' });
     }
 
-    const scryfallCard = await scryfallLib.getCardById(id);
+    let scryfallCard = null;
+    if (USE_BULK_DATA && bulkData.isLoaded()) {
+      scryfallCard = bulkData.getCardById(id);
+    }
+    if (!scryfallCard) {
+      scryfallCard = await scryfallLib.getCardById(id);
+    }
     
     // Return raw Scryfall format
     res.json(scryfallCard);
@@ -446,7 +451,13 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
       return res.status(400).json({ error: 'Invalid language code format' });
     }
 
-    const scryfallCard = await scryfallLib.getCardBySetNumber(set, number, langCode);
+    let scryfallCard = null;
+    if (USE_BULK_DATA && bulkData.isLoaded()) {
+      scryfallCard = bulkData.getCardBySetNumber(set, number, langCode);
+    }
+    if (!scryfallCard) {
+      scryfallCard = await scryfallLib.getCardBySetNumber(set, number, langCode);
+    }
     
     // Return raw Scryfall format
     res.json(scryfallCard);
