@@ -468,6 +468,48 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       expect(filtered.map(c => c.name)).not.toContain('Brisela, Voice of Nightmares');
     });
 
+    test('should exclude basic lands', () => {
+      const mockCards = [
+        // Basic lands (should be excluded)
+        { name: 'Forest', set: 'm21', layout: 'normal', type_line: 'Basic Land — Forest' },
+        { name: 'Island', set: 'm21', layout: 'normal', type_line: 'Basic Land — Island' },
+        { name: 'Mountain', set: 'm21', layout: 'normal', type_line: 'Basic Land — Mountain' },
+        { name: 'Plains', set: 'm21', layout: 'normal', type_line: 'Basic Land — Plains' },
+        { name: 'Swamp', set: 'm21', layout: 'normal', type_line: 'Basic Land — Swamp' },
+        { name: 'Wastes', set: 'ogw', layout: 'normal', type_line: 'Basic Land' },
+        { name: 'Snow-Covered Forest', set: 'mh1', layout: 'normal', type_line: 'Basic Snow Land — Forest' },
+        // Non-basic lands and other playable cards (should be included)
+        { name: 'Stomping Ground', set: 'rna', layout: 'normal', type_line: 'Land — Mountain Forest' },
+        { name: 'Evolving Wilds', set: 'rix', layout: 'normal', type_line: 'Land' },
+        { name: 'Lightning Bolt', set: 'lea', layout: 'normal', type_line: 'Instant' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const typeLine = card.type_line || '';
+        // Exclude basic lands
+        if (typeLine.toLowerCase().includes('basic')) {
+          return false;
+        }
+        return true;
+      });
+
+      expect(filtered).toHaveLength(3);
+      // Should include only non-basic cards
+      expect(filtered.map(c => c.name)).toEqual([
+        'Stomping Ground',
+        'Evolving Wilds',
+        'Lightning Bolt'
+      ]);
+      // Should exclude all basic lands
+      expect(filtered.map(c => c.name)).not.toContain('Forest');
+      expect(filtered.map(c => c.name)).not.toContain('Island');
+      expect(filtered.map(c => c.name)).not.toContain('Mountain');
+      expect(filtered.map(c => c.name)).not.toContain('Plains');
+      expect(filtered.map(c => c.name)).not.toContain('Swamp');
+      expect(filtered.map(c => c.name)).not.toContain('Wastes');
+      expect(filtered.map(c => c.name)).not.toContain('Snow-Covered Forest');
+    });
+
 
     test('should filter combined: test sets, acorn, and non-playable layouts', () => {
       const testCardSets = ['cmb1', 'mb2', 'cmb2'];
