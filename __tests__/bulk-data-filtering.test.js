@@ -2,7 +2,7 @@
  * Tests for bulk data filtering logic
  * Specifically tests exclusion of test cards, acorn-stamped cards, and non-playable layouts
  * 
- * Note: The isTestOrAcornCard function is not exported, so we test the filtering
+ * Note: The isNonPlayableCard function is not exported, so we test the filtering
  * logic through mock scenarios that replicate the function's behavior.
  */
 
