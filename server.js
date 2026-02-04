@@ -1095,17 +1095,13 @@ app.get('/random', randomLimiter, async (req, res) => {
                 duplicateCount++;
               }
             } else {
-              // Already have enough unique cards, count remaining as duplicates
-              if (!seenCardIds.has(card.id)) {
-                duplicateCount++;
-              } else {
-                duplicateCount++;
-              }
+              // Already have enough unique cards, count any remaining as excess
+              duplicateCount++;
             }
           }
           
           const fetchDuration = Date.now() - fetchStartTime;
-          console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates skipped)`);
+          console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates/excess skipped)`);
         }
       }
       
