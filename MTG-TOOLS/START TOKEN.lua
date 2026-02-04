@@ -476,14 +476,14 @@ printToAll(id)
             end
         end
 
-        -- Spawn entire deck at once (no lag!)
+        -- Spawn entire deck at once for optimal performance
         if #deckDat.ContainedObjects > 0 then
             spawnObjectData({
                 data = deckDat,
                 position = spawnPos,
                 rotation = self.getRotation()
             })
-            printToAll("Spawned " .. #deckDat.ContainedObjects .. " random cards as a deck!")
+            printToAll("Spawned " .. #deckDat.ContainedObjects .. " random cards as a deck")
         else
             print("No valid cards to spawn")
         end
