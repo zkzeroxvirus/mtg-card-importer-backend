@@ -31,7 +31,9 @@ function isValidCardBackURL(url) {
       'imgur.com'
     ];
     return allowedDomains.some(domain => parsed.hostname.endsWith(domain));
-  } catch (_e) {
+  } catch (e) {
+    // Invalid URL format
+    console.debug('Invalid card back URL:', e.message);
     return false;
   }
 }
@@ -367,16 +369,18 @@ app.get('/card/:name', async (req, res) => {
             corrected._corrected_name = suggestion;
             corrected._original_name = name;
             return res.json(corrected);
-          } catch (_fallbackError) {
+          } catch (fallbackError) {
             // If set-specific lookup failed, try without set
+            console.debug('Set-specific fallback failed:', fallbackError.message);
             if (set) {
               try {
                 const corrected = await scryfallLib.getCard(suggestion, null);
                 corrected._corrected_name = suggestion;
                 corrected._original_name = name;
                 return res.json(corrected);
-              } catch (_e) {
+              } catch (e) {
                 // fall through to error response
+                console.debug('Fallback without set also failed:', e.message);
               }
             }
           }
@@ -387,8 +391,9 @@ app.get('/card/:name', async (req, res) => {
             details: `Card not found: ${name}. Did you mean: ${suggestionList}?`
           });
         }
-      } catch (_e) {
+      } catch (e) {
         // Ignore autocomplete failures and return original error
+        console.debug('Autocomplete suggestion failed:', e.message);
       }
     }
 
@@ -762,8 +767,9 @@ app.post('/deck/parse', async (req, res) => {
             });
           }
         }
-      } catch (_e) {
+      } catch (e) {
         // Not valid JSON, fall through to other formats
+        console.debug('JSON parsing failed, trying other formats:', e.message);
       }
     }
 
