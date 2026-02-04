@@ -4,6 +4,8 @@ A Node.js backend that proxies the Scryfall API to provide Magic: The Gathering 
 
 **✅ Fully compliant with [Scryfall API guidelines](https://scryfall.com/docs/api)** - See [SCRYFALL_API_COMPLIANCE.md](SCRYFALL_API_COMPLIANCE.md) for details.
 
+**⚡ Optimized for high concurrency** - Supports 500+ concurrent users with clustering and compression. See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for details.
+
 ## 🎨 New Feature: Custom Image Proxies!
 
 You can now spawn cards with custom artwork while keeping official card data:
@@ -21,6 +23,23 @@ This backend acts as a middleware between the Amuzet Card Importer (Tabletop Sim
 - Applies rate limiting to respect Scryfall's API guidelines
 - Converts card data to Tabletop Simulator object formats
 - Provides convenient endpoints for deck building and card searching
+- **Supports 500+ concurrent users with clustering and performance optimizations**
+
+## Performance
+
+**Single Process:**
+- 100-200 concurrent users
+- 50-100 requests/second
+
+**Clustered (4 cores):**
+- 500-1000 concurrent users  
+- 200-400 requests/second
+
+**Clustered (8 cores):**
+- 1000-2000 concurrent users
+- 400-800 requests/second
+
+See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for detailed benchmarks, tuning, and horizontal scaling strategies.
 
 ## Deployment
 
@@ -36,7 +55,12 @@ cp .env.example .env
 3. Install dependencies and start the server:
 ```bash
 npm install
+
+# Single process (for development or low traffic)
 npm start
+
+# Clustered mode (for production with high traffic)
+npm run start:cluster
 ```
 
 ### Development
@@ -163,7 +187,18 @@ Example: `GET /sets/dom`
 
 **GET `/`**
 - Health check endpoint
-- Returns: Service status and available endpoints
+- Returns: Service status, metrics, and available endpoints
+- Includes: uptime, request counts, error rate, memory usage
+
+**GET `/metrics`**
+- Detailed performance metrics
+- Returns: Request stats, memory usage, bulk data status, process info
+- Use for monitoring and alerting
+
+**GET `/ready`**
+- Readiness probe for load balancers
+- Returns: `{"ready": true}` when server is ready to accept traffic
+- Returns HTTP 503 if server is not ready (bulk data loading, high memory)
 
 **GET `/rulings/:name`**
 - Fetch card rulings by card name
@@ -195,22 +230,45 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 
 ## Environment Variables
 
+### Core Settings
 - `NODE_ENV` — `development` or `production` (default: development)
 - `PORT` — Server port (default: 3000)
-- `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 50)
+
+### Performance Settings
+- `WORKERS` — Number of worker processes for clustering (default: auto = CPU cores)
+  - Set to `1` to disable clustering
+  - Set to `auto` to use all CPU cores (recommended for production)
+- `MAX_CACHE_SIZE` — Maximum entries in caches (default: 5000)
+  - Higher values = more memory, fewer cache misses
+  - Lower values = less memory, more cache misses
+
+### Scryfall API Settings
+- `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 100)
 - `DEFAULT_CARD_BACK` — Optional default card back image URL (Steam CDN/Imgur recommended)
+
+### Bulk Data Settings
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
 - `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data, Docker/Unraid: /app/data)
+
+See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for detailed tuning recommendations.
 
 ## Configuration
 
 Copy `.env.example` to `.env` and customize values:
 
 ```env
-NODE_ENV=development
+NODE_ENV=production
 PORT=3000
-SCRYFALL_DELAY=50
+
+# Performance (for 500+ concurrent users)
+WORKERS=auto
+MAX_CACHE_SIZE=5000
+
+# Scryfall API
+SCRYFALL_DELAY=100
 DEFAULT_CARD_BACK=https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/
+
+# Bulk Data (recommended for production)
 USE_BULK_DATA=true
 BULK_DATA_PATH=./data
 ```

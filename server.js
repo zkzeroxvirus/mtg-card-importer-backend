@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -15,7 +16,7 @@ const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 // Security: Input validation constants
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
-const MAX_CACHE_SIZE = 500; // Maximum size for failed query and error caches
+const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -66,7 +67,47 @@ const randomLimiter = rateLimit({
 
 // Middleware
 app.use(cors());
+
+// Enable compression for all responses (improves bandwidth efficiency)
+app.use(compression({
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
+  level: 6 // Balance between compression speed and ratio
+}));
+
 app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
+
+// Performance metrics tracking
+const metrics = {
+  requests: 0,
+  errors: 0,
+  startTime: Date.now()
+};
+
+// Request counter middleware
+app.use((req, res, next) => {
+  metrics.requests++;
+  
+  // Track response time
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (res.statusCode >= 500) {
+      metrics.errors++;
+    }
+    
+    // Log slow requests (> 5 seconds)
+    if (duration > 5000) {
+      console.warn(`[Perf] Slow request: ${req.method} ${req.path} took ${duration}ms`);
+    }
+  });
+  
+  next();
+});
 
 // Normalize errors from Scryfall/API calls into consistent JSON for the importer
 function normalizeError(error, defaultStatus = 502) {
@@ -267,13 +308,23 @@ function shouldShowDetailedError(query) {
   return false;
 }
 
-// Health check
+// Health check with metrics
 app.get('/', (req, res) => {
   const bulkStats = bulkData.getStats();
+  const uptime = Math.floor((Date.now() - metrics.startTime) / 1000);
+  const memUsage = process.memoryUsage();
+  
   res.json({
     status: 'ok',
     service: 'MTG Card Importer Backend',
     version: '1.0.0',
+    uptime: `${uptime}s`,
+    metrics: {
+      totalRequests: metrics.requests,
+      errors: metrics.errors,
+      errorRate: metrics.requests > 0 ? (metrics.errors / metrics.requests * 100).toFixed(2) + '%' : '0%',
+      memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024)
+    },
     bulkData: {
       enabled: USE_BULK_DATA,
       loaded: bulkStats.loaded,
@@ -284,9 +335,65 @@ app.get('/', (req, res) => {
       deck: 'POST /deck',
       random: 'GET /random',
       search: 'GET /search',
-      bulkStats: 'GET /bulk/stats'
+      bulkStats: 'GET /bulk/stats',
+      metrics: 'GET /metrics'
     }
   });
+});
+
+// Dedicated metrics endpoint for monitoring
+app.get('/metrics', (req, res) => {
+  const uptime = Math.floor((Date.now() - metrics.startTime) / 1000);
+  const memUsage = process.memoryUsage();
+  const bulkStats = bulkData.getStats();
+  
+  res.json({
+    uptime: uptime,
+    requests: {
+      total: metrics.requests,
+      errors: metrics.errors,
+      errorRate: metrics.requests > 0 ? metrics.errors / metrics.requests : 0
+    },
+    memory: {
+      heapUsed: memUsage.heapUsed,
+      heapTotal: memUsage.heapTotal,
+      external: memUsage.external,
+      rss: memUsage.rss
+    },
+    bulkData: {
+      enabled: USE_BULK_DATA,
+      loaded: bulkStats.loaded,
+      cardCount: bulkStats.cardCount,
+      lastUpdate: bulkStats.lastUpdate
+    },
+    process: {
+      pid: process.pid,
+      version: process.version,
+      platform: process.platform
+    }
+  });
+});
+
+// Readiness probe for load balancers
+app.get('/ready', (req, res) => {
+  const bulkStats = bulkData.getStats();
+  
+  // Server is ready if:
+  // 1. Either bulk data is disabled OR bulk data is loaded
+  // 2. Memory usage is reasonable (< 1GB heap)
+  const memUsage = process.memoryUsage();
+  const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+  
+  const isReady = (!USE_BULK_DATA || bulkStats.loaded) && heapUsedMB < 1024;
+  
+  if (isReady) {
+    res.json({ ready: true });
+  } else {
+    res.status(503).json({ 
+      ready: false,
+      reason: USE_BULK_DATA && !bulkStats.loaded ? 'bulk data loading' : 'high memory usage'
+    });
+  }
 });
 
 /**
@@ -1397,10 +1504,14 @@ app.use((err, req, res, _next) => {
 
 // Start server with bulk data initialization
 // Only start the server if not in test environment
+let server;
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, '0.0.0.0', async () => {
+  server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`MTG Card Importer Backend running on port ${PORT}`);
+    console.log(`Worker PID: ${process.pid}`);
     console.log(`Health check: http://localhost:${PORT}/`);
+    console.log(`Metrics: http://localhost:${PORT}/metrics`);
+    console.log(`Readiness probe: http://localhost:${PORT}/ready`);
     console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
     
     if (USE_BULK_DATA) {
@@ -1417,6 +1528,31 @@ if (process.env.NODE_ENV !== 'test') {
       console.log('[Init] Using Scryfall API mode');
     }
   });
+
+  // Configure server timeouts for high concurrency
+  server.keepAliveTimeout = 65000; // 65 seconds (higher than common LB timeout of 60s)
+  server.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
+  server.requestTimeout = 120000; // 2 minutes for long-running deck builds
+
+  // Graceful shutdown handler
+  const gracefulShutdown = (signal) => {
+    console.log(`\n[Shutdown] Received ${signal}, starting graceful shutdown...`);
+    
+    server.close(() => {
+      console.log('[Shutdown] Server closed, no longer accepting connections');
+      console.log('[Shutdown] Exiting process');
+      process.exit(0);
+    });
+
+    // Force shutdown after 30 seconds if graceful shutdown hangs
+    setTimeout(() => {
+      console.error('[Shutdown] Graceful shutdown timeout, forcing exit');
+      process.exit(1);
+    }, 30000);
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 // Export app for testing
