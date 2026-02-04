@@ -9,7 +9,7 @@ self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 author = '76561198045776458'
 coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
-GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/MTG-TOOLS/main/MTG%20Card%20Importer.lua'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG-TOOLS/MTG%20Card%20Importer.lua'
 lang = 'en'
 
 -- ============================================================================
