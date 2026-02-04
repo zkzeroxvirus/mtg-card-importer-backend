@@ -1348,22 +1348,28 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with bulk data initialization
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`MTG Card Importer Backend running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/`);
-  console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
-  
-  if (USE_BULK_DATA) {
-    console.log('[Init] Loading bulk data in background...');
-    bulkData.loadBulkData()
-      .then(() => {
-        console.log('[Init] Bulk data ready!');
-      })
-      .catch((error) => {
-        console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);
-        console.error('[Init] Server will continue using Scryfall API');
-      });
-  } else {
-    console.log('[Init] Using Scryfall API mode');
-  }
-});
+// Only start the server if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, '0.0.0.0', async () => {
+    console.log(`MTG Card Importer Backend running on port ${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/`);
+    console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
+    
+    if (USE_BULK_DATA) {
+      console.log('[Init] Loading bulk data in background...');
+      bulkData.loadBulkData()
+        .then(() => {
+          console.log('[Init] Bulk data ready!');
+        })
+        .catch((error) => {
+          console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);
+          console.error('[Init] Server will continue using Scryfall API');
+        });
+    } else {
+      console.log('[Init] Using Scryfall API mode');
+    }
+  });
+}
+
+// Export app for testing
+module.exports = app;

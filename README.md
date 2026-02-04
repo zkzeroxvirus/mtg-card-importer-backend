@@ -39,6 +39,27 @@ npm install
 npm start
 ```
 
+### Development
+
+The project includes scripts for development, testing, and linting:
+
+```bash
+# Run the server in development mode with auto-reload
+npm run dev
+
+# Run tests
+npm test
+npm run test:watch      # Run tests in watch mode
+npm run test:coverage   # Run tests with coverage report
+
+# Lint code
+npm run lint            # Check for linting errors
+npm run lint:fix        # Fix linting errors automatically
+
+# Build (validates that the project can be built)
+npm run build
+```
+
 ### Docker (Unraid)
 
 Build the image:

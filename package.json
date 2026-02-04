@@ -5,7 +5,13 @@
     "description": "Backend service for Tabletop Simulator MTG Card Importer (Scryfall proxy).",
     "scripts": {
         "start": "node server.js",
-        "dev": "nodemon server.js"
+        "dev": "nodemon server.js",
+        "test": "jest",
+        "test:watch": "jest --watch",
+        "test:coverage": "jest --coverage",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "build": "echo 'No build step required for Node.js' && exit 0"
     },
     "dependencies": {
         "axios": "^1.13.4",
@@ -15,6 +21,9 @@
         "express-rate-limit": "^7.1.5"
     },
     "devDependencies": {
-        "nodemon": "^3.0.1"
+        "eslint": "^9.39.2",
+        "jest": "^30.2.0",
+        "nodemon": "^3.0.1",
+        "supertest": "^7.2.2"
     }
 }
