@@ -68,6 +68,26 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       };
       expect(normalCard.security_stamp).not.toBe('acorn');
     });
+
+    test('should identify digital-only cards', () => {
+      const digitalCard = {
+        name: 'Alchemy Card',
+        set: 'ymid',
+        games: ['mtgo', 'arena'],
+        type_line: 'Creature'
+      };
+      expect(digitalCard.games).not.toContain('paper');
+    });
+
+    test('should not flag paper cards', () => {
+      const paperCard = {
+        name: 'Lightning Bolt',
+        set: 'lea',
+        games: ['paper', 'mtgo'],
+        type_line: 'Instant'
+      };
+      expect(paperCard.games).toContain('paper');
+    });
   });
 
   describe('Integration: Test card exclusion in mock scenarios', () => {
@@ -107,6 +127,24 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
 
       expect(filtered).toHaveLength(2);
       expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
+    });
+
+    test('digital-only cards should be excluded', () => {
+      const mockCards = [
+        { name: 'Paper Card', set: 'dom', games: ['paper', 'mtgo'] },
+        { name: 'Digital Only 1', set: 'ymid', games: ['mtgo', 'arena'] },
+        { name: 'Digital Only 2', set: 'ydmu', games: ['arena'] },
+        { name: 'Paper Card 2', set: 'mh2', games: ['paper'] }
+      ];
+
+      // Filter out digital-only cards
+      const filtered = mockCards.filter(card => {
+        const games = card.games || [];
+        return games.includes('paper');
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Paper Card', 'Paper Card 2']);
     });
 
     test('both test and acorn cards should be excluded', () => {
@@ -308,29 +346,32 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       ];
 
       const mockCards = [
-        { name: 'Normal Card', set: 'dom', security_stamp: null, layout: 'normal' },
-        { name: 'Test Card', set: 'cmb1', security_stamp: null, layout: 'normal' },
-        { name: 'Acorn Card', set: 'unf', security_stamp: 'acorn', layout: 'normal' },
-        { name: 'Token Card', set: 'tkhm', security_stamp: null, layout: 'token' },
-        { name: 'Art Card', set: 'nec', security_stamp: null, layout: 'art_series' },
-        { name: 'Emblem', set: 'teld', security_stamp: null, layout: 'emblem' },
-        { name: 'Dungeon Card', set: 'afr', security_stamp: null, layout: 'dungeon' },
-        { name: 'Hero Card', set: 'thb', security_stamp: null, layout: 'hero' },
-        { name: 'Attraction', set: 'unf', security_stamp: null, layout: 'attraction' },
-        { name: 'Normal Card 2', set: 'mh2', security_stamp: 'oval', layout: 'transform' }
+        { name: 'Normal Card', set: 'dom', security_stamp: null, layout: 'normal', games: ['paper'] },
+        { name: 'Test Card', set: 'cmb1', security_stamp: null, layout: 'normal', games: ['paper'] },
+        { name: 'Acorn Card', set: 'unf', security_stamp: 'acorn', layout: 'normal', games: ['paper'] },
+        { name: 'Token Card', set: 'tkhm', security_stamp: null, layout: 'token', games: ['paper'] },
+        { name: 'Art Card', set: 'nec', security_stamp: null, layout: 'art_series', games: ['paper'] },
+        { name: 'Emblem', set: 'teld', security_stamp: null, layout: 'emblem', games: ['paper'] },
+        { name: 'Dungeon Card', set: 'afr', security_stamp: null, layout: 'dungeon', games: ['paper'] },
+        { name: 'Hero Card', set: 'thb', security_stamp: null, layout: 'hero', games: ['paper'] },
+        { name: 'Attraction', set: 'unf', security_stamp: null, layout: 'attraction', games: ['paper'] },
+        { name: 'Digital Only', set: 'ymid', security_stamp: null, layout: 'normal', games: ['arena'] },
+        { name: 'Normal Card 2', set: 'mh2', security_stamp: 'oval', layout: 'transform', games: ['paper'] }
       ];
 
-      // Apply all filters
+      // Apply all filters (including digital-only check)
       const filtered = mockCards.filter(card => {
         const set = card.set || '';
         const securityStamp = card.security_stamp || '';
         const layout = card.layout || '';
+        const games = card.games || [];
         
         const isTest = testCardSets.includes(set.toLowerCase());
         const isAcorn = securityStamp.toLowerCase() === 'acorn';
         const isNonPlayable = nonPlayableLayouts.includes(layout.toLowerCase());
+        const isDigitalOnly = !games.includes('paper');
         
-        return !isTest && !isAcorn && !isNonPlayable;
+        return !isTest && !isAcorn && !isNonPlayable && !isDigitalOnly;
       });
 
       expect(filtered).toHaveLength(2);
