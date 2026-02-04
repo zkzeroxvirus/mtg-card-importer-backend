@@ -2,7 +2,7 @@
 -- Global variable for the card back image URL:
 backURL = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
 -- Backend Configuration
-BACKEND_URL = "https://mtg-card-importer-backend.onrender.com"
+BACKEND_URL = "https://api.mtginfo.org"
 
 -- Relative anchor reused from Start Token
 SPAWN_BUTTON_LOCAL = Vector{-4.2, 0, -3.9}
