@@ -60,6 +60,8 @@ docker run -d \
   mtg-card-importer-backend
 ```
 
+The Dockerfile defaults `NODE_ENV=production` and `PORT=3000`; override them at runtime if needed.
+
 Unraid template notes:
 - Container port: `3000`
 - Path mapping: `/mnt/user/appdata/mtg-card-importer-backend` → `/app/data`

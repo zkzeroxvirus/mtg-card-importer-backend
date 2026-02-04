@@ -5,7 +5,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY . .
+COPY server.js ./
+COPY lib ./lib
+COPY .env.example ./
 
 ENV NODE_ENV=production
 ENV PORT=3000
