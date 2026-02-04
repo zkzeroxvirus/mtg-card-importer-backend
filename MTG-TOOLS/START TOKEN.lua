@@ -12,6 +12,12 @@ SPAWN_HEIGHT_OFFSET = 2
 lastAnchorPos = nil
 lastAnchorRot = nil
 lastAnchorWorld = nil
+
+-- Spawning state tracking (prevents concurrent spawns)
+isSpawning = false
+spawnIndicatorText = nil
+cardsSpawned = 0
+totalCardsToSpawn = 0
 --------------------------------------------------------------------------
 function onLoad()
 
@@ -48,6 +54,47 @@ function getSpawnAnchor()
         lastAnchorRot = rot
     end
     return lastAnchorWorld
+end
+
+-----------------------------------------------------------------------
+-- SPAWNING INDICATOR FUNCTIONS (similar to MTG Importer)
+-----------------------------------------------------------------------
+function createSpawningIndicator(position)
+    if spawnIndicatorText then
+        destroySpawningIndicator()
+    end
+    
+    -- Create 3D text indicator above the spawn position
+    local textPosition = {position.x, position.y + 3, position.z}
+    local textObject = spawnObject({
+        type = '3DText',
+        position = textPosition,
+        rotation = {90, 0, 0}
+    })
+    
+    textObject.TextTool.setValue('Spawning...\n0 / ' .. totalCardsToSpawn .. ' cards')
+    textObject.TextTool.setFontSize(60)
+    spawnIndicatorText = textObject
+end
+
+function updateSpawningIndicator()
+    if spawnIndicatorText then
+        spawnIndicatorText.TextTool.setValue('Spawning...\n' .. cardsSpawned .. ' / ' .. totalCardsToSpawn .. ' cards')
+    end
+end
+
+function destroySpawningIndicator()
+    if spawnIndicatorText then
+        spawnIndicatorText.destruct()
+        spawnIndicatorText = nil
+    end
+end
+
+function endSpawning()
+    isSpawning = false
+    cardsSpawned = 0
+    totalCardsToSpawn = 0
+    destroySpawningIndicator()
 end
 
 
@@ -414,9 +461,25 @@ end
 -- It builds an OR query using the "id=" operator (for strictly mono-colored cards)
 -- and adds a clause "colorless type:artifact" so that only colorless artifacts are included.
 -- All cards are spawned as a single deck object for optimal performance (no lag).
+-- Includes spawning indicator and prevents concurrent spawns.
 ---------------------------------------------------------------------------
 function spawnRandomCardsByNumber(n)
+    -- Safety check: prevent concurrent spawns
+    if isSpawning then
+        printToAll("Cards are still spawning! Please wait...", Color.Red)
+        return
+    end
+    
+    -- Set spawning state
+    isSpawning = true
+    totalCardsToSpawn = n
+    cardsSpawned = 0
+    
     local spawnPos = getSpawnAnchor()
+    
+    -- Create spawning indicator
+    createSpawningIndicator(spawnPos)
+    
     local id = ""
     if White then id = id .. "W" end
     if Blue  then id = id .. "U" end
@@ -431,12 +494,14 @@ printToAll(id)
     WebRequest.get(url, function(response)
         if response.is_error or not response.text then
             print("Error fetching card from backend.")
+            endSpawning()
             return
         end
 
         local decoded = JSONdecode(response.text)
         if not decoded then
             print("Error: Invalid JSON from backend")
+            endSpawning()
             return
         end
 
@@ -449,6 +514,7 @@ printToAll(id)
             list = decoded
         else
             print("Error: Invalid response format from backend")
+            endSpawning()
             return
         end
 
@@ -471,6 +537,10 @@ printToAll(id)
                 deckDat.DeckIDs[i] = cardDat.CardID
                 deckDat.CustomDeck[1000 + i] = cardDat.CustomDeck[1000 + i]
                 deckDat.ContainedObjects[i] = cardDat
+                
+                -- Update spawning indicator
+                cardsSpawned = cardsSpawned + 1
+                updateSpawningIndicator()
             else
                 print("Error processing card data for card " .. tostring(i))
             end
@@ -484,8 +554,14 @@ printToAll(id)
                 rotation = self.getRotation()
             })
             printToAll("Spawned " .. #deckDat.ContainedObjects .. " random cards as a deck")
+            
+            -- Wait a moment before clearing the indicator so user sees completion
+            Wait.time(function()
+                endSpawning()
+            end, 1.0)
         else
             print("No valid cards to spawn")
+            endSpawning()
         end
     end)
 end
