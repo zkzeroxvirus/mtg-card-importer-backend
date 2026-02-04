@@ -17,6 +17,12 @@ const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = 500; // Maximum size for failed query and error caches
 
+// Random card deduplication constants
+// When fetching multiple random cards, request extra to account for duplicates
+// A 1.5x multiplier balances between API efficiency and getting enough unique cards
+const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
+const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
+
 // Security: Validate card back URL is from allowed domains
 function isValidCardBackURL(url) {
   if (!url || typeof url !== 'string') return false;
@@ -981,8 +987,8 @@ app.get('/random', randomLimiter, async (req, res) => {
       
       if (USE_BULK_DATA && bulkData.isLoaded()) {
         // Bulk data - instant responses (with logging suppressed)
-        // Try up to numCards * 3 attempts to account for duplicates
-        const maxAttempts = numCards * 3;
+        // Try up to numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER attempts to account for duplicates
+        const maxAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
         let attempts = 0;
         
         while (cards.length < numCards && attempts < maxAttempts) {
@@ -1009,7 +1015,7 @@ app.get('/random', randomLimiter, async (req, res) => {
             // Get remaining cards from API
             const remaining = numCards - cards.length;
             let apiAttempts = 0;
-            const maxApiAttempts = remaining * 3;
+            const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
             
             while (cards.length < numCards && apiAttempts < maxApiAttempts) {
               apiAttempts++;
@@ -1051,7 +1057,7 @@ app.get('/random', randomLimiter, async (req, res) => {
           const baseDelay = 100; // Base delay in ms between request starts
           
           // Request extra cards to account for potential duplicates
-          const cardsToFetch = Math.ceil((numCards - 1) * 1.5);
+          const cardsToFetch = Math.ceil((numCards - 1) * DUPLICATE_BUFFER_MULTIPLIER);
           
           for (let i = 0; i < cardsToFetch; i++) {
             // Stagger request starts to spread load and avoid overwhelming rate limits
@@ -1078,7 +1084,7 @@ app.get('/random', randomLimiter, async (req, res) => {
           let failedCount = 0;
           let duplicateCount = 0;
           
-          results.forEach(card => {
+          for (const card of results) {
             if (card === null) {
               failedCount++;
             } else if (cards.length < numCards) {
@@ -1088,8 +1094,15 @@ app.get('/random', randomLimiter, async (req, res) => {
               } else {
                 duplicateCount++;
               }
+            } else {
+              // Already have enough unique cards, count remaining as duplicates
+              if (!seenCardIds.has(card.id)) {
+                duplicateCount++;
+              } else {
+                duplicateCount++;
+              }
             }
-          });
+          }
           
           const fetchDuration = Date.now() - fetchStartTime;
           console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates skipped)`);
