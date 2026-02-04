@@ -1458,10 +1458,6 @@ local Usage = [[━━━━━━━━━━━━━━━━━━━━━�
    → Spawn a single card by name
    → Example: [b]Scryfall Lightning Bolt[/b]
 
-[b][0077ff]Scryfall[/b] [i]Number CardName[/i]
-   → Spawn multiple copies of a card
-   → Example: [b]Scryfall 4 Mountain[/b]
-
 [b][0077ff]Scryfall[/b] [i]DecklistURL[/i]
    → Import entire deck from URL
    → Supports: TappedOut, Moxfield, Archidekt, Scryfall
@@ -1504,7 +1500,6 @@ Stuck requests are automatically cleared and the queue continues.
 [b][AAAAAA]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [i]Modified by Sirin • Custom backend support
 Backend: ]] .. BACKEND_URL .. [[
-For more commands & features, check the SHelp notebook tab.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━]]
 
 -- Check for hung requests and auto-recover
@@ -1726,11 +1721,11 @@ function onLoad(data)
   Usage = Usage:format(self.getName())
   uNotebook('SHelp', Usage)
   local u = Usage:gsub('\n\n.*', '\n\n[b][FFFF77]📖 Full help available in Notebook tab: SHelp[/b]')
-  u = u .. '\n\n[b][77FF77]✨ Ready to import cards![/b] Type "[b]Scryfall help[/b]" anytime for commands.'
+  u = u .. '\n\n[b][77FF77]✨ Ready to import cards![/b]'
   -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   -- Less intrusive chat message - full help in notebook (SHelp)
-  printToAll('[b][77FF77]' .. self.getName() .. ' ready![/b] Type [b]Scryfall help[/b] or check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
+  printToAll('[b][77FF77]' .. self.getName() .. ' [/b] Check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
   
   -- Start the timeout monitor for hung requests
   startTimeoutMonitor()
