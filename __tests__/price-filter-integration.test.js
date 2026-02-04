@@ -95,20 +95,16 @@ describe('Price Filter Integration Tests', () => {
 
       // USD filters - check all patterns first
       if (part.match(/^usd[:=<>]/i)) {
-        if (part.match(/usd>=([0-9.]+)/i)) {
-          const match = part.match(/usd>=([0-9.]+)/i);
+        let match;
+        if ((match = part.match(/usd>=([0-9.]+)/i))) {
           filters.usdGreaterEqual = parseFloat(match[1]);
-        } else if (part.match(/usd>([0-9.]+)/i)) {
-          const match = part.match(/usd>([0-9.]+)/i);
+        } else if ((match = part.match(/usd>([0-9.]+)/i))) {
           filters.usdGreater = parseFloat(match[1]);
-        } else if (part.match(/usd<=([0-9.]+)/i)) {
-          const match = part.match(/usd<=([0-9.]+)/i);
+        } else if ((match = part.match(/usd<=([0-9.]+)/i))) {
           filters.usdLessEqual = parseFloat(match[1]);
-        } else if (part.match(/usd<([0-9.]+)/i)) {
-          const match = part.match(/usd<([0-9.]+)/i);
+        } else if ((match = part.match(/usd<([0-9.]+)/i))) {
           filters.usdLess = parseFloat(match[1]);
-        } else if (part.match(/usd[:=]([0-9.]+)/i)) {
-          const match = part.match(/usd[:=]([0-9.]+)/i);
+        } else if ((match = part.match(/usd[:=]([0-9.]+)/i))) {
           filters.usdEquals = parseFloat(match[1]);
         }
         return;

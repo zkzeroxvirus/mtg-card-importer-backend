@@ -55,20 +55,16 @@ describe('Price Filtering', () => {
     }
 
     // Parse USD filters
-    if (query.match(/usd>=([0-9.]+)/i)) {
-      const match = query.match(/usd>=([0-9.]+)/i);
+    let match;
+    if ((match = query.match(/usd>=([0-9.]+)/i))) {
       filters.usdGreaterEqual = parseFloat(match[1]);
-    } else if (query.match(/usd>([0-9.]+)/i)) {
-      const match = query.match(/usd>([0-9.]+)/i);
+    } else if ((match = query.match(/usd>([0-9.]+)/i))) {
       filters.usdGreater = parseFloat(match[1]);
-    } else if (query.match(/usd<=([0-9.]+)/i)) {
-      const match = query.match(/usd<=([0-9.]+)/i);
+    } else if ((match = query.match(/usd<=([0-9.]+)/i))) {
       filters.usdLessEqual = parseFloat(match[1]);
-    } else if (query.match(/usd<([0-9.]+)/i)) {
-      const match = query.match(/usd<([0-9.]+)/i);
+    } else if ((match = query.match(/usd<([0-9.]+)/i))) {
       filters.usdLess = parseFloat(match[1]);
-    } else if (query.match(/usd[:=]([0-9.]+)/i)) {
-      const match = query.match(/usd[:=]([0-9.]+)/i);
+    } else if ((match = query.match(/usd[:=]([0-9.]+)/i))) {
       filters.usdEquals = parseFloat(match[1]);
     }
 
