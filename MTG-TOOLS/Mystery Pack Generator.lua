@@ -3,7 +3,7 @@ function onLoad()
   backURL='https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
   -- Backend URL - change this to your deployed backend URL
-  backendURL='https://mtg-card-importer-backend.onrender.com/'
+  backendURL='https://api.mtginfo.org'
 
   setCode='Mystery'
   -- setCode='KLM'
