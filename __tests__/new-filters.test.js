@@ -4,8 +4,6 @@
  * is:spotlight, is:fetchland, is:shockland, is:modal, mv:odd, mv:even
  */
 
-const bulkData = require('../lib/bulk-data');
-
 // Mock card database for testing
 const mockCards = [
   {
@@ -196,13 +194,8 @@ const mockCards = [
 describe('New Scryfall Filters', () => {
   // Helper function to test filters
   const testFilter = async (query, expectedNames) => {
-    // Mock the cardsDatabase
-    const originalModule = require.cache[require.resolve('../lib/bulk-data')];
-    
     // Create a mock implementation
     const mockSearchCards = async (q) => {
-      const filters = bulkData.parseQuery ? bulkData.parseQuery(q) : { nameContains: q };
-      
       // Simple mock filtering based on query
       let results = mockCards;
       
