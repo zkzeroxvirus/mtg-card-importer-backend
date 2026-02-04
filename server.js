@@ -977,18 +977,29 @@ app.get('/random', randomLimiter, async (req, res) => {
     } else {
       // Multiple random cards - return as list
       const cards = [];
+      const seenCardIds = new Set(); // Track card IDs to avoid duplicates
       
       if (USE_BULK_DATA && bulkData.isLoaded()) {
         // Bulk data - instant responses (with logging suppressed)
-        for (let i = 0; i < numCards; i++) {
+        // Try up to numCards * 3 attempts to account for duplicates
+        const maxAttempts = numCards * 3;
+        let attempts = 0;
+        
+        while (cards.length < numCards && attempts < maxAttempts) {
+          attempts++;
           try {
             const card = await bulkData.getRandomCard(q, true);  // suppressLog=true
-            if (card) {
+            if (card && !seenCardIds.has(card.id)) {
+              seenCardIds.add(card.id);
               cards.push(card);
             }
           } catch (error) {
             console.warn(`Skipped: ${error.message}`);
           }
+        }
+        
+        if (attempts >= maxAttempts && cards.length < numCards) {
+          console.log(`[BulkData] Reached max attempts (${maxAttempts}) with ${cards.length}/${numCards} unique cards`);
         }
         
         // Fallback to API if bulk data didn't return enough cards
@@ -997,9 +1008,16 @@ app.get('/random', randomLimiter, async (req, res) => {
           try {
             // Get remaining cards from API
             const remaining = numCards - cards.length;
-            for (let i = 0; i < remaining; i++) {
+            let apiAttempts = 0;
+            const maxApiAttempts = remaining * 3;
+            
+            while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+              apiAttempts++;
               const card = await scryfallLib.getRandomCard(q, true);
-              if (card) cards.push(card);
+              if (card && !seenCardIds.has(card.id)) {
+                seenCardIds.add(card.id);
+                cards.push(card);
+              }
             }
           } catch (error) {
             console.warn(`API fallback failed: ${error.message}`);
@@ -1011,6 +1029,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         let firstCard;
         try {
           firstCard = await scryfallLib.getRandomCard(q);
+          seenCardIds.add(firstCard.id);
           cards.push(firstCard);
         } catch (error) {
           // First request failed - likely invalid query
@@ -1024,14 +1043,17 @@ app.get('/random', randomLimiter, async (req, res) => {
           throw error;
         }
         
-        // First card succeeded, fetch the rest in parallel
+        // First card succeeded, fetch the rest in parallel with deduplication
         if (numCards > 1) {
           console.log(`Fetching ${numCards - 1} additional random cards (logs suppressed)...`);
           const cardPromises = [];
           const fetchStartTime = Date.now();
           const baseDelay = 100; // Base delay in ms between request starts
           
-          for (let i = 1; i < numCards; i++) {
+          // Request extra cards to account for potential duplicates
+          const cardsToFetch = Math.min((numCards - 1) * 1.5, 100);
+          
+          for (let i = 1; i < cardsToFetch; i++) {
             // Stagger request starts to spread load and avoid overwhelming rate limits
             // Use linear staggering to space out requests evenly
             const staggerDelay = i * baseDelay;
@@ -1052,15 +1074,25 @@ app.get('/random', randomLimiter, async (req, res) => {
           }
           const results = await Promise.all(cardPromises);
           
-          // Calculate failures from results
-          const failedCount = results.filter(card => card === null).length;
+          // Calculate failures from results and deduplicate
+          let failedCount = 0;
+          let duplicateCount = 0;
           
           results.forEach(card => {
-            if (card) cards.push(card);
+            if (card === null) {
+              failedCount++;
+            } else if (cards.length < numCards) {
+              if (!seenCardIds.has(card.id)) {
+                seenCardIds.add(card.id);
+                cards.push(card);
+              } else {
+                duplicateCount++;
+              }
+            }
           });
           
           const fetchDuration = Date.now() - fetchStartTime;
-          console.log(`Bulk random completed: ${cards.length}/${numCards} cards fetched in ${fetchDuration}ms (${failedCount} failed)`);
+          console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates skipped)`);
         }
       }
       
