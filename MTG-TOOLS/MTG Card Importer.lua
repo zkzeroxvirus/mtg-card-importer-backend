@@ -2,7 +2,7 @@
 -- MTG Card Importer for Tabletop Simulator
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
-mod_name, version = 'Card Importer', '1.905'
+mod_name, version = 'MTG Importer', '1.905'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -1729,7 +1729,8 @@ function onLoad(data)
   u = u .. '\n\n[b][77FF77]✨ Ready to import cards![/b] Type "[b]Scryfall help[/b]" anytime for commands.'
   -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
-  printToAll(u, {0.9, 0.9, 0.9})
+  -- Less intrusive chat message - full help in notebook (SHelp)
+  printToAll('[b][77FF77]' .. self.getName() .. ' ready![/b] Type [b]Scryfall help[/b] or check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
   
   -- Start the timeout monitor for hung requests
   startTimeoutMonitor()
@@ -1760,7 +1761,14 @@ function onChat(msg,p)
                      '[FFFFFF]Now [b]' .. msg .. '[/b] importer chat messages.\n' ..
                      '[AAAAAA]Toggle anytime with "[b]Scryfall hide[/b]"',SMC)
     elseif a=='help'then
-      p.print(Usage,{0.9,0.9,0.9})return false
+      p.print('[b][00CCFF]📖 Help Documentation[/b]\n\n' ..
+              '[FFFFFF]Full command list available in [b][FFFF77]Notebook > SHelp tab[/b]\n\n' ..
+              '[AAAAAA]Quick reference:\n' ..
+              '• [b]Scryfall CardName[/b] - Spawn a card\n' ..
+              '• [b]Scryfall DeckURL[/b] - Import a deck\n' ..
+              '• [b]Scryfall random[/b] - Random card\n\n' ..
+              '[77FF77]Check the SHelp notebook for complete documentation!',{0.9,0.9,0.9})
+      return false
     elseif a=='promote me' and p.steam_id==author then
       p.promote()
     elseif a=='clear queue'then
