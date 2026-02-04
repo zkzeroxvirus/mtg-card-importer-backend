@@ -348,7 +348,36 @@ describe('New Scryfall Filters', () => {
 
 describe('Filter Integration', () => {
   test('should handle multiple filters together', async () => {
-    // This is a basic integration test
-    expect(true).toBe(true);
+    // Test combining mana cost, odd CMC, and modal filters
+    const testFilter = async (query, expectedNames) => {
+      const mockSearchCards = async (q) => {
+        let results = mockCards;
+        
+        // Apply all relevant filters
+        if (q.includes('m:{U}')) {
+          results = results.filter(c => (c.mana_cost || '').includes('{U}'));
+        }
+        if (q.includes('mv:odd')) {
+          results = results.filter(c => (c.cmc || 0) % 2 !== 0);
+        }
+        if (q.includes('is:modal')) {
+          results = results.filter(c => {
+            const oracle = (c.oracle_text || '').toLowerCase();
+            return oracle.includes('choose one') || oracle.includes('choose two');
+          });
+        }
+        
+        return results;
+      };
+      
+      const results = await mockSearchCards(query);
+      const resultNames = results.map(c => c.name).sort();
+      const expected = expectedNames.sort();
+      
+      expect(resultNames).toEqual(expected);
+    };
+    
+    // A card that has mana cost with {U}, odd CMC (3), and is modal
+    await testFilter('m:{U} mv:odd is:modal', ['Modal Spell']);
   });
 });
