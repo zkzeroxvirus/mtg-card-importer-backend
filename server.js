@@ -31,7 +31,7 @@ function isValidCardBackURL(url) {
       'imgur.com'
     ];
     return allowedDomains.some(domain => parsed.hostname.endsWith(domain));
-  } catch (e) {
+  } catch (_e) {
     return false;
   }
 }
@@ -287,9 +287,10 @@ app.get('/', (req, res) => {
  * Uses bulk data if available (exact name match only), falls back to API for fuzzy search
  */
 app.get('/card/:name', async (req, res) => {
+  const { name } = req.params;
+  const { set } = req.query;
+  
   try {
-    const { name } = req.params;
-    const { set } = req.query;
 
     if (!name) {
       return res.status(400).json({ object: 'error', details: 'Card name required' });
@@ -366,7 +367,7 @@ app.get('/card/:name', async (req, res) => {
             corrected._corrected_name = suggestion;
             corrected._original_name = name;
             return res.json(corrected);
-          } catch (fallbackError) {
+          } catch (_fallbackError) {
             // If set-specific lookup failed, try without set
             if (set) {
               try {
@@ -374,7 +375,7 @@ app.get('/card/:name', async (req, res) => {
                 corrected._corrected_name = suggestion;
                 corrected._original_name = name;
                 return res.json(corrected);
-              } catch (e) {
+              } catch (_e) {
                 // fall through to error response
               }
             }
@@ -386,7 +387,7 @@ app.get('/card/:name', async (req, res) => {
             details: `Card not found: ${name}. Did you mean: ${suggestionList}?`
           });
         }
-      } catch (e) {
+      } catch (_e) {
         // Ignore autocomplete failures and return original error
       }
     }
@@ -761,7 +762,7 @@ app.post('/deck/parse', async (req, res) => {
             });
           }
         }
-      } catch (e) {
+      } catch (_e) {
         // Not valid JSON, fall through to other formats
       }
     }
@@ -811,7 +812,7 @@ app.post('/deck/parse', async (req, res) => {
         // Parse: "4x Island" or "4 Island" or "4x Island (DOM) 264"
         const match = line.match(/^(\d+)x?\s+(.+?)(?:\s*\(([^)]+)\))?(?:\s+\d+)?$/i);
         if (match) {
-          const [_, count, name, set] = match;
+          const [, count, name, set] = match;
           const card = {
             count: parseInt(count),
             name: name.trim()
@@ -1339,7 +1340,7 @@ app.get('/proxy', async (req, res) => {
 /**
  * Error handler
  */
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
     error: 'Internal server error',
