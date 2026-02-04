@@ -1051,9 +1051,9 @@ app.get('/random', randomLimiter, async (req, res) => {
           const baseDelay = 100; // Base delay in ms between request starts
           
           // Request extra cards to account for potential duplicates
-          const cardsToFetch = Math.min(Math.ceil((numCards - 1) * 1.5), 100);
+          const cardsToFetch = Math.ceil((numCards - 1) * 1.5);
           
-          for (let i = 1; i < cardsToFetch; i++) {
+          for (let i = 0; i < cardsToFetch; i++) {
             // Stagger request starts to spread load and avoid overwhelming rate limits
             // Use linear staggering to space out requests evenly
             const staggerDelay = i * baseDelay;
