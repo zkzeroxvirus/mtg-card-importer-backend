@@ -180,7 +180,11 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       'art_series',
       'reversible_card',
       'augment',
-      'host'
+      'host',
+      'dungeon',
+      'hero',
+      'attraction',
+      'stickers'
     ];
 
     test.each(nonPlayableLayouts)('should exclude cards with layout: %s', (layout) => {
@@ -194,9 +198,74 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
         const cardLayout = card.layout || '';
         const nonPlayableLayouts = [
           'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
-          'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+          'vanguard', 'art_series', 'reversible_card', 'augment', 'host',
+          'dungeon', 'hero', 'attraction', 'stickers'
         ];
         return !nonPlayableLayouts.includes(cardLayout.toLowerCase());
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Another Normal']);
+    });
+    
+    test('should exclude dungeon cards (AFR)', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'afr', layout: 'normal' },
+        { name: 'Dungeon of the Mad Mage', set: 'afr', layout: 'dungeon' },
+        { name: 'Another Normal', set: 'afr', layout: 'modal_dfc' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const layout = card.layout || '';
+        return layout.toLowerCase() !== 'dungeon';
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Another Normal']);
+    });
+    
+    test('should exclude hero cards (THB)', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'thb', layout: 'normal' },
+        { name: 'Hero Card', set: 'thb', layout: 'hero' },
+        { name: 'Another Normal', set: 'thb', layout: 'transform' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const layout = card.layout || '';
+        return layout.toLowerCase() !== 'hero';
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Another Normal']);
+    });
+    
+    test('should exclude attraction cards (Unfinity)', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'unf', layout: 'normal', security_stamp: 'oval' },
+        { name: 'Attraction Card', set: 'unf', layout: 'attraction' },
+        { name: 'Another Normal', set: 'unf', layout: 'transform', security_stamp: 'oval' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const layout = card.layout || '';
+        return layout.toLowerCase() !== 'attraction';
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Another Normal']);
+    });
+    
+    test('should exclude sticker cards (Unfinity)', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'unf', layout: 'normal', security_stamp: 'oval' },
+        { name: 'Sticker Sheet', set: 'unf', layout: 'stickers' },
+        { name: 'Another Normal', set: 'unf', layout: 'transform', security_stamp: 'oval' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const layout = card.layout || '';
+        return layout.toLowerCase() !== 'stickers';
       });
 
       expect(filtered).toHaveLength(2);
@@ -234,7 +303,8 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       const testCardSets = ['cmb1', 'mb2', 'cmb2'];
       const nonPlayableLayouts = [
         'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
-        'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+        'vanguard', 'art_series', 'reversible_card', 'augment', 'host',
+        'dungeon', 'hero', 'attraction', 'stickers'
       ];
 
       const mockCards = [
@@ -244,6 +314,9 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
         { name: 'Token Card', set: 'tkhm', security_stamp: null, layout: 'token' },
         { name: 'Art Card', set: 'nec', security_stamp: null, layout: 'art_series' },
         { name: 'Emblem', set: 'teld', security_stamp: null, layout: 'emblem' },
+        { name: 'Dungeon Card', set: 'afr', security_stamp: null, layout: 'dungeon' },
+        { name: 'Hero Card', set: 'thb', security_stamp: null, layout: 'hero' },
+        { name: 'Attraction', set: 'unf', security_stamp: null, layout: 'attraction' },
         { name: 'Normal Card 2', set: 'mh2', security_stamp: 'oval', layout: 'transform' }
       ];
 
@@ -269,12 +342,15 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
         { name: 'Token Upper', set: 'test', layout: 'TOKEN' },
         { name: 'Token Mixed', set: 'test', layout: 'Token' },
         { name: 'Art Series Upper', set: 'test', layout: 'ART_SERIES' },
+        { name: 'Dungeon Upper', set: 'test', layout: 'DUNGEON' },
+        { name: 'Hero Mixed', set: 'test', layout: 'Hero' },
         { name: 'Normal Card', set: 'dom', layout: 'NORMAL' }
       ];
 
       const nonPlayableLayouts = [
         'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
-        'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+        'vanguard', 'art_series', 'reversible_card', 'augment', 'host',
+        'dungeon', 'hero', 'attraction', 'stickers'
       ];
 
       const filtered = mockCards.filter(card => {
