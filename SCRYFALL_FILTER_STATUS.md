@@ -2,7 +2,7 @@
 
 This document provides a comprehensive overview of which Scryfall API filters are implemented in the bulk data query parser.
 
-## ✅ Fully Implemented Filters (53 total)
+## ✅ Fully Implemented Filters (75+ total)
 
 ### Basic Card Properties
 - `set:` / `s:` / `se:` - Filter by set code
@@ -26,6 +26,7 @@ This document provides a comprehensive overview of which Scryfall API filters ar
 ### Numeric Properties
 - `manavalue:` / `mv:` / `cmc:` - Converted mana cost
   - Operators: `=`, `<`, `>`, `<=`, `>=`
+  - **NEW:** Supports `mv:odd` and `mv:even` for odd/even CMC
 - `power:` / `pow:` - Creature power
   - Operators: `=`, `<`, `>`, `<=`, `>=`
 - `toughness:` / `tou:` / `toughness:` - Creature toughness
@@ -39,14 +40,28 @@ This document provides a comprehensive overview of which Scryfall API filters ar
 - `flavor:` / `ft:` - Search flavor text
 - `name:` - Search card name (supports quoted strings)
 - `artist:` / `a:` - Search artist name (supports quoted strings)
+- **NEW:** `fo:` / `fulloracle:` - Full oracle text including reminder text
+
+### Mana & Symbols (NEW)
+- `m:` / `mana:` - Mana symbol search
+  - Examples: `m:{2}{U}{U}`, `m:{R}{R}`
+  - Search for specific mana costs
+
+### Feature Detection (NEW)
+- `has:watermark` - Cards with watermarks
+- `has:partner` - Cards with Partner ability
+- `has:companion` - Cards with Companion ability
 
 ### Card Properties
 - `watermark:` / `wm:` - Filter by watermark (also supports `-wm:` for exclusion)
 - `frame:` - Filter by frame year (also supports `-frame:` for exclusion)
 - `year:` - Filter by release year
   - Operators: `=`, `<`, `>`, `>=`
+- **NEW:** `stamp:` - Security stamp type (oval, acorn, triangle)
+- **NEW:** `frameeffect:` - Frame effects (showcase, extendedart, etc.)
+- **NEW:** `block:` - Block name search (searches in set_name field)
 
-### Format Legality (NEW)
+### Format Legality
 - `legal:` - Filter cards legal in a format
   - Examples: `legal:commander`, `legal:modern`, `legal:standard`
 - `banned:` - Filter cards banned in a format
@@ -54,7 +69,7 @@ This document provides a comprehensive overview of which Scryfall API filters ar
 - `restricted:` - Filter cards restricted in a format
   - Examples: `restricted:vintage`
 
-### Layout (NEW)
+### Layout
 - `layout:` - Filter by card layout type
   - Examples: `layout:normal`, `layout:transform`, `layout:split`
 - `-layout:` - Exclude specific layout types
@@ -88,8 +103,19 @@ This document provides a comprehensive overview of which Scryfall API filters ar
 - `is:full-art` - Full-art card
 - `is:extended-art` - Extended-art frame
 - `is:vanilla` - No rules text
+- **NEW:** `is:reserved` - Reserved list cards
+- **NEW:** `is:spotlight` - Story spotlight cards
+- **NEW:** `is:fetchland` - Fetchland cards (searches library for lands)
+- **NEW:** `is:shockland` - Shockland cards (2 life payment on ETB)
+- **NEW:** `is:modal` - Modal cards (choose one or more)
 
 ## ⚠️ Partially Implemented
+
+### Printings Filter
+- `prints:` - Number of printings
+  - **LIMITED:** Only approximates based on reprint status
+  - Note: Bulk data doesn't include full printing count
+  - Treats reprints as 2+ and new cards as 1
 
 ### Format Filter
 - `format:standard` - Only standard format is implemented
@@ -97,33 +123,15 @@ This document provides a comprehensive overview of which Scryfall API filters ar
 
 ## ❌ Not Yet Implemented
 
-### High Priority (Common Queries)
-- `m:` / `mana:` - Mana symbol search (e.g., `m:{2}{U}{U}`)
-- `has:` - Feature detection
-  - `has:watermark`, `has:partner`, `has:companion`, etc.
-- `block:` - Block name search
-- `fo:` / `fulloracle:` - Full oracle text including reminder text
-- `prints:` - Number of printings
-  - Examples: `prints>10`, `prints=1`
-
-### Medium Priority (Less Common)
-- `stamp:` - Security stamp type (oval, acorn, triangle)
-- `frameeffect:` - Frame effects (showcase, extendedart, etc.)
-- `is:reserved` - Reserved list cards
-- `is:spotlight` - Story spotlight cards
-- `is:fetchland`, `is:shockland` - Land type shortcuts
-- `is:modal` - Modal cards
-- `unique:` - Uniqueness parameter (not a filter)
-- `prefer:` - Preference parameter (not a filter)
-
 ### Low Priority (Edge Cases)
-- `manavalue:odd` / `manavalue:even` - Odd/even CMC
-- `power:*` / `toughness:*` - Variable stats
-- `tagged:` - User tags (Scryfall-specific)
-- `cube:` - Cube availability
-- `date:` - Specific date filters
+- `power:*` / `toughness:*` - Variable stats (cards with * in power/toughness)
+- `tagged:` - User tags (Scryfall-specific, not available in bulk data)
+- `cube:` - Cube availability (Scryfall-specific)
+- `date:` - Specific date filters (more granular than year:)
 - `firstprint:` - First printing date
 - `is:permanent` subtypes (is:land, is:enchantment, etc.)
+- `unique:` - Uniqueness parameter (not a filter, sorting parameter)
+- `prefer:` - Preference parameter (not a filter, sorting parameter)
 
 ## Query Syntax Support
 
@@ -157,9 +165,31 @@ layout:transform
 usd>=50 t:artifact
 eur<10 r:rare
 
+# Mana symbol search (NEW)
+m:{2}{U}{U}
+m:{R}{R}
+
+# Feature detection (NEW)
+has:watermark t:artifact
+has:partner
+has:companion
+
+# Land type shortcuts (NEW)
+is:fetchland
+is:shockland
+
+# Security and frame effects (NEW)
+stamp:oval
+frameeffect:showcase
+
+# Odd/even CMC (NEW)
+mv:odd t:creature
+mv:even t:instant
+
 # Combined filters
 legal:commander id<=rug mv<=3 t:creature
 layout:normal usd<5 legal:pauper
+is:reserved usd>=100
 ```
 
 ## Testing Coverage
@@ -169,15 +199,16 @@ All implemented filters have comprehensive test coverage:
 - Integration tests for filtering behavior
 - Edge case handling
 - Case insensitivity verification
+- New filters tested in `__tests__/new-filters.test.js`
 
 ## Future Enhancements
 
-Priority order for additional implementations:
-1. **Mana symbol search** (`mana:`) - High user demand
-2. **Feature detection** (`has:`) - Versatile filter
-3. **Block filter** (`block:`) - Historical searches
-4. **Full oracle search** (`fo:`) - Advanced text queries
-5. **Frame effects** (`frameeffect:`) - Visual preferences
+Priority order for remaining implementations:
+1. **Variable stats** (`power:*`, `toughness:*`) - Edge case for special cards
+2. **More granular date filters** (`date:`, `firstprint:`) - Advanced historical queries
+3. **Permanent subtypes** (`is:land`, `is:enchantment`, etc.) - Type shortcuts
+
+Note: Many high-priority filters have been implemented in this update.
 
 ## Performance Considerations
 
@@ -186,13 +217,37 @@ Priority order for additional implementations:
 - Price filters require cards with price data
 - Format legality requires `legalities` field in card data
 - Layout filter requires `layout` field in card data
+- Mana symbol search performs substring matching on mana_cost field
+- Feature detection (has:) checks keywords and oracle text
+- Land type shortcuts (fetchland/shockland) use heuristics for identification
 
 ## Compliance
 
 This implementation follows Scryfall API syntax where possible:
 - Case-insensitive matching
-- Multiple aliases for filters (e.g., `t:` vs `type:`)
+- Multiple aliases for filters (e.g., `t:` vs `type:`, `m:` vs `mana:`)
 - Operator consistency
 - Error handling for malformed queries
+
+## Implementation Notes
+
+### Prints Filter Limitation
+The `prints:` filter is partially implemented due to bulk data limitations. The oracle_cards bulk data doesn't include the full printing count for each card. The current implementation:
+- Treats `reprint: true` cards as having 2+ printings
+- Treats `reprint: false` cards as having 1 printing
+- This is a rough approximation and may not be accurate for all queries
+
+For accurate printing counts, consider using the Scryfall API's /cards/search endpoint directly.
+
+### Block Filter
+The `block:` filter searches the `set_name` field since block information isn't explicitly provided in bulk data. This works for most cases but may not be as precise as Scryfall's native block data.
+
+### Land Type Shortcuts
+The `is:fetchland` and `is:shockland` filters use heuristics based on:
+- Card type line (must be Land)
+- Oracle text patterns (e.g., "search your library" for fetchlands, "2 life" for shocklands)
+- Known card names from popular cycles
+
+This approach captures most common cases but may miss edge cases or non-standard lands.
 
 Last Updated: 2026-02-04
