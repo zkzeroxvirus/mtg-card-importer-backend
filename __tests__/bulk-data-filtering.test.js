@@ -1,12 +1,14 @@
 /**
  * Tests for bulk data filtering logic
  * Specifically tests exclusion of test cards and acorn-stamped cards
+ * 
+ * Note: The isTestOrAcornCard function is not exported, so we test the filtering
+ * logic through mock scenarios that replicate the function's behavior.
  */
 
 describe('Bulk Data Filtering - Test and Acorn Cards', () => {
-  describe('isTestOrAcornCard helper function', () => {
-    // Since isTestOrAcornCard is not exported, we'll test it indirectly
-    // through the behavior of getRandomCard
+  describe('Card identification logic', () => {
+    // These tests document the expected behavior of card filtering
     
     test('should identify Mystery Booster playtest cards (cmb1)', () => {
       const testCard = {
