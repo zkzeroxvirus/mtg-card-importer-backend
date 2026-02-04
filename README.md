@@ -91,11 +91,11 @@ Unraid template notes:
 ### Deployment Options
 
 **API Mode (No Bulk Data)**
-- Best for quick cloud hosting (e.g., Render, Heroku)
+- Best for quick cloud hosting (e.g., Heroku, Railway, Fly.io)
 - Uses Scryfall API directly with rate limiting
 - Set `USE_BULK_DATA=false` in environment variables
 - Lower memory usage
-- Note: Render free tier may sleep after inactivity
+- Note: Some free tier services may sleep after inactivity
 
 **Bulk Data Mode**
 - Best for heavy usage or local hosting

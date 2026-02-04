@@ -413,7 +413,7 @@ end
 -- spawnRandomCardsByNumber spawns n random cards from any set that match the active card identity.
 -- It builds an OR query using the "id=" operator (for strictly mono-colored cards)
 -- and adds a clause "colorless type:artifact" so that only colorless artifacts are included.
--- All cards are spawned at the same position (startPos) to form a pile.
+-- All cards are spawned as a single deck object for optimal performance (no lag).
 ---------------------------------------------------------------------------
 function spawnRandomCardsByNumber(n)
     local spawnPos = getSpawnAnchor()
@@ -452,16 +452,40 @@ printToAll(id)
             return
         end
 
+        -- Build deck object (like MTG Importer does) for optimal performance
+        local deckDat = {
+            Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
+            Name = "Deck",
+            Nickname = "Random Cards (" .. tostring(#list) .. ")",
+            Description = "Random cards matching color identity: " .. id,
+            DeckIDs = {},
+            CustomDeck = {},
+            ContainedObjects = {}
+        }
+
+        -- Process all cards and add to deck
         for i, cardData in ipairs(list) do
-            local delay = (i - 1) * 0.2
-            Wait.time(function()
-                local cardDat = getCardDatFromJSON(cardData, 1000 + i)
-                if cardDat then
-                    spawnObjectData({ data = cardDat, position = spawnPos, rotation = self.getRotation() })
-                else
-                    print("Error processing card data for card " .. tostring(i))
-                end
-            end, delay)
+            local cardDat = getCardDatFromJSON(cardData, 1000 + i)
+            if cardDat then
+                -- Add card to deck
+                deckDat.DeckIDs[i] = cardDat.CardID
+                deckDat.CustomDeck[1000 + i] = cardDat.CustomDeck[1000 + i]
+                deckDat.ContainedObjects[i] = cardDat
+            else
+                print("Error processing card data for card " .. tostring(i))
+            end
+        end
+
+        -- Spawn entire deck at once for optimal performance
+        if #deckDat.ContainedObjects > 0 then
+            spawnObjectData({
+                data = deckDat,
+                position = spawnPos,
+                rotation = self.getRotation()
+            })
+            printToAll("Spawned " .. #deckDat.ContainedObjects .. " random cards as a deck")
+        else
+            print("No valid cards to spawn")
         end
     end)
 end

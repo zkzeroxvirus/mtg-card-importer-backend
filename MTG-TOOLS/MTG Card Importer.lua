@@ -9,7 +9,7 @@ self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 author = '76561198045776458'
 coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
-GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/MTG-TOOLS/main/MTG%20Card%20Importer.lua'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG-TOOLS/MTG%20Card%20Importer.lua'
 lang = 'en'
 
 -- ============================================================================
@@ -303,10 +303,11 @@ local Card=setmetatable({n=1,image=false},
       end
     end)
     if not success then
-      printToAll('Something went wrong and the importer crashed, giving the error:',{1,0,0})
-      printToAll(errorMSG,{0.8,0,0})
-      printToAll("If you were doing everything you were supposed to, please let Amuzet know on discord or the workshop page (please remember what you typed to get the error, and the error message itself).",{0,1,1})
-      printToAll('Restarting Importer...',{0,0.5,1})
+      printToAll('[b][FF0000]❌ Importer Error Detected[/b]',{1,0,0})
+      printToAll('[FF6666]' .. errorMSG,{0.8,0,0})
+      printToAll('[00FFFF]If this error persists, please report it on Discord or the Workshop page.\n' ..
+                 'Include: what you typed + this error message.',{0,1,1})
+      printToAll('[b][0099FF]♻️ Restarting Importer...[/b]',{0,0.5,1})
       for i,o in ipairs(textItems) do
         if o~=nil then
           o.destruct()
@@ -1146,7 +1147,10 @@ Importer=setmetatable({
     local url,n=BACKEND_URL..'/search?q=',qTbl.name:lower():gsub('%s',''):gsub('%%20','')    -- pieHere, making search with spaces possible
     if('plains island swamp mountain forest'):find(n)then
       --url=url:gsub('prints','art')end
-      broadcastToAll('Please Do NOT print Basics\nIf you would like a specific Basic specify that in your decklist\nor Spawn it using "Scryfall island&set=kld" the corresponding setcode',{0.9,0.9,0.9})
+      broadcastToAll('[b][FFAA00]⚠️ Basic Lands Not Printed[/b]\n' ..
+                     '[FFFFFF]Please specify which basics you want in your decklist,\n' ..
+                     'or spawn them individually:\n' ..
+                     '[00CCFF]Example: [b]Scryfall island&set=kld[/b] (for Kaladesh Island)',{0.9,0.9,0.9})
       endLoop()
     else
       if qTbl.oracleid~=nil then
@@ -1225,7 +1229,8 @@ Importer=setmetatable({
             return
           end
           if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
-            broadcastToAll('Failed to fetch rulings.',{0.9,0.9,0.9})
+            broadcastToAll('[b][FF6666]❌ Failed to fetch rulings[/b]\n' ..
+                           '[AAAAAA]The rulings service might be temporarily unavailable.',{0.9,0.9,0.9})
             endLoop()
             return
           end
@@ -1242,7 +1247,9 @@ Importer=setmetatable({
 
           if text:len()>1000 then
             uNotebook(cardDat.name,text)
-            broadcastToAll('Rulings are too long!\nFull rulings can be found in the Notebook',{0.9,0.9,0.9})
+            broadcastToAll('[b][FFAA00]📖 Rulings Saved to Notebook[/b]\n' ..
+                           '[FFFFFF]Too many rulings to display in chat.\n' ..
+                           '[00CCFF]Check the Notebook tab: [b]' .. cardDat.name .. '[/b]',{0.9,0.9,0.9})
           elseif qTbl.target then
             qTbl.target.setDescription(text)
           else
@@ -1441,26 +1448,64 @@ MODES=''
 for k,v in pairs(Importer)do if not('request'):find(k)then
 MODES=MODES..' '..k end end
 --[[Functions used everywhere else]]
-local Usage = [[    [b]%s
-[b][0077ff]Scryfall[/b] [i]CardName[/i]  [-][Spawn a card by name]
-[b][0077ff]Scryfall[/b] [i]CardName URL[/i]  [-][Spawn card with custom image (proxy)]
-[b][0077ff]Scryfall[/b] [i]URL[/i]  [-][Import deck from URL]
+local Usage = [[━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    [b]%s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[b]Custom Image Proxy:[/b]
-Type: Scryfall island https://your-image-url.com/image.jpg
-This fetches the card data (name, text, etc.) from Scryfall but uses your custom image.
+[b][00CCFF]⚡ QUICK START - BASIC COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[b][0077ff]Scryfall[/b] [i]CardName[/i]
+   → Spawn a single card by name
+   → Example: [b]Scryfall Lightning Bolt[/b]
 
-[b]Additional Commands:[/b]
-[b][0077ff]Scryfall help[/b]  [-][Show this help message]
-[b][0077ff]Scryfall hide[/b]  [-][Toggle chat message visibility (admin only)]
-[b][0077ff]Scryfall clear queue[/b]  [-][Reload importer and clear queue]
-[b][0077ff]Scryfall clear back[/b]  [-][Reset card back to default]
+[b][0077ff]Scryfall[/b] [i]Number CardName[/i]
+   → Spawn multiple copies of a card
+   → Example: [b]Scryfall 4 Mountain[/b]
 
-[b]Auto-Recovery:[/b]
-The importer now automatically detects and recovers from hung requests.
-If a request takes longer than 2 minutes, it will automatically timeout and move to the next request.
+[b][0077ff]Scryfall[/b] [i]DecklistURL[/i]
+   → Import entire deck from URL
+   → Supports: TappedOut, Moxfield, Archidekt, Scryfall
 
-Modified by Sirin to work with custom backend.]]
+
+[b][00FF77]🎨 CUSTOM ARTWORK (PROXIES)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[b][0077ff]Scryfall[/b] [i]CardName ImageURL[/i]
+   → Spawn card with official text & stats + your custom art
+   → Example: [b]Scryfall Island https://i.imgur.com/abc123.jpg[/b]
+   → Fetches card data from Scryfall, displays your image
+   → Supports: Imgur, Steam CDN
+
+
+[b][FFAA00]⚙️ UTILITY COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[b][0077ff]Scryfall help[/b]
+   → Display this help message
+
+[b][0077ff]Scryfall clear queue[/b]
+   → Cancel pending requests & reload importer
+
+[b][0077ff]Scryfall clear back[/b]
+   → Reset custom card backs to default
+
+[b][0077ff]Scryfall hide[/b]
+   → Toggle chat message visibility (admin only)
+
+
+[b][77FF77]✅ AUTO-RECOVERY SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The importer automatically detects and recovers from:
+  • Hung/frozen requests (30 second timeout)
+  • Network failures & API errors
+  • Backend connection issues
+
+Stuck requests are automatically cleared and the queue continues.
+
+
+[b][AAAAAA]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[i]Modified by Sirin • Custom backend support
+Backend: ]] .. BACKEND_URL .. [[
+For more commands & features, check the SHelp notebook tab.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━]]
 
 -- Check for hung requests and auto-recover
 function checkRequestTimeout()
@@ -1476,7 +1521,10 @@ function checkRequestTimeout()
       local requestInfo = failedRequest.full or failedRequest.name or 'Unknown'
       
       log('[MTG Importer] Request timeout detected after ' .. elapsed .. 's: ' .. requestInfo)
-      broadcastToAll('[FF7700]Importer: Request timed out after ' .. elapsed .. 's[-]\n[FFFFFF]' .. requestInfo .. '[-]\n[77FF77]Moving to next request...[-]', {1, 0.5, 0})
+      broadcastToAll('[b][FF7700]⚠️ Request Timeout[/b]\n' ..
+                     '[FFFFFF]Request took too long (>' .. elapsed .. 's):\n' ..
+                     '[AAAAAA]' .. requestInfo .. '\n' ..
+                     '[77FF77]✓ Automatically moving to next request...', {1, 0.5, 0})
       
       -- Clear the hung request and move to next
       if failedRequest.text and type(failedRequest.text) == 'function' then
@@ -1577,36 +1625,36 @@ function uVersion(wr)
   
   log('GitHub Version ' .. v .. ' | Current Version ' .. version)
   
-  local s = '\nLatest Version ' .. self.getName()
+  local statusMsg = '\nLatest Version ' .. self.getName()
   
   if versionNum > vNum or Test then
     Test = true
-    s = '\n[fff600]Experimental Version of Importer Module'
+    statusMsg = '\n[fff600]Experimental Version of Importer Module'
   elseif versionNum < vNum then
-    s = '\n[77ff00]Update Available: v' .. v .. ' (Current: v' .. version .. ')[-]'
-    s = s .. '\n[ffffff]Auto-updating from GitHub...'
-    broadcastToAll('[MTG Importer] ' .. s, {0.4, 1, 0.4})
+    statusMsg = '\n[b][00FF00]🔄 Updating Importer...[/b]'
+    statusMsg = statusMsg .. '\n[FFFFFF]New version [b]v' .. v .. '[/b] available (you have [b]v' .. version .. '[/b])'
+    statusMsg = statusMsg .. '\n[00CCFF]Downloading from GitHub...'
+    broadcastToAll('[b][MTG Importer][/b] ' .. statusMsg, {0.4, 1, 0.4})
     
     -- Update the script
     self.setLuaScript(wr.text)
     
     Wait.time(function()
-      broadcastToAll('[MTG Importer] Update complete! Reloading...', {0.4, 1, 0.4})
+      broadcastToAll('[b][MTG Importer][/b] [00FF00]✓ Update complete![/b] Reloading...', {0.4, 1, 0.4})
       self.reload()
     end, 1)
     return
   else
-    s = '\n[ffffff]You have the latest version!'
+    statusMsg = '\n[ffffff]You have the latest version!'
+    broadcastToAll('[b][MTG Importer][/b] [00FF00]✓ Up to date![/b] Running version [b]' .. version .. '[/b]', {0.4, 1, 0.4})
   end
   
-  Usage = Usage .. s
-  broadcastToAll('[MTG Importer] ' .. s, {1, 1, 0.4})
   registerModule()
 end
 
 -- Manual update check function (callable from button)
 function checkForUpdates()
-  broadcastToAll('[MTG Importer] Checking for updates from GitHub...', {0.7, 0.7, 1})
+  broadcastToAll('[b][MTG Importer][/b] [00CCFF]🔄 Checking for updates from GitHub...', {0.7, 0.7, 1})
   WebRequest.get(GITURL, self, 'uVersion')
 end
 
@@ -1677,8 +1725,8 @@ function onLoad(data)
   -- Setup usage text and description
   Usage = Usage:format(self.getName())
   uNotebook('SHelp', Usage)
-  local u = Usage:gsub('\n\n.*', '\nFull capabilities listed in Notebook: SHelp')
-  u = u .. '\n[ffffff]What\'s New: Modified for custom backend support'
+  local u = Usage:gsub('\n\n.*', '\n\n[b][FFFF77]📖 Full help available in Notebook tab: SHelp[/b]')
+  u = u .. '\n\n[b][77FF77]✨ Ready to import cards![/b] Type "[b]Scryfall help[/b]" anytime for commands.'
   -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   printToAll(u, {0.9, 0.9, 0.9})
@@ -1707,15 +1755,17 @@ function onChat(msg,p)
     local a=msg:match('!?[Ss]cryfall (.*)')or false
     if a=='hide'and p.admin then
       chatToggle=not chatToggle
-      if chatToggle then msg='supressing' else msg='showing'end
-      broadcastToAll('Importer now '..msg..' Chat messages with Importer in them.\nToggle this with "Scryfall Hide"',SMC)
+      if chatToggle then msg='hiding' else msg='showing'end
+      broadcastToAll('[b][FFAA00]👁️ Chat Display Toggle[/b]\n' ..
+                     '[FFFFFF]Now [b]' .. msg .. '[/b] importer chat messages.\n' ..
+                     '[AAAAAA]Toggle anytime with "[b]Scryfall hide[/b]"',SMC)
     elseif a=='help'then
       p.print(Usage,{0.9,0.9,0.9})return false
     elseif a=='promote me' and p.steam_id==author then
       p.promote()
     elseif a=='clear queue'then
       -- Clear the queue by reloading the object
-      printToAll(SMG..'Respawning Importer!',SMC)
+      printToAll('[b][00CCFF]♻️ Respawning Importer...[/b]',SMC)
       self.reload()
     elseif a=='clear back'then
       self.script_state=string.gsub([[{}]],'\n','')
