@@ -176,7 +176,7 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `NODE_ENV` — `development` or `production` (default: development)
 - `PORT` — Server port (default: 3000)
 - `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 50)
-- `DEFAULT_CARD_BACK` — Default card back URL when not specified in requests
+- `DEFAULT_CARD_BACK` — Optional default card back image URL (Steam CDN/Imgur recommended)
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
 - `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data, Docker/Unraid: /app/data)
 
