@@ -1,12 +1,12 @@
 /**
  * Tests for bulk data filtering logic
- * Specifically tests exclusion of test cards and acorn-stamped cards
+ * Specifically tests exclusion of test cards, acorn-stamped cards, and non-playable layouts
  * 
  * Note: The isTestOrAcornCard function is not exported, so we test the filtering
  * logic through mock scenarios that replicate the function's behavior.
  */
 
-describe('Bulk Data Filtering - Test and Acorn Cards', () => {
+describe('Bulk Data Filtering - Non-Playable Cards', () => {
   describe('Card identification logic', () => {
     // These tests document the expected behavior of card filtering
     
@@ -161,6 +161,125 @@ describe('Bulk Data Filtering - Test and Acorn Cards', () => {
       const filtered = mockCards.filter(card => {
         const securityStamp = card.security_stamp || '';
         return securityStamp.toLowerCase() !== 'acorn';
+      });
+
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].name).toBe('Normal Card');
+    });
+  });
+
+  describe('Non-playable layout filtering', () => {
+    // Test that non-playable card layouts are properly identified and excluded
+    const nonPlayableLayouts = [
+      'token',
+      'double_faced_token',
+      'emblem',
+      'planar',
+      'scheme',
+      'vanguard',
+      'art_series',
+      'reversible_card',
+      'augment',
+      'host'
+    ];
+
+    test.each(nonPlayableLayouts)('should exclude cards with layout: %s', (layout) => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'dom', layout: 'normal' },
+        { name: `Non-playable ${layout}`, set: 'test', layout: layout },
+        { name: 'Another Normal', set: 'mh2', layout: 'transform' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const cardLayout = card.layout || '';
+        const nonPlayableLayouts = [
+          'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
+          'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+        ];
+        return !nonPlayableLayouts.includes(cardLayout.toLowerCase());
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Another Normal']);
+    });
+
+    test('should allow playable layouts', () => {
+      const playableLayouts = [
+        'normal', 'split', 'flip', 'transform', 'modal_dfc', 'meld',
+        'leveler', 'class', 'case', 'saga', 'adventure', 'mutate',
+        'prototype', 'battle'
+      ];
+
+      const mockCards = playableLayouts.map(layout => ({
+        name: `Card with ${layout}`,
+        set: 'test',
+        layout: layout
+      }));
+
+      const nonPlayableLayouts = [
+        'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
+        'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const cardLayout = card.layout || '';
+        return !nonPlayableLayouts.includes(cardLayout.toLowerCase());
+      });
+
+      // All playable layouts should pass through
+      expect(filtered).toHaveLength(playableLayouts.length);
+    });
+
+    test('should filter combined: test sets, acorn, and non-playable layouts', () => {
+      const testCardSets = ['cmb1', 'mb2', 'cmb2'];
+      const nonPlayableLayouts = [
+        'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
+        'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+      ];
+
+      const mockCards = [
+        { name: 'Normal Card', set: 'dom', security_stamp: null, layout: 'normal' },
+        { name: 'Test Card', set: 'cmb1', security_stamp: null, layout: 'normal' },
+        { name: 'Acorn Card', set: 'unf', security_stamp: 'acorn', layout: 'normal' },
+        { name: 'Token Card', set: 'tkhm', security_stamp: null, layout: 'token' },
+        { name: 'Art Card', set: 'nec', security_stamp: null, layout: 'art_series' },
+        { name: 'Emblem', set: 'teld', security_stamp: null, layout: 'emblem' },
+        { name: 'Normal Card 2', set: 'mh2', security_stamp: 'oval', layout: 'transform' }
+      ];
+
+      // Apply all filters
+      const filtered = mockCards.filter(card => {
+        const set = card.set || '';
+        const securityStamp = card.security_stamp || '';
+        const layout = card.layout || '';
+        
+        const isTest = testCardSets.includes(set.toLowerCase());
+        const isAcorn = securityStamp.toLowerCase() === 'acorn';
+        const isNonPlayable = nonPlayableLayouts.includes(layout.toLowerCase());
+        
+        return !isTest && !isAcorn && !isNonPlayable;
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
+    });
+
+    test('layout matching should be case-insensitive', () => {
+      const mockCards = [
+        { name: 'Token Upper', set: 'test', layout: 'TOKEN' },
+        { name: 'Token Mixed', set: 'test', layout: 'Token' },
+        { name: 'Art Series Upper', set: 'test', layout: 'ART_SERIES' },
+        { name: 'Normal Card', set: 'dom', layout: 'NORMAL' }
+      ];
+
+      const nonPlayableLayouts = [
+        'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
+        'vanguard', 'art_series', 'reversible_card', 'augment', 'host'
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const layout = card.layout || '';
+        return !nonPlayableLayouts.includes(layout.toLowerCase());
       });
 
       expect(filtered).toHaveLength(1);
