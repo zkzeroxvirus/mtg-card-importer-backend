@@ -3,13 +3,8 @@
  * Tests retry logic, error handling, and data validation
  */
 
-const fs = require('fs');
-const path = require('path');
-
 // Mock dependencies before requiring bulk-data
 jest.mock('axios');
-jest.mock('fs');
-jest.mock('path');
 
 describe('Bulk Data - Download Retry Logic', () => {
   test('should retry on network failure', async () => {

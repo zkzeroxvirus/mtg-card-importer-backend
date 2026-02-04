@@ -1625,16 +1625,16 @@ function uVersion(wr)
   
   log('GitHub Version ' .. v .. ' | Current Version ' .. version)
   
-  local s = '\nLatest Version ' .. self.getName()
+  local statusMsg = '\nLatest Version ' .. self.getName()
   
   if versionNum > vNum or Test then
     Test = true
-    s = '\n[fff600]Experimental Version of Importer Module'
+    statusMsg = '\n[fff600]Experimental Version of Importer Module'
   elseif versionNum < vNum then
-    s = '\n[b][00FF00]🔄 Updating Importer...[/b]'
-    s = s .. '\n[FFFFFF]New version [b]v' .. v .. '[/b] available (you have [b]v' .. version .. '[/b])'
-    s = s .. '\n[00CCFF]Downloading from GitHub...'
-    broadcastToAll('[b][MTG Importer][/b] ' .. s, {0.4, 1, 0.4})
+    statusMsg = '\n[b][00FF00]🔄 Updating Importer...[/b]'
+    statusMsg = statusMsg .. '\n[FFFFFF]New version [b]v' .. v .. '[/b] available (you have [b]v' .. version .. '[/b])'
+    statusMsg = statusMsg .. '\n[00CCFF]Downloading from GitHub...'
+    broadcastToAll('[b][MTG Importer][/b] ' .. statusMsg, {0.4, 1, 0.4})
     
     -- Update the script
     self.setLuaScript(wr.text)
@@ -1645,20 +1645,10 @@ function uVersion(wr)
     end, 1)
     return
   else
-    s = '\n[ffffff]You have the latest version!'
+    statusMsg = '\n[ffffff]You have the latest version!'
+    broadcastToAll('[b][MTG Importer][/b] [00FF00]✓ Up to date![/b] Running version [b]' .. version .. '[/b]', {0.4, 1, 0.4})
   end
   
-  local s = '[b][00FF00]✓ Update Available![/b]\n' ..
-            '[FFFFFF]New version [b]' .. other .. '[/b] is available (you have [b]' .. version .. '[/b])\n' ..
-            '[00CCFF]Get the latest version from the Workshop or GitHub.'
-  if AUTO_UPDATE_ENABLED then
-    s = s .. '\n[77FF77]Auto-update is enabled - will update on next load.'
-  else
-    s = s .. '\n[FFAA00]Auto-update is disabled - manual update required.'
-  end
-  
-  Usage = Usage .. s
-  broadcastToAll('[b][MTG Importer][/b] ' .. s, {1, 1, 0.4})
   registerModule()
 end
 
