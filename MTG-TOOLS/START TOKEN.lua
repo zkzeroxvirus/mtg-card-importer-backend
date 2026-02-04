@@ -60,7 +60,7 @@ end
 -- SPAWNING INDICATOR FUNCTIONS (similar to MTG Importer)
 -----------------------------------------------------------------------
 function getSpawningProgressText()
-    return 'Spawning...\n' .. cardsSpawned .. ' / ' .. totalCardsToSpawn .. ' cards'
+    return 'Spawning...\n' .. totalCardsToSpawn .. ' cards'
 end
 
 function createSpawningIndicator(position)
@@ -70,10 +70,11 @@ function createSpawningIndicator(position)
     
     -- Create 3D text indicator above the spawn position
     local textPosition = {position.x, position.y + 3, position.z}
+    local selfRot = self.getRotation()
     local textObject = spawnObject({
         type = '3DText',
         position = textPosition,
-        rotation = {90, 0, 0}
+        rotation = {selfRot.x, selfRot.y + 180, selfRot.z}
     })
     
     textObject.TextTool.setValue(getSpawningProgressText())
@@ -557,8 +558,6 @@ printToAll(id)
                 position = spawnPos,
                 rotation = self.getRotation()
             })
-            printToAll("Spawned " .. #deckDat.ContainedObjects .. " random cards as a deck")
-            
             -- Wait a moment before clearing the indicator so user sees completion
             Wait.time(function()
                 endSpawning()
