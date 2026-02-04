@@ -59,6 +59,10 @@ end
 -----------------------------------------------------------------------
 -- SPAWNING INDICATOR FUNCTIONS (similar to MTG Importer)
 -----------------------------------------------------------------------
+function getSpawningProgressText()
+    return 'Spawning...\n' .. cardsSpawned .. ' / ' .. totalCardsToSpawn .. ' cards'
+end
+
 function createSpawningIndicator(position)
     if spawnIndicatorText then
         destroySpawningIndicator()
@@ -72,14 +76,14 @@ function createSpawningIndicator(position)
         rotation = {90, 0, 0}
     })
     
-    textObject.TextTool.setValue('Spawning...\n0 / ' .. totalCardsToSpawn .. ' cards')
+    textObject.TextTool.setValue(getSpawningProgressText())
     textObject.TextTool.setFontSize(60)
     spawnIndicatorText = textObject
 end
 
 function updateSpawningIndicator()
     if spawnIndicatorText then
-        spawnIndicatorText.TextTool.setValue('Spawning...\n' .. cardsSpawned .. ' / ' .. totalCardsToSpawn .. ' cards')
+        spawnIndicatorText.TextTool.setValue(getSpawningProgressText())
     end
 end
 
