@@ -16,7 +16,7 @@ const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 // Security: Input validation constants
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
-const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000'); // Maximum size for failed query and error caches
+const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -1533,7 +1533,6 @@ if (process.env.NODE_ENV !== 'test') {
   server.keepAliveTimeout = 65000; // 65 seconds (higher than common LB timeout of 60s)
   server.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
   server.requestTimeout = 120000; // 2 minutes for long-running deck builds
-  server.timeout = 120000; // Socket timeout
 
   // Graceful shutdown handler
   const gracefulShutdown = (signal) => {

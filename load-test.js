@@ -9,9 +9,9 @@ const http = require('http');
 const https = require('https');
 
 const BASE_URL = process.env.TEST_URL || 'http://localhost:3000';
-const CONCURRENT_USERS = parseInt(process.env.CONCURRENT_USERS || '500');
-const REQUESTS_PER_USER = parseInt(process.env.REQUESTS_PER_USER || '5');
-const RAMP_UP_TIME = parseInt(process.env.RAMP_UP_TIME || '10000'); // 10 seconds
+const CONCURRENT_USERS = parseInt(process.env.CONCURRENT_USERS || '500', 10);
+const REQUESTS_PER_USER = parseInt(process.env.REQUESTS_PER_USER || '5', 10);
+const RAMP_UP_TIME = parseInt(process.env.RAMP_UP_TIME || '10000', 10); // 10 seconds
 
 // Test scenarios mimicking real user behavior
 const TEST_SCENARIOS = [

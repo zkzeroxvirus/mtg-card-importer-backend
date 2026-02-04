@@ -7,7 +7,8 @@ const os = require('os');
  */
 
 // Configuration: Use environment variable or default to CPU count
-const WORKERS = parseInt(process.env.WORKERS || os.cpus().length);
+const workersEnv = process.env.WORKERS || 'auto';
+const WORKERS = workersEnv === 'auto' ? os.cpus().length : parseInt(workersEnv, 10);
 
 if (cluster.isPrimary) {
   console.log(`[Cluster] Primary process ${process.pid} is running`);
