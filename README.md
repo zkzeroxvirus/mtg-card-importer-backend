@@ -39,6 +39,34 @@ npm install
 npm start
 ```
 
+### Docker (Unraid)
+
+Build the image:
+```bash
+docker build -t mtg-card-importer-backend .
+```
+
+Run the container (recommended for Unraid/self-hosted bulk mode):
+```bash
+docker run -d \
+  --name mtg-card-importer-backend \
+  -p 3000:3000 \
+  -e NODE_ENV=production \
+  -e USE_BULK_DATA=true \
+  -e BULK_DATA_PATH=/app/data \
+  -e DEFAULT_CARD_BACK=https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/ \
+  -v /mnt/user/appdata/mtg-card-importer-backend:/app/data \
+  --restart unless-stopped \
+  mtg-card-importer-backend
+```
+
+The Dockerfile defaults `NODE_ENV=production` and `PORT=3000`; override them at runtime if needed.
+
+Unraid template notes:
+- Container port: `3000`
+- Path mapping: `/mnt/user/appdata/mtg-card-importer-backend` → `/app/data`
+- Environment: `USE_BULK_DATA=true`, `BULK_DATA_PATH=/app/data`
+
 ### Deployment Options
 
 **API Mode (No Bulk Data)**
@@ -148,9 +176,9 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `NODE_ENV` — `development` or `production` (default: development)
 - `PORT` — Server port (default: 3000)
 - `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 50)
-- `DEFAULT_CARD_BACK` — Default card back URL when not specified in requests
+- `DEFAULT_CARD_BACK` — Optional default card back image URL (Steam CDN/Imgur recommended)
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
-- `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data)
+- `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data, Docker/Unraid: /app/data)
 
 ## Configuration
 
