@@ -1,6 +1,13 @@
 const js = require('@eslint/js');
 
 module.exports = [
+  {
+    ignores: [
+      'node_modules/**',
+      'coverage/**',
+      'data/**'
+    ]
+  },
   js.configs.recommended,
   {
     languageOptions: {
@@ -32,11 +39,6 @@ module.exports = [
       'no-unused-vars': ['warn', { 'argsIgnorePattern': '^_' }],
       'no-undef': 'error',
       'no-console': 'off'
-    },
-    ignores: [
-      'node_modules/**',
-      'coverage/**',
-      'data/**'
-    ]
+    }
   }
 ];
