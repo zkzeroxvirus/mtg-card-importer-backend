@@ -68,6 +68,66 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       };
       expect(normalCard.security_stamp).not.toBe('acorn');
     });
+
+    test('should identify digital-only cards', () => {
+      const digitalCard = {
+        name: 'Alchemy Card',
+        set: 'ymid',
+        games: ['mtgo', 'arena'],
+        type_line: 'Creature'
+      };
+      expect(digitalCard.games).not.toContain('paper');
+    });
+
+    test('should identify oversized cards', () => {
+      const oversizedCard = {
+        name: 'Vanguard Card',
+        set: 'pvan',
+        oversized: true,
+        type_line: 'Vanguard'
+      };
+      expect(oversizedCard.oversized).toBe(true);
+    });
+
+    test('should not flag normal-sized cards', () => {
+      const normalCard = {
+        name: 'Lightning Bolt',
+        set: 'lea',
+        oversized: false,
+        type_line: 'Instant'
+      };
+      expect(normalCard.oversized).toBe(false);
+    });
+
+    test('should identify funny set_type cards', () => {
+      const funnyCard = {
+        name: 'Un-card',
+        set: 'unh',
+        set_type: 'funny',
+        type_line: 'Creature'
+      };
+      expect(funnyCard.set_type).toBe('funny');
+    });
+
+    test('should identify memorabilia set_type cards', () => {
+      const memorabiliaCard = {
+        name: 'Gold Border Card',
+        set: 'unk',
+        set_type: 'memorabilia',
+        type_line: 'Creature'
+      };
+      expect(memorabiliaCard.set_type).toBe('memorabilia');
+    });
+
+    test('should not flag paper cards', () => {
+      const paperCard = {
+        name: 'Lightning Bolt',
+        set: 'lea',
+        games: ['paper', 'mtgo'],
+        type_line: 'Instant'
+      };
+      expect(paperCard.games).toContain('paper');
+    });
   });
 
   describe('Integration: Test card exclusion in mock scenarios', () => {
@@ -91,6 +151,57 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
     });
 
+    test('oversized cards should be excluded', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'dom', oversized: false },
+        { name: 'Oversized Plane', set: 'opca', oversized: true },
+        { name: 'Oversized Scheme', set: 'oarc', oversized: true },
+        { name: 'Normal Card 2', set: 'mh2', oversized: false }
+      ];
+
+      // Filter out oversized cards
+      const filtered = mockCards.filter(card => card.oversized !== true);
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
+    });
+
+    test('funny set_type cards should be excluded', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'dom', set_type: 'expansion' },
+        { name: 'Un-card', set: 'unh', set_type: 'funny' },
+        { name: 'Another Un-card', set: 'ust', set_type: 'funny' },
+        { name: 'Normal Card 2', set: 'mh2', set_type: 'masters' }
+      ];
+
+      // Filter out funny cards
+      const filtered = mockCards.filter(card => {
+        const setType = card.set_type || '';
+        return setType.toLowerCase() !== 'funny';
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
+    });
+
+    test('memorabilia set_type cards should be excluded', () => {
+      const mockCards = [
+        { name: 'Normal Card', set: 'dom', set_type: 'expansion' },
+        { name: 'Gold Border', set: 'unk', set_type: 'memorabilia' },
+        { name: 'Oversized Promo', set: 'olep', set_type: 'memorabilia' },
+        { name: 'Normal Card 2', set: 'mh2', set_type: 'masters' }
+      ];
+
+      // Filter out memorabilia cards
+      const filtered = mockCards.filter(card => {
+        const setType = card.set_type || '';
+        return setType.toLowerCase() !== 'memorabilia';
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
+    });
+
     test('acorn cards should be excluded based on security_stamp', () => {
       const mockCards = [
         { name: 'Normal Card', set: 'dom', security_stamp: null },
@@ -107,6 +218,24 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
 
       expect(filtered).toHaveLength(2);
       expect(filtered.map(c => c.name)).toEqual(['Normal Card', 'Normal Card 2']);
+    });
+
+    test('digital-only cards should be excluded', () => {
+      const mockCards = [
+        { name: 'Paper Card', set: 'dom', games: ['paper', 'mtgo'] },
+        { name: 'Digital Only 1', set: 'ymid', games: ['mtgo', 'arena'] },
+        { name: 'Digital Only 2', set: 'ydmu', games: ['arena'] },
+        { name: 'Paper Card 2', set: 'mh2', games: ['paper'] }
+      ];
+
+      // Filter out digital-only cards
+      const filtered = mockCards.filter(card => {
+        const games = card.games || [];
+        return games.includes('paper');
+      });
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map(c => c.name)).toEqual(['Paper Card', 'Paper Card 2']);
     });
 
     test('both test and acorn cards should be excluded', () => {
@@ -306,31 +435,41 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
         'vanguard', 'art_series', 'reversible_card', 'augment', 'host',
         'dungeon', 'hero', 'attraction', 'stickers'
       ];
+      const nonPlayableSetTypes = ['funny', 'memorabilia', 'token', 'minigame'];
 
       const mockCards = [
-        { name: 'Normal Card', set: 'dom', security_stamp: null, layout: 'normal' },
-        { name: 'Test Card', set: 'cmb1', security_stamp: null, layout: 'normal' },
-        { name: 'Acorn Card', set: 'unf', security_stamp: 'acorn', layout: 'normal' },
-        { name: 'Token Card', set: 'tkhm', security_stamp: null, layout: 'token' },
-        { name: 'Art Card', set: 'nec', security_stamp: null, layout: 'art_series' },
-        { name: 'Emblem', set: 'teld', security_stamp: null, layout: 'emblem' },
-        { name: 'Dungeon Card', set: 'afr', security_stamp: null, layout: 'dungeon' },
-        { name: 'Hero Card', set: 'thb', security_stamp: null, layout: 'hero' },
-        { name: 'Attraction', set: 'unf', security_stamp: null, layout: 'attraction' },
-        { name: 'Normal Card 2', set: 'mh2', security_stamp: 'oval', layout: 'transform' }
+        { name: 'Normal Card', set: 'dom', security_stamp: null, layout: 'normal', games: ['paper'], oversized: false, set_type: 'expansion' },
+        { name: 'Test Card', set: 'cmb1', security_stamp: null, layout: 'normal', games: ['paper'], oversized: false, set_type: 'expansion' },
+        { name: 'Acorn Card', set: 'unf', security_stamp: 'acorn', layout: 'normal', games: ['paper'], oversized: false, set_type: 'funny' },
+        { name: 'Token Card', set: 'tkhm', security_stamp: null, layout: 'token', games: ['paper'], oversized: false, set_type: 'token' },
+        { name: 'Art Card', set: 'nec', security_stamp: null, layout: 'art_series', games: ['paper'], oversized: false, set_type: 'expansion' },
+        { name: 'Emblem', set: 'teld', security_stamp: null, layout: 'emblem', games: ['paper'], oversized: false, set_type: 'token' },
+        { name: 'Dungeon Card', set: 'afr', security_stamp: null, layout: 'dungeon', games: ['paper'], oversized: false, set_type: 'expansion' },
+        { name: 'Hero Card', set: 'thb', security_stamp: null, layout: 'hero', games: ['paper'], oversized: false, set_type: 'expansion' },
+        { name: 'Attraction', set: 'unf', security_stamp: null, layout: 'attraction', games: ['paper'], oversized: false, set_type: 'funny' },
+        { name: 'Digital Only', set: 'ymid', security_stamp: null, layout: 'normal', games: ['arena'], oversized: false, set_type: 'alchemy' },
+        { name: 'Oversized Plane', set: 'opca', security_stamp: null, layout: 'planar', games: ['paper'], oversized: true, set_type: 'planechase' },
+        { name: 'Funny Card', set: 'unh', security_stamp: null, layout: 'normal', games: ['paper'], oversized: false, set_type: 'funny' },
+        { name: 'Memorabilia', set: 'unk', security_stamp: null, layout: 'normal', games: ['paper'], oversized: false, set_type: 'memorabilia' },
+        { name: 'Normal Card 2', set: 'mh2', security_stamp: 'oval', layout: 'transform', games: ['paper'], oversized: false, set_type: 'masters' }
       ];
 
-      // Apply all filters
+      // Apply all filters (including digital-only, oversized, and set_type checks)
       const filtered = mockCards.filter(card => {
         const set = card.set || '';
         const securityStamp = card.security_stamp || '';
         const layout = card.layout || '';
+        const games = card.games || [];
+        const setType = card.set_type || '';
         
         const isTest = testCardSets.includes(set.toLowerCase());
         const isAcorn = securityStamp.toLowerCase() === 'acorn';
         const isNonPlayable = nonPlayableLayouts.includes(layout.toLowerCase());
+        const isDigitalOnly = !games.includes('paper');
+        const isOversized = card.oversized === true;
+        const isNonPlayableSetType = nonPlayableSetTypes.includes(setType.toLowerCase());
         
-        return !isTest && !isAcorn && !isNonPlayable;
+        return !isTest && !isAcorn && !isNonPlayable && !isDigitalOnly && !isOversized && !isNonPlayableSetType;
       });
 
       expect(filtered).toHaveLength(2);
