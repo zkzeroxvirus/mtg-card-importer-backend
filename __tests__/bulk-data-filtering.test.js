@@ -428,6 +428,47 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       expect(filtered).toHaveLength(playableLayouts.length);
     });
 
+    test('should exclude meld result cards (collector number ending in b)', () => {
+      const mockCards = [
+        // Playable meld component cards
+        { name: 'Graf Rats', set: 'emn', layout: 'meld', collector_number: '113' },
+        { name: 'Midnight Scavengers', set: 'emn', layout: 'meld', collector_number: '125' },
+        { name: 'Bruna, the Fading Light', set: 'emn', layout: 'meld', collector_number: '15a' },
+        { name: 'Gisela, the Broken Blade', set: 'emn', layout: 'meld', collector_number: '28a' },
+        // Unplayable meld results (collector number ends with 'b')
+        { name: 'Chittering Host', set: 'emn', layout: 'meld', collector_number: '123b' },
+        { name: 'Brisela, Voice of Nightmares', set: 'emn', layout: 'meld', collector_number: '15b' },
+        // Regular playable cards for comparison
+        { name: 'Normal Card', set: 'emn', layout: 'normal', collector_number: '100' },
+        { name: 'Transform Card', set: 'emn', layout: 'transform', collector_number: '50a' }
+      ];
+
+      const filtered = mockCards.filter(card => {
+        const layout = card.layout || '';
+        const collectorNumber = card.collector_number || '';
+        // Exclude meld results (layout:meld + collector number ending in 'b')
+        if (layout.toLowerCase() === 'meld' && collectorNumber.toLowerCase().endsWith('b')) {
+          return false;
+        }
+        return true;
+      });
+
+      expect(filtered).toHaveLength(6);
+      // Should include all cards except the two meld results
+      expect(filtered.map(c => c.name)).toEqual([
+        'Graf Rats',
+        'Midnight Scavengers',
+        'Bruna, the Fading Light',
+        'Gisela, the Broken Blade',
+        'Normal Card',
+        'Transform Card'
+      ]);
+      // Should exclude meld results
+      expect(filtered.map(c => c.name)).not.toContain('Chittering Host');
+      expect(filtered.map(c => c.name)).not.toContain('Brisela, Voice of Nightmares');
+    });
+
+
     test('should filter combined: test sets, acorn, and non-playable layouts', () => {
       const testCardSets = ['cmb1', 'mb2', 'cmb2'];
       const nonPlayableLayouts = [
