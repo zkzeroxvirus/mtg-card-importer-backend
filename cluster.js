@@ -30,7 +30,7 @@ if (cluster.isPrimary) {
       console.log(`[Cluster] Auto worker count using CPU cores: ${WORKERS}/${cpuCount} (${memoryNote})`);
     }
 
-    if (useBulkData === 'true' && memoryLimitMB < memoryPerWorkerMB) {
+    if (useBulkData && memoryLimitMB < memoryPerWorkerMB) {
       console.warn('[Cluster] Memory limit is lower than bulk data recommendations. Consider setting USE_BULK_DATA=false.');
     }
   }
