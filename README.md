@@ -387,7 +387,7 @@ docker run -d \
 
 Check the logs to see the specific error:
 ```bash
-docker logs mtg-card-importer-backend
+docker logs mtg-card-importer
 ```
 
 Common issues:
