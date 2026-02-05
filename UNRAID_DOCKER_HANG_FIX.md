@@ -88,21 +88,22 @@ async function decompressFile(filePath) {
   return new Promise((resolve, reject) => {
     // ... setup code ...
     
-    // Add timeout to prevent indefinite hanging on corrupted files
-    const timeoutMs = 5 * 60 * 1000; // 5 minutes
-    const timeout = setTimeout(() => {
-      handleError(new Error('Decompression timeout - file may be corrupted'));
-    }, timeoutMs);
-    
+    // Define error handler first
     const handleError = (error) => {
       if (!errorHandled) {
         errorHandled = true;
-        clearTimeout(timeout); // Clean up timeout
+        if (timeout) clearTimeout(timeout); // Clean up timeout
         readStream.destroy();
         gunzip.destroy();
         reject(error);
       }
     };
+    
+    // Add timeout to prevent indefinite hanging on corrupted files
+    const timeoutMs = 5 * 60 * 1000; // 5 minutes
+    const timeout = setTimeout(() => {
+      handleError(new Error('Decompression timeout - file may be corrupted'));
+    }, timeoutMs);
     
     gunzip.on('end', () => {
       clearTimeout(timeout); // Clean up timeout on success
