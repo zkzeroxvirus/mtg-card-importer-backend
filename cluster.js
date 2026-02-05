@@ -1,5 +1,5 @@
 const cluster = require('cluster');
-const os = require('os');
+const { calculateWorkerCount } = require('./lib/cluster-config');
 
 /**
  * Cluster management for horizontal scaling across CPU cores
@@ -8,13 +8,32 @@ const os = require('os');
 
 // Configuration: Use environment variable or default to CPU count
 const workersEnv = process.env.WORKERS || 'auto';
-const WORKERS = workersEnv === 'auto' ? os.cpus().length : parseInt(workersEnv, 10);
+const {
+  workers: WORKERS,
+  cpuCount,
+  memoryLimitMB,
+  memoryPerWorkerMB,
+  maxWorkersByMemory,
+  useBulkData
+} = calculateWorkerCount({ workersEnv });
 // Stagger worker startup to prevent simultaneous JSON parsing (configurable via env var)
 // Reduced to 500ms since decompression is now cached - only JSON.parse() is CPU intensive
 const STARTUP_STAGGER_MS = parseInt(process.env.STARTUP_STAGGER_MS || '500', 10);
 
 if (cluster.isPrimary) {
   console.log(`[Cluster] Primary process ${process.pid} is running`);
+  if (workersEnv === 'auto') {
+    const memoryNote = `${memoryLimitMB}MB limit, ${memoryPerWorkerMB}MB per worker estimate`;
+    if (maxWorkersByMemory < cpuCount) {
+      console.log(`[Cluster] Auto worker count limited by memory: ${WORKERS}/${cpuCount} (${memoryNote})`);
+    } else {
+      console.log(`[Cluster] Auto worker count using CPU cores: ${WORKERS}/${cpuCount} (${memoryNote})`);
+    }
+
+    if (useBulkData && memoryLimitMB < memoryPerWorkerMB) {
+      console.warn('[Cluster] Memory limit is lower than bulk data recommendations. Consider setting USE_BULK_DATA=false.');
+    }
+  }
   console.log(`[Cluster] Starting ${WORKERS} worker processes with ${STARTUP_STAGGER_MS}ms stagger delay...`);
 
   // Track worker status
