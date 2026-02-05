@@ -187,7 +187,7 @@ Example: `GET /sets/dom`
 - Parse and validate decklist text without building TTS objects
 - Consumes: Raw text body (decklist in any supported format)
 - Returns: `{ format: "FORMAT_NAME", cards: [...], sideboard: [...] }`
-- Supports: Moxfield JSON, Archidekt JSON, Arena format, simple text format
+- Supports all decklist formats (see Decklist Format section below)
 - Useful for validation and format detection before building
 
 ### System
