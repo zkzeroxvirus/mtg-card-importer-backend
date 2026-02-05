@@ -1,6 +1,7 @@
 /**
  * Tests for filtering non-playable cards (test cards, tokens, etc.) from random endpoint
  * Verifies that test card sets like cmb2 are excluded from random results
+ * Also verifies unique card filtering to avoid reprints and alternative arts
  */
 
 const scryfall = require('../lib/scryfall');
@@ -26,6 +27,13 @@ describe('Non-Playable Card Filtering', () => {
       expect(filter).toContain('-layout:token');
       expect(filter).toContain('-layout:emblem');
       expect(filter).toContain('-set_type:funny');
+    });
+
+    test('should place is:unique at the beginning of filter query', () => {
+      const filter = scryfall.buildNonPlayableFilter();
+      
+      // Verify is:unique is at the start to ensure it's applied first
+      expect(filter.startsWith('is:unique')).toBe(true);
     });
   });
 
