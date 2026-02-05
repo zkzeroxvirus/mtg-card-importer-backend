@@ -117,7 +117,7 @@ docker run -d \
   - `NODE_ENV=production` (required for optimal performance)
   - `USE_BULK_DATA=true` (recommended for self-hosted - loads card data into memory)
   - `BULK_DATA_PATH=/app/data` (where bulk data is cached)
-  - `WORKERS=auto` (uses all CPU cores for clustering - default in Docker)
+  - `WORKERS=auto` (uses CPU cores for clustering, capped by container memory)
   - `PORT=3000` (default)
   - `MAX_CACHE_SIZE=5000` (optional - default is 5000)
   - `SCRYFALL_DELAY=100` (optional - default is 100ms)
@@ -125,6 +125,7 @@ docker run -d \
 
 **Notes:**
 - The Dockerfile uses clustering mode (`npm run start:cluster`) by default for better performance
+- Auto worker count is capped by container memory (~700MB per worker in bulk data mode)
 - Bulk data file (~161MB compressed, ~500MB in memory) is downloaded on first start and cached
 - Set `WORKERS=1` to disable clustering if running on a single-core system
 - Restart policy `unless-stopped` ensures the container restarts automatically
@@ -280,9 +281,9 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `PORT` — Server port (default: 3000)
 
 ### Performance Settings
-- `WORKERS` — Number of worker processes for clustering (default: auto = CPU cores)
+- `WORKERS` — Number of worker processes for clustering (default: auto = CPU cores, capped by memory)
   - Set to `1` to disable clustering
-  - Set to `auto` to use all CPU cores (recommended for production)
+  - Set to `auto` to use all CPU cores when memory allows (recommended for production)
 - `MAX_CACHE_SIZE` — Maximum entries in caches (default: 5000)
   - Higher values = more memory, fewer cache misses
   - Lower values = less memory, more cache misses
