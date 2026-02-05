@@ -20,9 +20,51 @@ const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 const SHOULD_SCHEDULE_UPDATES = !cluster.isWorker || cluster.worker.id === 1;
 
 // Security: Input validation constants
-const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
-const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
+const MAX_CARD_NAME_LENGTH = 200;
+const MAX_QUERY_LENGTH = 1000;
+const MAX_SEARCH_LIMIT = 175;
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
+
+const IS_TEST_ENV = process.env.NODE_ENV === 'test';
+
+if (IS_TEST_ENV) {
+  const mockCard = {
+    id: 'test-card',
+    name: 'Test Card',
+    image_uris: { normal: 'https://example.com/test-card.jpg' },
+    mana_cost: '{1}',
+    type_line: 'Creature — Test',
+    oracle_text: 'Test oracle text.',
+    oracle_id: 'test-oracle-id'
+  };
+  const mockSet = {
+    id: 'test-set',
+    object: 'set',
+    name: 'Test Set',
+    code: 'tst'
+  };
+
+  scryfallLib.getCard = async () => ({ ...mockCard });
+  scryfallLib.getCardById = async (id) => ({ ...mockCard, id: id || mockCard.id });
+  scryfallLib.getCardBySetNumber = async (set, number, lang) => ({
+    ...mockCard,
+    set: set || 'tst',
+    collector_number: number || '123',
+    lang: lang || 'en'
+  });
+  scryfallLib.getRandomCard = async () => ({ ...mockCard });
+  scryfallLib.searchCards = async () => ([{ ...mockCard }]);
+  scryfallLib.getCardRulings = async () => ([{
+    object: 'ruling',
+    comment: 'Test ruling',
+    published_at: '2020-01-01',
+    source: 'scryfall'
+  }]);
+  scryfallLib.getTokens = async () => ([{ ...mockCard, name: 'Test Token' }]);
+  scryfallLib.getPrintings = async () => ([{ ...mockCard }]);
+  scryfallLib.getSet = async (code) => ({ ...mockSet, code: code || mockSet.code });
+  scryfallLib.proxyUri = async () => ({ ...mockCard });
+}
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -85,7 +127,7 @@ app.use(compression({
   level: 6 // Balance between compression speed and ratio
 }));
 
-app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
+app.use(express.raw({ limit: '10mb', type: '*/*' }));  // Accept raw body as Buffer, parse manually
 
 // Performance metrics tracking
 const metrics = {
@@ -336,7 +378,18 @@ app.get('/', (req, res) => {
       loaded: bulkStats.loaded,
       cardCount: bulkStats.cardCount
     },
-    endpoints: {
+    config: {
+      useBulkData: USE_BULK_DATA
+    },
+    endpoints: [
+      'GET /card/:name',
+      'POST /deck',
+      'GET /random',
+      'GET /search',
+      'GET /bulk/stats',
+      'GET /metrics'
+    ],
+    endpointMap: {
       card: 'GET /card/:name',
       deck: 'POST /deck',
       random: 'GET /random',
@@ -418,10 +471,10 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Security: Validate input length to prevent DoS
-    if (name.length > MAX_INPUT_LENGTH) {
+    if (name.length > MAX_CARD_NAME_LENGTH) {
       return res.status(400).json({ 
         object: 'error', 
-        details: `Card name too long (max ${MAX_INPUT_LENGTH} characters)` 
+        details: `Card name too long (max ${MAX_CARD_NAME_LENGTH} characters)` 
       });
     }
 
@@ -643,7 +696,8 @@ app.post('/deck', async (req, res) => {
         // Security: Validate custom card back URL if provided
         if (back && !isValidCardBackURL(back)) {
           return res.status(400).json({ 
-            error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
+            object: 'error',
+            details: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)'
           });
         }
       } catch (e) {
@@ -744,7 +798,8 @@ app.post('/build', async (req, res) => {
         // Security: Validate custom card back URL if provided
         if (back && !isValidCardBackURL(back)) {
           return res.status(400).json({ 
-            error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
+            object: 'error',
+            details: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)'
           });
         }
       } catch (e) {
@@ -843,8 +898,13 @@ app.post('/deck/parse', async (req, res) => {
       try {
         const json = JSON.parse(bodyText);
         
+        // Decklist JSON format: { decklist: "4 Card Name\n2 Other" }
+        if (typeof json.decklist === 'string') {
+          detectedFormat = 'decklist_json';
+          parsedCards = scryfallLib.parseDecklist(json.decklist);
+        }
         // Moxfield format: { main: [...], sideboard: [...] }
-        if (json.main || json.mainboard) {
+        else if (json.main || json.mainboard) {
           detectedFormat = 'moxfield_json';
           const mainArray = json.main || json.mainboard;
           if (Array.isArray(mainArray)) {
@@ -1035,16 +1095,22 @@ app.post('/deck/parse', async (req, res) => {
 app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count, q = '' } = req.query;
-    // Security: Enforce maximum count to prevent resource exhaustion
-    const numCards = count ? Math.min(Math.max(parseInt(count) || 1, 1), 100) : 1;
+    const countNum = count ? parseInt(count, 10) : 1;
+    if (count && (Number.isNaN(countNum) || countNum < 1 || countNum > 100)) {
+      return res.status(400).json({ 
+        object: 'error', 
+        details: 'Count must be between 1 and 100' 
+      });
+    }
+    const numCards = countNum || 1;
     
     console.log(`GET /random - count: ${numCards}, query: "${q}"`);
 
     // Security: Validate query length
-    if (q && q.length > MAX_INPUT_LENGTH) {
+    if (q && q.length > MAX_QUERY_LENGTH) {
       return res.status(400).json({ 
         object: 'error', 
-        details: `Query too long (max ${MAX_INPUT_LENGTH} characters)` 
+        details: `Query too long (max ${MAX_QUERY_LENGTH} characters)` 
       });
     }
 
@@ -1255,15 +1321,21 @@ app.get('/search', async (req, res) => {
     }
 
     // Security: Validate input length
-    if (q.length > MAX_INPUT_LENGTH) {
+    if (q.length > MAX_QUERY_LENGTH) {
       return res.status(400).json({ 
-        error: `Query too long (max ${MAX_INPUT_LENGTH} characters)` 
+        error: `Query too long (max ${MAX_QUERY_LENGTH} characters)` 
       });
     }
 
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
     // Security: Enforce maximum limit to prevent memory exhaustion
-    const limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
+    const parsedLimit = parseInt(limit, 10);
+    const limitNum = Number.isNaN(parsedLimit) ? 100 : parsedLimit;
+    if (limitNum < 1 || limitNum > MAX_SEARCH_LIMIT) {
+      return res.status(400).json({ 
+        error: `Limit must be between 1 and ${MAX_SEARCH_LIMIT}` 
+      });
+    }
     
     let scryfallCards = null;
     
@@ -1398,6 +1470,9 @@ app.get('/sets/:code', async (req, res) => {
     if (!code) {
       return res.status(400).json({ error: 'Set code required' });
     }
+    if (code.length > 10) {
+      return res.status(400).json({ error: 'Set code too long' });
+    }
 
     const setData = await scryfallLib.getSet(code);
     
@@ -1495,6 +1570,11 @@ app.get('/proxy', async (req, res) => {
     const { status, details } = normalizeError(error, 502);
     res.status(status).json({ object: 'error', details, status });
   }
+});
+
+// JSON 404 handler for unknown endpoints
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 /**
