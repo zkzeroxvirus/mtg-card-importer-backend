@@ -347,6 +347,26 @@ All formats can be parsed and validated using the `/deck/parse` endpoint.
 
 ## Troubleshooting
 
+### System Crashes or High Memory Usage (Unraid/Docker)
+
+If you're experiencing system crashes or high memory usage, especially after recent updates:
+
+**Root Cause**: Memory leaks from duplicate bulk data update timers in cluster mode (fixed in latest version)
+
+**Solution**: Update to the latest version and restart:
+```bash
+# Pull latest image
+docker pull your-registry/mtg-card-importer-backend:latest
+
+# Or rebuild if using local image
+docker build --no-cache -t mtg-card-importer-backend .
+
+# Restart container
+docker restart mtg-card-importer-backend
+```
+
+See [UNRAID_CRASH_FIX.md](UNRAID_CRASH_FIX.md) for detailed information about the fix and monitoring.
+
 ### Docker Container Won't Start - "Cannot find module 'express'"
 
 If your Docker container crashes immediately with errors like:
