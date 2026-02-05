@@ -183,6 +183,13 @@ Example: `GET /sets/dom`
 - Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
 - Returns: NDJSON (one TTS card object per line)
 
+**POST `/deck/parse`**
+- Parse and validate decklist text without building TTS objects
+- Consumes: Raw text body (decklist in any supported format)
+- Returns: `{ format: "FORMAT_NAME", cards: [...], sideboard: [...] }`
+- Supports: Moxfield JSON, Archidekt JSON, Arena format, simple text format
+- Useful for validation and format detection before building
+
 ### System
 
 **GET `/`**
@@ -200,6 +207,17 @@ Example: `GET /sets/dom`
 - Returns: `{"ready": true}` when server is ready to accept traffic
 - Returns HTTP 503 if server is not ready (bulk data loading, high memory)
 
+**GET `/bulk/stats`**
+- Get bulk data statistics (when bulk mode is enabled)
+- Returns: File size, card count, memory usage, last update time
+- Available even when `USE_BULK_DATA=false`
+
+**POST `/bulk/reload`**
+- Manually trigger bulk data reload (when bulk mode is enabled)
+- No request body required
+- Returns: Success status and updated statistics
+- Useful for forcing updates without restarting the server
+
 **GET `/rulings/:name`**
 - Fetch card rulings by card name
 - Returns: Scryfall rulings list
@@ -211,6 +229,12 @@ Example: `GET /sets/dom`
 **GET `/printings/:name`**
 - Fetch all printings of a card
 - Returns: Scryfall list object with all printings
+
+**GET `/proxy`**
+- Proxy Scryfall API requests with rate limiting
+- Query parameters: `?uri=SCRYFALL_API_URL` (must be a valid Scryfall API URL)
+- Returns: Proxied Scryfall API response
+- Note: Blocks certain expensive parameters for performance reasons
 
 ## How It Works
 
@@ -289,11 +313,16 @@ See [SCRYFALL_API_COMPLIANCE.md](SCRYFALL_API_COMPLIANCE.md) for detailed techni
 ## Decklist Format
 
 Supported formats:
-- Simple: `2 Black Lotus`
-- With set: `2 Black Lotus (LEA) 1`
-- Deckstats format with brackets
-- TappedOut CSV format
-- Scryfall deck exports
+- **Simple text**: `2 Black Lotus`
+- **With set code**: `2 Black Lotus (LEA) 1`
+- **Arena format**: `2 Black Lotus (LEA)`
+- **Moxfield JSON**: `{ "main": [...], "sideboard": [...] }`
+- **Archidekt JSON**: `{ "cards": [...] }`
+- **Deckstats format**: With brackets `[2x] Black Lotus`
+- **TappedOut CSV**: Comma-separated format
+- **Scryfall deck exports**: Official Scryfall export format
+
+All formats support sideboard cards and can be parsed using the `/deck/parse` endpoint for validation.
 
 ## License
 
