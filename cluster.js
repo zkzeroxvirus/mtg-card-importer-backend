@@ -9,8 +9,9 @@ const os = require('os');
 // Configuration: Use environment variable or default to CPU count
 const workersEnv = process.env.WORKERS || 'auto';
 const WORKERS = workersEnv === 'auto' ? os.cpus().length : parseInt(workersEnv, 10);
-// Stagger worker startup to prevent simultaneous bulk data loading (configurable via env var)
-const STARTUP_STAGGER_MS = parseInt(process.env.STARTUP_STAGGER_MS || '2000', 10);
+// Stagger worker startup to prevent simultaneous JSON parsing (configurable via env var)
+// Reduced to 500ms since decompression is now cached - only JSON.parse() is CPU intensive
+const STARTUP_STAGGER_MS = parseInt(process.env.STARTUP_STAGGER_MS || '500', 10);
 
 if (cluster.isPrimary) {
   console.log(`[Cluster] Primary process ${process.pid} is running`);
@@ -19,8 +20,9 @@ if (cluster.isPrimary) {
   // Track worker status
   const workerStats = new Map();
 
-  // Fork workers with staggered startup to prevent simultaneous bulk data loading
-  // This prevents 100% CPU usage when all workers try to JSON.parse() bulk data at once
+  // Fork workers with staggered startup to prevent simultaneous JSON parsing
+  // First worker decompresses and caches data, subsequent workers use cached uncompressed JSON
+  // This prevents 100% CPU usage when all workers try to JSON.parse() simultaneously
   // Delay can be configured via STARTUP_STAGGER_MS environment variable
   for (let i = 0; i < WORKERS; i++) {
     setTimeout(() => {
