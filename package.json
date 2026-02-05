@@ -27,5 +27,9 @@
         "jest": "^30.2.0",
         "nodemon": "^3.0.1",
         "supertest": "^7.2.2"
+    },
+    "overrides": {
+        "glob": "^13.0.1",
+        "inflight": "npm:@zkochan/inflight@1.1.0"
     }
 }
