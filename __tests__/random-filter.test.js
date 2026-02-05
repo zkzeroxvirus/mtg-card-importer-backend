@@ -10,6 +10,9 @@ describe('Non-Playable Card Filtering', () => {
     test('should build filter query with all non-playable exclusions', () => {
       const filter = scryfall.buildNonPlayableFilter();
       
+      // Check for unique cards filter (to avoid reprints and alternative arts)
+      expect(filter).toContain('is:unique');
+      
       // Check for test set exclusions
       expect(filter).toContain('-set:cmb1');
       expect(filter).toContain('-set:cmb2');
