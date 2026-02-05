@@ -208,9 +208,9 @@ Example: `GET /sets/dom`
 - Returns HTTP 503 if server is not ready (bulk data loading, high memory)
 
 **GET `/bulk/stats`**
-- Get bulk data statistics (when bulk mode is enabled)
-- Returns: File size, card count, memory usage, last update time
-- Available even when `USE_BULK_DATA=false`
+- Get bulk data statistics
+- Returns: File size, card count, memory usage, last update time, and enabled status
+- Works regardless of `USE_BULK_DATA` setting (returns empty stats when disabled)
 
 **POST `/bulk/reload`**
 - Manually trigger bulk data reload (when bulk mode is enabled)
@@ -234,7 +234,7 @@ Example: `GET /sets/dom`
 - Proxy Scryfall API requests with rate limiting
 - Query parameters: `?uri=SCRYFALL_API_URL` (must be a valid Scryfall API URL)
 - Returns: Proxied Scryfall API response
-- Note: Blocks certain expensive parameters for performance reasons:
+- Note: Returns HTTP 400 error if request includes blocked parameters:
   - `include_extras=true` (increases result set size)
   - `include_multilingual=true` (increases result set size)
   - `order=released` or `order=added` (can return thousands of results)
