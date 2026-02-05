@@ -1,3 +1,4 @@
+/* global it */
 const request = require('supertest');
 const app = require('../server');
 
@@ -19,7 +20,7 @@ describe('Performance and Monitoring Endpoints', () => {
       expect(response.body.metrics).toHaveProperty('errorRate');
       expect(response.body.metrics).toHaveProperty('memoryMB');
       expect(response.body).toHaveProperty('endpoints');
-      expect(response.body.endpoints).toHaveProperty('metrics');
+      expect(response.body.endpoints).toContain('GET /metrics');
     });
   });
 
@@ -85,7 +86,7 @@ describe('Performance and Monitoring Endpoints', () => {
     it('should track errors in metrics', async () => {
       // Make a request that will fail
       await request(app)
-        .get('/card/nonexistent_card_that_definitely_does_not_exist_12345')
+        .get('/nonexistent-endpoint')
         .expect(404);
 
       const metricsResponse = await request(app).get('/metrics');
