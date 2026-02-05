@@ -84,14 +84,16 @@ npm run lint:fix        # Fix linting errors automatically
 npm run build
 ```
 
-### Docker (Unraid)
+### Docker (Recommended for Unraid/Self-Hosted)
 
-Build the image:
+The Docker image is optimized for production use with clustering enabled by default.
+
+**Build the image:**
 ```bash
 docker build -t mtg-card-importer-backend .
 ```
 
-Run the container (recommended for Unraid/self-hosted bulk mode):
+**Run the container:**
 ```bash
 docker run -d \
   --name mtg-card-importer-backend \
@@ -99,18 +101,33 @@ docker run -d \
   -e NODE_ENV=production \
   -e USE_BULK_DATA=true \
   -e BULK_DATA_PATH=/app/data \
+  -e WORKERS=auto \
+  -e MAX_CACHE_SIZE=5000 \
+  -e SCRYFALL_DELAY=100 \
   -e DEFAULT_CARD_BACK=https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/ \
   -v /mnt/user/appdata/mtg-card-importer-backend:/app/data \
   --restart unless-stopped \
   mtg-card-importer-backend
 ```
 
-The Dockerfile defaults `NODE_ENV=production` and `PORT=3000`; override them at runtime if needed.
+**Unraid Template Configuration:**
+- **Container port:** `3000` → Host port: `3000` (or your preferred port)
+- **Volume mapping:** `/mnt/user/appdata/mtg-card-importer-backend` → `/app/data`
+- **Key environment variables:**
+  - `NODE_ENV=production` (required for optimal performance)
+  - `USE_BULK_DATA=true` (recommended for self-hosted - loads card data into memory)
+  - `BULK_DATA_PATH=/app/data` (where bulk data is cached)
+  - `WORKERS=auto` (uses all CPU cores for clustering - default in Docker)
+  - `PORT=3000` (default)
+  - `MAX_CACHE_SIZE=5000` (optional - default is 5000)
+  - `SCRYFALL_DELAY=100` (optional - default is 100ms)
+  - `DEFAULT_CARD_BACK=<URL>` (optional - custom card back image)
 
-Unraid template notes:
-- Container port: `3000`
-- Path mapping: `/mnt/user/appdata/mtg-card-importer-backend` → `/app/data`
-- Environment: `USE_BULK_DATA=true`, `BULK_DATA_PATH=/app/data`
+**Notes:**
+- The Dockerfile uses clustering mode (`npm run start:cluster`) by default for better performance
+- Bulk data file (~161MB compressed, ~500MB in memory) is downloaded on first start and cached
+- Set `WORKERS=1` to disable clustering if running on a single-core system
+- Restart policy `unless-stopped` ensures the container restarts automatically
 
 ### Deployment Options
 

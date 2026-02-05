@@ -4,3 +4,12 @@ node_modules
 npm-debug.log*
 .DS_Store
 data
+__tests__
+*.md
+!README.md
+.github
+coverage
+.eslintrc*
+jest.config.js
+load-test.js
+test-concurrency.js
