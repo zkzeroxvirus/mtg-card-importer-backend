@@ -179,6 +179,7 @@ Example: `GET /search?q=type:creature%20power>5`
 - Query parameters: `?count=5&q=FILTER` (both optional)
 - Returns: Single card or list of cards depending on count
 - Note: Automatically excludes non-playable cards (basic lands, tokens, emblems, art cards, test cards, digital-only cards, meld results, etc.) to match paper Magic gameplay
+- Note: Automatically filters to unique cards (by oracle_id) to prevent skewing results with heavily reprinted cards or alternative arts
 
 ### Set Information
 
