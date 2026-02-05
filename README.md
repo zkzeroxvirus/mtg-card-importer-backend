@@ -345,6 +345,64 @@ Supported formats:
 
 All formats can be parsed and validated using the `/deck/parse` endpoint.
 
+## Troubleshooting
+
+### Docker Container Won't Start - "Cannot find module 'express'"
+
+If your Docker container crashes immediately with errors like:
+```
+Error: Cannot find module 'express'
+Require stack:
+- /app/server.js
+```
+
+**Root Cause**: Docker is using a stale cached build layer where dependencies weren't properly installed.
+
+**Solution**: Rebuild the Docker image without cache:
+```bash
+docker build --no-cache -t mtg-card-importer-backend .
+```
+
+Then run your container as normal:
+```bash
+docker run -d \
+  --name mtg-card-importer \
+  --network mtg-net \
+  -p 3000:3000 \
+  -e NODE_ENV=production \
+  -e USE_BULK_DATA=true \
+  -e BULK_DATA_PATH=/app/data \
+  -e WORKERS=auto \
+  -v /mnt/user/appdata/mtg-card-importer-backend:/app/data \
+  --restart unless-stopped \
+  mtg-card-importer-backend
+```
+
+**Prevention**: Always rebuild the image after:
+- Pulling updates from git
+- Changing `package.json` or `package-lock.json`
+- Experiencing any module-not-found errors
+
+### Container Keeps Restarting
+
+Check the logs to see the specific error:
+```bash
+docker logs mtg-card-importer-backend
+```
+
+Common issues:
+- **Port already in use**: Change the host port in the `-p` flag (e.g., `-p 3001:3000`)
+- **Network doesn't exist**: Create the network first or remove `--network mtg-net`
+- **Volume mount issues**: Ensure the host directory exists and has proper permissions
+
+### Performance Issues
+
+See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for detailed tuning recommendations, including:
+- Worker count optimization
+- Cache size tuning
+- Bulk data vs API mode comparison
+- Clustering best practices
+
 ## License
 
 Uses Scryfall's free API with rate limiting. See [Scryfall API documentation](https://scryfall.com/docs/api) for terms.
