@@ -68,11 +68,7 @@ function makeRequest(scenario) {
     }
 
     const req = client.request(options, (res) => {
-      let data = '';
-      
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
+      res.on('data', () => {});
 
       res.on('end', () => {
         const latency = Date.now() - startTime;
@@ -163,7 +159,7 @@ async function runLoadTest() {
     await makeRequest({ path: '/' });
     console.log('✓ Server is responding\n');
   } catch (error) {
-    console.error('✗ Server is not responding. Please start the server first.');
+    console.error('✗ Server is not responding. Please start the server first.', error.message);
     process.exit(1);
   }
 
