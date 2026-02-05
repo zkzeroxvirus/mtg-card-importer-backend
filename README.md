@@ -234,7 +234,10 @@ Example: `GET /sets/dom`
 - Proxy Scryfall API requests with rate limiting
 - Query parameters: `?uri=SCRYFALL_API_URL` (must be a valid Scryfall API URL)
 - Returns: Proxied Scryfall API response
-- Note: Blocks certain expensive parameters for performance reasons
+- Note: Blocks certain expensive parameters for performance reasons:
+  - `include_extras=true` (increases result set size)
+  - `include_multilingual=true` (increases result set size)
+  - `order=released` or `order=added` (can return thousands of results)
 
 ## How It Works
 
