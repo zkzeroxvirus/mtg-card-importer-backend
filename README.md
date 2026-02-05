@@ -84,14 +84,16 @@ npm run lint:fix        # Fix linting errors automatically
 npm run build
 ```
 
-### Docker (Unraid)
+### Docker (Recommended for Unraid/Self-Hosted)
 
-Build the image:
+The Docker image is optimized for production use with clustering enabled by default.
+
+**Build the image:**
 ```bash
 docker build -t mtg-card-importer-backend .
 ```
 
-Run the container (recommended for Unraid/self-hosted bulk mode):
+**Run the container:**
 ```bash
 docker run -d \
   --name mtg-card-importer-backend \
@@ -99,18 +101,33 @@ docker run -d \
   -e NODE_ENV=production \
   -e USE_BULK_DATA=true \
   -e BULK_DATA_PATH=/app/data \
+  -e WORKERS=auto \
+  -e MAX_CACHE_SIZE=5000 \
+  -e SCRYFALL_DELAY=100 \
   -e DEFAULT_CARD_BACK=https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/ \
   -v /mnt/user/appdata/mtg-card-importer-backend:/app/data \
   --restart unless-stopped \
   mtg-card-importer-backend
 ```
 
-The Dockerfile defaults `NODE_ENV=production` and `PORT=3000`; override them at runtime if needed.
+**Unraid Template Configuration:**
+- **Container port:** `3000` → Host port: `3000` (or your preferred port)
+- **Volume mapping:** `/mnt/user/appdata/mtg-card-importer-backend` → `/app/data`
+- **Key environment variables:**
+  - `NODE_ENV=production` (required for optimal performance)
+  - `USE_BULK_DATA=true` (recommended for self-hosted - loads card data into memory)
+  - `BULK_DATA_PATH=/app/data` (where bulk data is cached)
+  - `WORKERS=auto` (uses all CPU cores for clustering - default in Docker)
+  - `PORT=3000` (default)
+  - `MAX_CACHE_SIZE=5000` (optional - default is 5000)
+  - `SCRYFALL_DELAY=100` (optional - default is 100ms)
+  - `DEFAULT_CARD_BACK=<URL>` (optional - custom card back image)
 
-Unraid template notes:
-- Container port: `3000`
-- Path mapping: `/mnt/user/appdata/mtg-card-importer-backend` → `/app/data`
-- Environment: `USE_BULK_DATA=true`, `BULK_DATA_PATH=/app/data`
+**Notes:**
+- The Dockerfile uses clustering mode (`npm run start:cluster`) by default for better performance
+- Bulk data file (~161MB compressed, ~500MB in memory) is downloaded on first start and cached
+- Set `WORKERS=1` to disable clustering if running on a single-core system
+- Restart policy `unless-stopped` ensures the container restarts automatically
 
 ### Deployment Options
 
@@ -183,6 +200,13 @@ Example: `GET /sets/dom`
 - Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
 - Returns: NDJSON (one TTS card object per line)
 
+**POST `/deck/parse`**
+- Parse and validate decklist text without building TTS objects
+- Consumes: Raw text body (decklist in any supported format)
+- Returns: `{ format: "FORMAT_NAME", cards: [...], sideboard: [...] }`
+- Supports all decklist formats (see Decklist Format section below)
+- Useful for validation and format detection before building
+
 ### System
 
 **GET `/`**
@@ -200,6 +224,17 @@ Example: `GET /sets/dom`
 - Returns: `{"ready": true}` when server is ready to accept traffic
 - Returns HTTP 503 if server is not ready (bulk data loading, high memory)
 
+**GET `/bulk/stats`**
+- Get bulk data statistics
+- Returns: File size, card count, memory usage, last update time, and enabled status
+- Works regardless of `USE_BULK_DATA` setting (returns empty stats when disabled)
+
+**POST `/bulk/reload`**
+- Manually trigger bulk data reload (when bulk mode is enabled)
+- No request body required
+- Returns: Success status and updated statistics
+- Useful for forcing updates without restarting the server
+
 **GET `/rulings/:name`**
 - Fetch card rulings by card name
 - Returns: Scryfall rulings list
@@ -211,6 +246,15 @@ Example: `GET /sets/dom`
 **GET `/printings/:name`**
 - Fetch all printings of a card
 - Returns: Scryfall list object with all printings
+
+**GET `/proxy`**
+- Proxy Scryfall API requests with rate limiting
+- Query parameters: `?uri=SCRYFALL_API_URL` (must be a valid Scryfall API URL)
+- Returns: Proxied Scryfall API response
+- Note: Returns HTTP 400 error if request includes blocked parameters:
+  - `include_extras=true` (increases result set size)
+  - `include_multilingual=true` (increases result set size)
+  - `order=released` or `order=added` (can return thousands of results)
 
 ## How It Works
 
@@ -289,11 +333,16 @@ See [SCRYFALL_API_COMPLIANCE.md](SCRYFALL_API_COMPLIANCE.md) for detailed techni
 ## Decklist Format
 
 Supported formats:
-- Simple: `2 Black Lotus`
-- With set: `2 Black Lotus (LEA) 1`
-- Deckstats format with brackets
-- TappedOut CSV format
-- Scryfall deck exports
+- **Simple text**: `2 Black Lotus`
+- **With set code**: `2 Black Lotus (LEA) 1`
+- **Arena format**: `2 Black Lotus (LEA)`
+- **Moxfield JSON**: `{ "main": [...], "sideboard": [...] }`
+- **Archidekt JSON**: `{ "cards": [...] }`
+- **Deckstats format**: With brackets `[2x] Black Lotus`
+- **TappedOut CSV**: Comma-separated format
+- **Scryfall deck exports**: Official Scryfall export format
+
+All formats can be parsed and validated using the `/deck/parse` endpoint.
 
 ## License
 
