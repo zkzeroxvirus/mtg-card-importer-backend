@@ -9,21 +9,27 @@ const os = require('os');
 // Configuration: Use environment variable or default to CPU count
 const workersEnv = process.env.WORKERS || 'auto';
 const WORKERS = workersEnv === 'auto' ? os.cpus().length : parseInt(workersEnv, 10);
+// Stagger worker startup to prevent simultaneous bulk data loading (configurable via env var)
+const STARTUP_STAGGER_MS = parseInt(process.env.STARTUP_STAGGER_MS || '2000', 10);
 
 if (cluster.isPrimary) {
   console.log(`[Cluster] Primary process ${process.pid} is running`);
-  console.log(`[Cluster] Starting ${WORKERS} worker processes...`);
+  console.log(`[Cluster] Starting ${WORKERS} worker processes with ${STARTUP_STAGGER_MS}ms stagger delay...`);
 
   // Track worker status
   const workerStats = new Map();
 
-  // Fork workers
+  // Fork workers with staggered startup to prevent simultaneous bulk data loading
+  // This prevents 100% CPU usage when all workers try to JSON.parse() bulk data at once
+  // Delay can be configured via STARTUP_STAGGER_MS environment variable
   for (let i = 0; i < WORKERS; i++) {
-    const worker = cluster.fork();
-    workerStats.set(worker.id, {
-      startTime: Date.now(),
-      restarts: 0
-    });
+    setTimeout(() => {
+      const worker = cluster.fork();
+      workerStats.set(worker.id, {
+        startTime: Date.now(),
+        restarts: 0
+      });
+    }, i * STARTUP_STAGGER_MS);
   }
 
   // Monitor worker health
