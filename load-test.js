@@ -68,6 +68,7 @@ function makeRequest(scenario) {
     }
 
     const req = client.request(options, (res) => {
+      // Consume data events to avoid backpressure during load tests
       res.on('data', () => {});
 
       res.on('end', () => {
