@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const cluster = require('cluster');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -12,6 +13,11 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
+
+// Detect if this should schedule bulk data updates
+// In cluster mode: only worker 1 schedules updates to prevent duplicate timers
+// In non-cluster mode: always schedule updates
+const SHOULD_SCHEDULE_UPDATES = !cluster.isWorker || cluster.worker.id === 1;
 
 // Security: Input validation constants
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
@@ -1516,7 +1522,16 @@ if (process.env.NODE_ENV !== 'test') {
     
     if (USE_BULK_DATA) {
       console.log('[Init] Loading bulk data in background...');
-      bulkData.loadBulkData()
+      
+      // In cluster mode, only worker 1 schedules automatic updates
+      // This prevents multiple concurrent bulk data downloads across workers
+      if (cluster.isWorker && cluster.worker.id !== 1) {
+        console.log(`[Init] Worker ${cluster.worker.id} - automatic updates disabled (handled by worker 1)`);
+      } else if (cluster.isWorker && cluster.worker.id === 1) {
+        console.log('[Init] Worker 1 - will handle automatic bulk data updates');
+      }
+      
+      bulkData.loadBulkData(SHOULD_SCHEDULE_UPDATES)
         .then(() => {
           console.log('[Init] Bulk data ready!');
         })
@@ -1537,6 +1552,12 @@ if (process.env.NODE_ENV !== 'test') {
   // Graceful shutdown handler
   const gracefulShutdown = (signal) => {
     console.log(`\n[Shutdown] Received ${signal}, starting graceful shutdown...`);
+    
+    // Stop bulk data update timers to prevent memory leaks
+    // Only stop if this worker was responsible for scheduling updates
+    if (USE_BULK_DATA && SHOULD_SCHEDULE_UPDATES) {
+      bulkData.stopUpdateCheck();
+    }
     
     server.close(() => {
       console.log('[Shutdown] Server closed, no longer accepting connections');
