@@ -325,7 +325,7 @@ Supported formats:
 - **TappedOut CSV**: Comma-separated format
 - **Scryfall deck exports**: Official Scryfall export format
 
-All formats support sideboard cards and can be parsed using the `/deck/parse` endpoint for validation.
+All formats can be parsed and validated using the `/deck/parse` endpoint.
 
 ## License
 
