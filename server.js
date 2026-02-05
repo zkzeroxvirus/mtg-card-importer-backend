@@ -23,6 +23,10 @@ const SHOULD_SCHEDULE_UPDATES = !cluster.isWorker || cluster.worker.id === 1;
 const MAX_CARD_NAME_LENGTH = 200;
 const MAX_QUERY_LENGTH = 1000;
 const MAX_SEARCH_LIMIT = 175;
+const DEFAULT_SEARCH_LIMIT = Math.min(100, MAX_SEARCH_LIMIT);
+const MAX_RANDOM_COUNT = 100;
+const MAX_SET_CODE_LENGTH = 10;
+const INVALID_CARD_BACK_MESSAGE = 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)';
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
@@ -362,6 +366,15 @@ app.get('/', (req, res) => {
   const uptime = Math.floor((Date.now() - metrics.startTime) / 1000);
   const memUsage = process.memoryUsage();
   
+  // endpointMap preserves the legacy object shape while endpoints exposes a simple list.
+  const endpointMap = {
+    card: 'GET /card/:name',
+    deck: 'POST /deck',
+    random: 'GET /random',
+    search: 'GET /search',
+    bulkStats: 'GET /bulk/stats',
+    metrics: 'GET /metrics'
+  };
   res.json({
     status: 'ok',
     service: 'MTG Card Importer Backend',
@@ -381,22 +394,8 @@ app.get('/', (req, res) => {
     config: {
       useBulkData: USE_BULK_DATA
     },
-    endpoints: [
-      'GET /card/:name',
-      'POST /deck',
-      'GET /random',
-      'GET /search',
-      'GET /bulk/stats',
-      'GET /metrics'
-    ],
-    endpointMap: {
-      card: 'GET /card/:name',
-      deck: 'POST /deck',
-      random: 'GET /random',
-      search: 'GET /search',
-      bulkStats: 'GET /bulk/stats',
-      metrics: 'GET /metrics'
-    }
+    endpoints: Object.values(endpointMap),
+    endpointMap
   });
 });
 
@@ -478,10 +477,10 @@ app.get('/card/:name', async (req, res) => {
       });
     }
 
-    if (set && set.length > 10) {
+    if (set && set.length > MAX_SET_CODE_LENGTH) {
       return res.status(400).json({ 
         object: 'error', 
-        details: 'Set code too long (max 10 characters)' 
+        details: `Set code too long (max ${MAX_SET_CODE_LENGTH} characters)` 
       });
     }
 
@@ -616,7 +615,7 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
     }
 
     // Security: Validate input lengths
-    if (set.length > 10) {
+    if (set.length > MAX_SET_CODE_LENGTH) {
       return res.status(400).json({ error: 'Set code too long' });
     }
     if (number.length > 10) {
@@ -697,7 +696,7 @@ app.post('/deck', async (req, res) => {
         if (back && !isValidCardBackURL(back)) {
           return res.status(400).json({ 
             object: 'error',
-            details: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)'
+            details: INVALID_CARD_BACK_MESSAGE
           });
         }
       } catch (e) {
@@ -799,7 +798,7 @@ app.post('/build', async (req, res) => {
         if (back && !isValidCardBackURL(back)) {
           return res.status(400).json({ 
             object: 'error',
-            details: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)'
+            details: INVALID_CARD_BACK_MESSAGE
           });
         }
       } catch (e) {
@@ -1096,13 +1095,13 @@ app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count, q = '' } = req.query;
     const countNum = count ? parseInt(count, 10) : 1;
-    if (count && (Number.isNaN(countNum) || countNum < 1 || countNum > 100)) {
+    if (Number.isNaN(countNum) || countNum < 1 || countNum > MAX_RANDOM_COUNT) {
       return res.status(400).json({ 
         object: 'error', 
-        details: 'Count must be between 1 and 100' 
+        details: `Count must be between 1 and ${MAX_RANDOM_COUNT}` 
       });
     }
-    const numCards = countNum || 1;
+    const numCards = countNum;
     
     console.log(`GET /random - count: ${numCards}, query: "${q}"`);
 
@@ -1330,7 +1329,7 @@ app.get('/search', async (req, res) => {
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
     // Security: Enforce maximum limit to prevent memory exhaustion
     const parsedLimit = parseInt(limit, 10);
-    const limitNum = Number.isNaN(parsedLimit) ? 100 : parsedLimit;
+    const limitNum = Number.isNaN(parsedLimit) ? DEFAULT_SEARCH_LIMIT : parsedLimit;
     if (limitNum < 1 || limitNum > MAX_SEARCH_LIMIT) {
       return res.status(400).json({ 
         error: `Limit must be between 1 and ${MAX_SEARCH_LIMIT}` 
@@ -1470,7 +1469,7 @@ app.get('/sets/:code', async (req, res) => {
     if (!code) {
       return res.status(400).json({ error: 'Set code required' });
     }
-    if (code.length > 10) {
+    if (code.length > MAX_SET_CODE_LENGTH) {
       return res.status(400).json({ error: 'Set code too long' });
     }
 

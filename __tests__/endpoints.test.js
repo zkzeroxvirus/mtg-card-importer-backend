@@ -136,6 +136,8 @@ describe('Server Endpoints - Deck Building', () => {
       });
     // Should not be a validation error
     expect(response.status).not.toBe(400);
+    expect(response.body.detected_format).toBe('decklist_json');
+    expect(response.body.mainboard_count).toBeGreaterThan(0);
   });
 });
 
