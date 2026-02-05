@@ -1531,7 +1531,17 @@ if (process.env.NODE_ENV !== 'test') {
         console.log('[Init] Worker 1 - will handle automatic bulk data updates');
       }
       
-      bulkData.loadBulkData(SHOULD_SCHEDULE_UPDATES)
+      // Timeout wrapper to prevent indefinite hanging on bulk data load
+      // 10 minutes should be enough even for large downloads + decompression on slow storage
+      const BULK_DATA_LOAD_TIMEOUT = 10 * 60 * 1000;
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Bulk data load timeout - exceeded 10 minutes')), BULK_DATA_LOAD_TIMEOUT)
+      );
+      
+      Promise.race([
+        bulkData.loadBulkData(SHOULD_SCHEDULE_UPDATES),
+        timeoutPromise
+      ])
         .then(() => {
           console.log('[Init] Bulk data ready!');
         })
