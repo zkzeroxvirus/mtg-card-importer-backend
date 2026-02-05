@@ -30,8 +30,9 @@ Update timers were not properly cleaned up during graceful shutdowns, leaving or
   - Set to `false` in cluster workers to prevent duplicate timers
 
 - **Fixed missing timer rescheduling**
-  - Added `scheduleUpdateCheck()` calls after successful updates (lines 1915, 1924)
-  - Added `scheduleUpdateCheck(RETRY_INTERVAL)` call after failed updates (line 1929)
+  - Added `scheduleUpdateCheck()` calls after successful updates
+  - Added `scheduleUpdateCheck(RETRY_INTERVAL)` call after failed updates
+  - Ensures the 24-hour update cycle continues indefinitely
 
 - **Added `stopUpdateCheck()` function**
   - Cleanly stops automatic update checks
