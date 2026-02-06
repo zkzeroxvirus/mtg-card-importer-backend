@@ -216,17 +216,23 @@ GET /random?count=15&q=t:creature
 
 **Impact:** Negligible for most users. New cards are rare (few per week).
 
-### 3. Price Data ⚠️
+### 3. Price Data ⚠️ → ✅ **Always Uses API (as of latest update)**
 
-**Bulk Mode:**
-- Requires `BULK_DATA_TYPE=default_cards`
-- `oracle_cards` (default) has NO price data
-- `default_cards` includes `usd`, `eur`, `tix` fields
+**NEW BEHAVIOR (Forced API Mode):**
+- Price filters (`usd:`, `eur:`, `tix:`) **always** use live Scryfall API
+- Ensures real-time market pricing regardless of dataset
+- Works with both `oracle_cards` and `default_cards` datasets
+- Queries containing `usd>=`, `eur<`, `tix:`, etc. automatically skip bulk mode
+
+**Old Behavior (Before API Forcing):**
+- Required `BULK_DATA_TYPE=default_cards` for price data
+- `oracle_cards` (default) had NO price data
+- Price data was 24 hours stale
 
 **API Mode:**
 - Always has current price data
 
-**Impact:** Price filters (`usd>10`) only work with `default_cards` dataset.
+**Impact:** Price queries are now always accurate and real-time, but slightly slower (~100-500ms vs instant).
 
 ### 4. All Printings Queries ⚠️
 
