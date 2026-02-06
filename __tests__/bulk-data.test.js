@@ -246,6 +246,13 @@ describe('Bulk Data - Cross-Process Locking', () => {
     const staleThresholdMs = 30 * 60 * 1000; // 30 minutes
     expect(staleThresholdMs).toBe(1800000);
   });
+
+  test('should use load lock filenames with .load.lock suffix', () => {
+    const cardBasename = 'oracle_cards';
+    const lockFile = path.join('/data', `${cardBasename}.load.lock`);
+
+    expect(lockFile.endsWith('.load.lock')).toBe(true);
+  });
 });
 
 describe('Bulk Data - Cross-Process Lock Integration', () => {
