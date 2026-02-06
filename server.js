@@ -158,9 +158,6 @@ function sanitizeTokenQueryName(name) {
     .replace(/[^\w\s'-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!/^[\w\s'-]+$/.test(cleaned)) {
-    return '';
-  }
   return cleaned;
 }
 
@@ -207,7 +204,7 @@ function getBulkCardFromUri(uri) {
   return null;
 }
 
-async function getTokensFromBulkData(cardName) {
+async function tryGetTokensFromBulkData(cardName) {
   if (!USE_BULK_DATA || !bulkData.isLoaded()) {
     return null;
   }
@@ -219,9 +216,11 @@ async function getTokensFromBulkData(cardName) {
   const jsonEncodedName = JSON.stringify(queryName);
 
   let baseCard = null;
+  let hasBaseCard = false;
 
   try {
     baseCard = bulkData.getCardByName(queryName);
+    hasBaseCard = Boolean(baseCard);
   } catch {
     baseCard = null;
   }
@@ -250,7 +249,7 @@ async function getTokensFromBulkData(cardName) {
     return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
   }
 
-  return [];
+  return hasBaseCard ? [] : null;
 }
 
 /**
@@ -1463,7 +1462,7 @@ app.get('/tokens/:name', async (req, res) => {
 
     let tokens = null;
     if (USE_BULK_DATA && bulkData.isLoaded()) {
-      tokens = await getTokensFromBulkData(name);
+      tokens = await tryGetTokensFromBulkData(name);
     }
     if (tokens === null) {
       tokens = await scryfallLib.getTokens(name);
