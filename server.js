@@ -199,10 +199,15 @@ async function getTokensFromBulkData(cardName) {
   }
 
   const MAX_TOKENS = 16;
+  const sanitizedName = String(cardName || '').replace(/"/g, '').trim();
+  if (!sanitizedName) {
+    return [];
+  }
+
   let baseCard = null;
 
   try {
-    baseCard = bulkData.getCardByName(cardName);
+    baseCard = bulkData.getCardByName(sanitizedName);
   } catch {
     baseCard = null;
   }
@@ -217,13 +222,13 @@ async function getTokensFromBulkData(cardName) {
     }
   }
 
-  const typeQuery = `t:token name:"${cardName}"`;
+  const typeQuery = `t:token name:"${sanitizedName}"`;
   const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKENS);
   if (Array.isArray(typeResults) && typeResults.length > 0) {
     return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKENS);
   }
 
-  const createQuery = `o:"create ${cardName}"`;
+  const createQuery = `o:"create ${sanitizedName}"`;
   const createResults = await bulkData.searchCards(createQuery, MAX_TOKENS);
   if (Array.isArray(createResults) && createResults.length > 0) {
     return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKENS);
