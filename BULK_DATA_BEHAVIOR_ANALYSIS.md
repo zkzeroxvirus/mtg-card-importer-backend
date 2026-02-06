@@ -151,7 +151,7 @@ GET /search?q=usd>10
 
 **Non-Playable Exclusions** (both modes):
 - Test cards (Mystery Booster playtest)
-- Acorn-stamped cards (not tournament legal)
+- Acorn stamp cards (not tournament legal)
 - Digital-only cards
 - Tokens, emblems, art cards
 - Oversized cards
