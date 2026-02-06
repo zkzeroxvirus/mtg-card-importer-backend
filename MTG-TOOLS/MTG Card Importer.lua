@@ -2,7 +2,7 @@
 -- MTG Card Importer for Tabletop Simulator
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
-mod_name, version = 'MTG Importer', '1.906'
+mod_name, version = 'Card Importer', '1.906'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
