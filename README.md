@@ -266,6 +266,7 @@ Example: `GET /sets/dom`
 2. **Caching**: Bulk mode keeps the full Oracle bulk file in memory for instant responses; API mode streams results directly
 3. **Error Handling**: Returns 404 when cards are not found, with descriptive error messages
 4. **Price Queries**: Queries with price filters (`usd:`, `eur:`, `tix:`) always use live API for real-time market pricing, regardless of bulk mode settings
+5. **Token Queries**: Queries with token filters (`t:token`, `type:token`, `is:token`) always use live API for complete and current token database, regardless of bulk mode settings
 
 ### Tabletop Simulator Format
 

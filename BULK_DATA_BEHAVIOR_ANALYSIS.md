@@ -234,7 +234,27 @@ GET /random?count=15&q=t:creature
 
 **Impact:** Price queries are now always accurate and real-time, but slightly slower (~100-500ms vs instant).
 
-### 4. All Printings Queries ⚠️
+### 4. Token Searches ⚠️ → ✅ **Always Uses API (as of latest update)**
+
+**NEW BEHAVIOR (Forced API Mode):**
+- Token type filters (`t:token`, `type:token`, `is:token`) **always** use live Scryfall API
+- Ensures complete and current token database
+- Works with both `oracle_cards` and `default_cards` datasets
+- Queries like `t:token name:treasure`, `is:token`, etc. automatically skip bulk mode
+
+**Rationale:**
+- Tokens are frequently updated with new sets
+- Token searches need the most complete results (DFC exclusion, all variants)
+- 24-hour stale data could miss newly released tokens
+- Token spawning in TTS requires accurate, complete token lists
+
+**API Mode:**
+- Always has current token data
+- Auto-excludes DFC tokens to prevent duplicate variants
+
+**Impact:** Token queries are now always complete and current, but slightly slower (~100-500ms vs instant).
+
+### 5. All Printings Queries ⚠️
 
 **Bulk Mode:**
 - Cannot query "all printings of X card"
@@ -245,7 +265,7 @@ GET /random?count=15&q=t:creature
 
 **Impact:** Printings endpoint always uses API mode (by design).
 
-### 5. Memory Requirements ⚠️
+### 6. Memory Requirements ⚠️
 
 **Bulk Mode:**
 - `oracle_cards`: ~500MB RAM per worker

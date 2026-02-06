@@ -1195,20 +1195,28 @@ app.get('/random', randomLimiter, async (req, res) => {
     // Check if query contains price filters (usd, eur, tix)
     // Price queries always use API for real-time market data
     const hasPriceFilter = q && /\b(usd|eur|tix)[:=<>]/i.test(q);
+    
+    // Check if query contains token type filters (t:token, type:token, is:token)
+    // Token queries always use API for complete and current token database
+    const hasTokenFilter = q && /\b(?:t|type|is):token\b/i.test(q);
+    
     if (hasPriceFilter) {
       console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
+    }
+    if (hasTokenFilter) {
+      console.log(`[API] Token filter detected in query: "${q}", using live API for complete token database`);
     }
 
     if (numCards === 1) {
       // Single random card
       let scryfallCard = null;
       
-      // Skip bulk mode for price filters to ensure real-time pricing
-      if (!hasPriceFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      // Skip bulk mode for price/token filters to ensure real-time/complete data
+      if (!hasPriceFilter && !hasTokenFilter && USE_BULK_DATA && bulkData.isLoaded()) {
         scryfallCard = await bulkData.getRandomCard(q);
       }
       
-      // Fallback to API if bulk data not loaded, returned null, or has price filter
+      // Fallback to API if bulk data not loaded, returned null, or has price/token filter
       if (!scryfallCard) {
         try {
           scryfallCard = await scryfallLib.getRandomCard(q);
@@ -1230,8 +1238,8 @@ app.get('/random', randomLimiter, async (req, res) => {
       const cards = [];
       const seenCardIds = new Set(); // Track card IDs to avoid duplicates
       
-      // Skip bulk mode for price filters to ensure real-time pricing
-      if (!hasPriceFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      // Skip bulk mode for price/token filters to ensure real-time/complete data
+      if (!hasPriceFilter && !hasTokenFilter && USE_BULK_DATA && bulkData.isLoaded()) {
         // Bulk data - instant responses (with logging suppressed)
         // Try up to numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER attempts to account for duplicates
         const maxAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
@@ -1404,10 +1412,17 @@ app.get('/search', async (req, res) => {
     // Price queries always use API for real-time market data
     const hasPriceFilter = /\b(usd|eur|tix)[:=<>]/i.test(q);
     
-    // For full printings list or price filters, prefer live API to ensure completeness/freshness
-    if (requestedUnique === 'prints' || hasPriceFilter) {
+    // Check if query contains token type filters (t:token, type:token, is:token)
+    // Token queries always use API for complete and current token database
+    const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(q);
+    
+    // For full printings list, price filters, or token searches, prefer live API to ensure completeness/freshness
+    if (requestedUnique === 'prints' || hasPriceFilter || hasTokenFilter) {
       if (hasPriceFilter) {
         console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
+      }
+      if (hasTokenFilter) {
+        console.log(`[API] Token filter detected in query: "${q}", using live API for complete token database`);
       }
       scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
     } else if (USE_BULK_DATA && bulkData.isLoaded()) {

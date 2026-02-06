@@ -1,5 +1,5 @@
 /**
- * Tests to verify price filters force API routing for real-time pricing
+ * Tests to verify price and token filters force API routing for real-time/complete data
  */
 
 const request = require('supertest');
@@ -12,7 +12,7 @@ jest.mock('../lib/bulk-data');
 const scryfallLib = require('../lib/scryfall');
 const bulkData = require('../lib/bulk-data');
 
-describe('Price Filter API Routing', () => {
+describe('Price and Token Filter API Routing', () => {
   let app;
   let originalEnv;
 
@@ -150,6 +150,24 @@ describe('Price Filter API Routing', () => {
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).toHaveBeenCalled();
     });
+
+    test('should use API for single random with token filter', async () => {
+      await request(app)
+        .get('/random?q=t:token')
+        .expect(200);
+
+      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+    });
+
+    test('should use API for multiple random with token filter', async () => {
+      await request(app)
+        .get('/random?count=5&q=is:token')
+        .expect(200);
+
+      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+    });
   });
 
   describe('Price filter detection regex', () => {
@@ -180,6 +198,44 @@ describe('Price Filter API Routing', () => {
           expect(bulkData.searchCards).toHaveBeenCalled();
         }
       });
+    });
+  });
+
+  describe('Token filter detection regex', () => {
+    const testQueries = [
+      { query: 't:token', shouldMatch: true, desc: 't:token' },
+      { query: 'type:token', shouldMatch: true, desc: 'type:token' },
+      { query: 'is:token', shouldMatch: true, desc: 'is:token' },
+      { query: 't:token name:treasure', shouldMatch: true, desc: 't:token with name' },
+      { query: 'is:token c:r', shouldMatch: true, desc: 'is:token with color' },
+      { query: 't:goblin', shouldMatch: false, desc: 't:goblin (not token)' },
+      { query: 'c:r t:creature', shouldMatch: false, desc: 'no token filter' },
+    ];
+
+    testQueries.forEach(({ query, shouldMatch, desc }) => {
+      test(`should ${shouldMatch ? '' : 'not '}match: ${desc}`, async () => {
+        await request(app)
+          .get(`/search?q=${encodeURIComponent(query)}`)
+          .expect(200);
+
+        if (shouldMatch) {
+          expect(scryfallLib.searchCards).toHaveBeenCalled();
+          expect(bulkData.searchCards).not.toHaveBeenCalled();
+        } else {
+          expect(bulkData.searchCards).toHaveBeenCalled();
+        }
+      });
+    });
+  });
+
+  describe('Combined price and token filters', () => {
+    test('should use API for query with both price and token filters', async () => {
+      await request(app)
+        .get('/search?q=t:token+usd>=5')
+        .expect(200);
+
+      expect(scryfallLib.searchCards).toHaveBeenCalled();
+      expect(bulkData.searchCards).not.toHaveBeenCalled();
     });
   });
 });
