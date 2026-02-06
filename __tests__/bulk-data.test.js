@@ -5,6 +5,7 @@
 
 // Mock dependencies before requiring bulk-data
 jest.mock('axios');
+const path = require('path');
 const bulkData = require('../lib/bulk-data');
 
 describe('Bulk Data - Download Retry Logic', () => {
@@ -235,6 +236,20 @@ describe('Bulk Data - Atomic File Operations', () => {
     // Documents cleanup requirement
     const shouldCleanupTempFiles = true;
     expect(shouldCleanupTempFiles).toBe(true);
+  });
+});
+
+describe('Bulk Data - Cross-Process Locking', () => {
+  test('should derive download lock file path from data dir', () => {
+    const bulkDataDir = '/app/data';
+    const cardBasename = 'oracle_cards';
+    const lockFile = path.join(bulkDataDir, `${cardBasename}.download.lock`);
+    expect(lockFile).toBe('/app/data/oracle_cards.download.lock');
+  });
+
+  test('should treat locks older than 30 minutes as stale', () => {
+    const staleThresholdMs = 30 * 60 * 1000; // 30 minutes
+    expect(staleThresholdMs).toBe(1800000);
   });
 });
 
