@@ -151,6 +151,10 @@ function isTokenOrEmblemCard(card) {
   return typeLine.includes('token') || typeLine.includes('emblem');
 }
 
+/**
+ * Normalize a token name for bulk-data search queries.
+ * Strips characters that can break query parsing and collapses whitespace.
+ */
 // Sanitize token names for safe bulk-data search queries (used inside quoted filters).
 function sanitizeTokenQueryName(name) {
   const cleaned = String(name || '')
@@ -161,6 +165,10 @@ function sanitizeTokenQueryName(name) {
   return cleaned;
 }
 
+/**
+ * Resolve a Scryfall card URI against bulk data when possible.
+ * Returns null for unsupported endpoints or when bulk data isn't available.
+ */
 function getBulkCardFromUri(uri) {
   if (!USE_BULK_DATA || !bulkData.isLoaded()) {
     return null;
@@ -204,6 +212,11 @@ function getBulkCardFromUri(uri) {
   return null;
 }
 
+/**
+ * Attempt to find tokens/emblems using bulk data.
+ * Tries all_parts first, then name-based token search, then oracle text search.
+ * Returns [] when bulk data finds no tokens for a known card, and null to allow API fallback.
+ */
 async function tryGetTokensFromBulkData(cardName) {
   if (!USE_BULK_DATA || !bulkData.isLoaded()) {
     return null;
