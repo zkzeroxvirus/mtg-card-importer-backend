@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
-const cluster = require('cluster');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -14,61 +13,10 @@ const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 
-// Detect if this should schedule bulk data updates
-// In cluster mode: only worker 1 schedules updates to prevent duplicate timers
-// In non-cluster mode: always schedule updates
-const SHOULD_SCHEDULE_UPDATES = !cluster.isWorker || cluster.worker.id === 1;
-
 // Security: Input validation constants
-const MAX_CARD_NAME_LENGTH = 200;
-const MAX_QUERY_LENGTH = 1000;
-const MAX_SEARCH_LIMIT = 175;
-const DEFAULT_SEARCH_LIMIT = Math.min(100, MAX_SEARCH_LIMIT);
-const MAX_RANDOM_COUNT = 100;
-const MAX_SET_CODE_LENGTH = 10;
-const INVALID_CARD_BACK_MESSAGE = 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)';
+const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
+const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
-
-const IS_TEST_ENV = process.env.NODE_ENV === 'test';
-
-if (IS_TEST_ENV) {
-  const mockCard = {
-    id: 'test-card',
-    name: 'Test Card',
-    image_uris: { normal: 'https://example.com/test-card.jpg' },
-    mana_cost: '{1}',
-    type_line: 'Creature — Test',
-    oracle_text: 'Test oracle text.',
-    oracle_id: 'test-oracle-id'
-  };
-  const mockSet = {
-    id: 'test-set',
-    object: 'set',
-    name: 'Test Set',
-    code: 'tst'
-  };
-
-  scryfallLib.getCard = async () => ({ ...mockCard });
-  scryfallLib.getCardById = async (id) => ({ ...mockCard, id: id || mockCard.id });
-  scryfallLib.getCardBySetNumber = async (set, number, lang) => ({
-    ...mockCard,
-    set: set || 'tst',
-    collector_number: number || '123',
-    lang: lang || 'en'
-  });
-  scryfallLib.getRandomCard = async () => ({ ...mockCard });
-  scryfallLib.searchCards = async () => ([{ ...mockCard }]);
-  scryfallLib.getCardRulings = async () => ([{
-    object: 'ruling',
-    comment: 'Test ruling',
-    published_at: '2020-01-01',
-    source: 'scryfall'
-  }]);
-  scryfallLib.getTokens = async () => ([{ ...mockCard, name: 'Test Token' }]);
-  scryfallLib.getPrintings = async () => ([{ ...mockCard }]);
-  scryfallLib.getSet = async (code) => ({ ...mockSet, code: code || mockSet.code });
-  scryfallLib.proxyUri = async () => ({ ...mockCard });
-}
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -131,7 +79,7 @@ app.use(compression({
   level: 6 // Balance between compression speed and ratio
 }));
 
-app.use(express.raw({ limit: '10mb', type: '*/*' }));  // Accept raw body as Buffer, parse manually
+app.use(express.raw({ limit: '10mb' }));  // Accept raw body as Buffer, parse manually
 
 // Performance metrics tracking
 const metrics = {
@@ -366,15 +314,6 @@ app.get('/', (req, res) => {
   const uptime = Math.floor((Date.now() - metrics.startTime) / 1000);
   const memUsage = process.memoryUsage();
   
-  // endpointMap preserves the legacy object shape while endpoints exposes a simple list.
-  const endpointMap = {
-    card: 'GET /card/:name',
-    deck: 'POST /deck',
-    random: 'GET /random',
-    search: 'GET /search',
-    bulkStats: 'GET /bulk/stats',
-    metrics: 'GET /metrics'
-  };
   res.json({
     status: 'ok',
     service: 'MTG Card Importer Backend',
@@ -391,11 +330,14 @@ app.get('/', (req, res) => {
       loaded: bulkStats.loaded,
       cardCount: bulkStats.cardCount
     },
-    config: {
-      useBulkData: USE_BULK_DATA
-    },
-    endpoints: Object.values(endpointMap),
-    endpointMap
+    endpoints: {
+      card: 'GET /card/:name',
+      deck: 'POST /deck',
+      random: 'GET /random',
+      search: 'GET /search',
+      bulkStats: 'GET /bulk/stats',
+      metrics: 'GET /metrics'
+    }
   });
 });
 
@@ -470,17 +412,17 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Security: Validate input length to prevent DoS
-    if (name.length > MAX_CARD_NAME_LENGTH) {
+    if (name.length > MAX_INPUT_LENGTH) {
       return res.status(400).json({ 
         object: 'error', 
-        details: `Card name too long (max ${MAX_CARD_NAME_LENGTH} characters)` 
+        details: `Card name too long (max ${MAX_INPUT_LENGTH} characters)` 
       });
     }
 
-    if (set && set.length > MAX_SET_CODE_LENGTH) {
+    if (set && set.length > 10) {
       return res.status(400).json({ 
         object: 'error', 
-        details: `Set code too long (max ${MAX_SET_CODE_LENGTH} characters)` 
+        details: 'Set code too long (max 10 characters)' 
       });
     }
 
@@ -615,7 +557,7 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
     }
 
     // Security: Validate input lengths
-    if (set.length > MAX_SET_CODE_LENGTH) {
+    if (set.length > 10) {
       return res.status(400).json({ error: 'Set code too long' });
     }
     if (number.length > 10) {
@@ -695,8 +637,7 @@ app.post('/deck', async (req, res) => {
         // Security: Validate custom card back URL if provided
         if (back && !isValidCardBackURL(back)) {
           return res.status(400).json({ 
-            object: 'error',
-            details: INVALID_CARD_BACK_MESSAGE
+            error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
           });
         }
       } catch (e) {
@@ -797,8 +738,7 @@ app.post('/build', async (req, res) => {
         // Security: Validate custom card back URL if provided
         if (back && !isValidCardBackURL(back)) {
           return res.status(400).json({ 
-            object: 'error',
-            details: INVALID_CARD_BACK_MESSAGE
+            error: 'Invalid card back URL. Must be from allowed domains (Steam CDN, Imgur)' 
           });
         }
       } catch (e) {
@@ -897,13 +837,8 @@ app.post('/deck/parse', async (req, res) => {
       try {
         const json = JSON.parse(bodyText);
         
-        // Decklist JSON format: { decklist: "4 Card Name\n2 Other" }
-        if (typeof json.decklist === 'string') {
-          detectedFormat = 'decklist_json';
-          parsedCards = scryfallLib.parseDecklist(json.decklist);
-        }
         // Moxfield format: { main: [...], sideboard: [...] }
-        else if (json.main || json.mainboard) {
+        if (json.main || json.mainboard) {
           detectedFormat = 'moxfield_json';
           const mainArray = json.main || json.mainboard;
           if (Array.isArray(mainArray)) {
@@ -1094,22 +1029,16 @@ app.post('/deck/parse', async (req, res) => {
 app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count, q = '' } = req.query;
-    const countNum = count ? parseInt(count, 10) : 1;
-    if (Number.isNaN(countNum) || countNum < 1 || countNum > MAX_RANDOM_COUNT) {
-      return res.status(400).json({ 
-        object: 'error', 
-        details: `Count must be between 1 and ${MAX_RANDOM_COUNT}` 
-      });
-    }
-    const numCards = countNum;
+    // Security: Enforce maximum count to prevent resource exhaustion
+    const numCards = count ? Math.min(Math.max(parseInt(count) || 1, 1), 100) : 1;
     
     console.log(`GET /random - count: ${numCards}, query: "${q}"`);
 
     // Security: Validate query length
-    if (q && q.length > MAX_QUERY_LENGTH) {
+    if (q && q.length > MAX_INPUT_LENGTH) {
       return res.status(400).json({ 
         object: 'error', 
-        details: `Query too long (max ${MAX_QUERY_LENGTH} characters)` 
+        details: `Query too long (max ${MAX_INPUT_LENGTH} characters)` 
       });
     }
 
@@ -1320,21 +1249,15 @@ app.get('/search', async (req, res) => {
     }
 
     // Security: Validate input length
-    if (q.length > MAX_QUERY_LENGTH) {
+    if (q.length > MAX_INPUT_LENGTH) {
       return res.status(400).json({ 
-        error: `Query too long (max ${MAX_QUERY_LENGTH} characters)` 
+        error: `Query too long (max ${MAX_INPUT_LENGTH} characters)` 
       });
     }
 
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
     // Security: Enforce maximum limit to prevent memory exhaustion
-    const parsedLimit = parseInt(limit, 10);
-    const limitNum = Number.isNaN(parsedLimit) ? DEFAULT_SEARCH_LIMIT : parsedLimit;
-    if (limitNum < 1 || limitNum > MAX_SEARCH_LIMIT) {
-      return res.status(400).json({ 
-        error: `Limit must be between 1 and ${MAX_SEARCH_LIMIT}` 
-      });
-    }
+    const limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
     
     let scryfallCards = null;
     
@@ -1469,9 +1392,6 @@ app.get('/sets/:code', async (req, res) => {
     if (!code) {
       return res.status(400).json({ error: 'Set code required' });
     }
-    if (code.length > MAX_SET_CODE_LENGTH) {
-      return res.status(400).json({ error: 'Set code too long' });
-    }
 
     const setData = await scryfallLib.getSet(code);
     
@@ -1571,11 +1491,6 @@ app.get('/proxy', async (req, res) => {
   }
 });
 
-// JSON 404 handler for unknown endpoints
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
-
 /**
  * Error handler
  */
@@ -1601,26 +1516,7 @@ if (process.env.NODE_ENV !== 'test') {
     
     if (USE_BULK_DATA) {
       console.log('[Init] Loading bulk data in background...');
-      
-      // In cluster mode, only worker 1 schedules automatic updates
-      // This prevents multiple concurrent bulk data downloads across workers
-      if (cluster.isWorker && cluster.worker.id !== 1) {
-        console.log(`[Init] Worker ${cluster.worker.id} - automatic updates disabled (handled by worker 1)`);
-      } else if (cluster.isWorker && cluster.worker.id === 1) {
-        console.log('[Init] Worker 1 - will handle automatic bulk data updates');
-      }
-      
-      // Timeout wrapper to prevent indefinite hanging on bulk data load
-      // 10 minutes should be enough even for large downloads + decompression on slow storage
-      const BULK_DATA_LOAD_TIMEOUT = 10 * 60 * 1000;
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Bulk data load timeout - exceeded 10 minutes')), BULK_DATA_LOAD_TIMEOUT)
-      );
-      
-      Promise.race([
-        bulkData.loadBulkData(SHOULD_SCHEDULE_UPDATES),
-        timeoutPromise
-      ])
+      bulkData.loadBulkData()
         .then(() => {
           console.log('[Init] Bulk data ready!');
         })
@@ -1641,12 +1537,6 @@ if (process.env.NODE_ENV !== 'test') {
   // Graceful shutdown handler
   const gracefulShutdown = (signal) => {
     console.log(`\n[Shutdown] Received ${signal}, starting graceful shutdown...`);
-    
-    // Stop bulk data update timers to prevent memory leaks
-    // Only stop if this worker was responsible for scheduling updates
-    if (USE_BULK_DATA && SHOULD_SCHEDULE_UPDATES) {
-      bulkData.stopUpdateCheck();
-    }
     
     server.close(() => {
       console.log('[Shutdown] Server closed, no longer accepting connections');
