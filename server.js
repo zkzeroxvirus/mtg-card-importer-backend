@@ -215,6 +215,7 @@ async function getTokensFromBulkData(cardName) {
   if (!sanitizedName) {
     return [];
   }
+  const quotedName = JSON.stringify(sanitizedName);
 
   let baseCard = null;
 
@@ -234,13 +235,14 @@ async function getTokensFromBulkData(cardName) {
     }
   }
 
-  const typeQuery = `t:token name:"${sanitizedName}"`;
+  const typeQuery = `t:token name:${quotedName}`;
   const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(typeResults) && typeResults.length > 0) {
     return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
   }
 
-  const createQuery = `o:"create ${sanitizedName}"`;
+  const createPhrase = `create ${sanitizedName}`;
+  const createQuery = `o:${JSON.stringify(createPhrase)}`;
   const createResults = await bulkData.searchCards(createQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(createResults) && createResults.length > 0) {
     return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
