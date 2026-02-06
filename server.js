@@ -17,6 +17,7 @@ const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
+const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -151,11 +152,15 @@ function isTokenOrEmblemCard(card) {
 }
 
 function sanitizeTokenSearchName(name) {
-  return String(name || '')
+  const cleaned = String(name || '')
     .replace(/[\\"]/g, '')
     .replace(/[^\w\s'-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  if (!/^[\w\s'-]+$/.test(cleaned)) {
+    return '';
+  }
+  return cleaned;
 }
 
 function getBulkCardFromUri(uri) {
@@ -206,7 +211,6 @@ async function getTokensFromBulkData(cardName) {
     return null;
   }
 
-  const MAX_TOKENS = 16;
   const sanitizedName = sanitizeTokenSearchName(cardName);
   if (!sanitizedName) {
     return [];
@@ -221,7 +225,7 @@ async function getTokensFromBulkData(cardName) {
   }
 
   if (baseCard?.all_parts?.length) {
-    const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKENS);
+    const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKEN_RESULTS);
     const tokensFromParts = tokenParts
       .map(part => bulkData.getCardById(part.id))
       .filter(Boolean);
@@ -231,15 +235,15 @@ async function getTokensFromBulkData(cardName) {
   }
 
   const typeQuery = `t:token name:"${sanitizedName}"`;
-  const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKENS);
+  const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(typeResults) && typeResults.length > 0) {
-    return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKENS);
+    return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
   }
 
   const createQuery = `o:"create ${sanitizedName}"`;
-  const createResults = await bulkData.searchCards(createQuery, MAX_TOKENS);
+  const createResults = await bulkData.searchCards(createQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(createResults) && createResults.length > 0) {
-    return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKENS);
+    return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
   }
 
   return [];
