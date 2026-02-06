@@ -37,6 +37,8 @@ jest.mock('../lib/scryfall', () => ({
 const bulkData = require('../lib/bulk-data');
 const app = require('../server');
 
+const MAX_TOKEN_RESULTS = 16;
+
 describe('Search endpoint - Token limits', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -51,6 +53,6 @@ describe('Search endpoint - Token limits', () => {
       .query({ q: 't:token treasure' });
 
     expect(response.status).toBe(200);
-    expect(bulkData.searchCards).toHaveBeenCalledWith('t:token treasure', 16);
+    expect(bulkData.searchCards).toHaveBeenCalledWith('t:token treasure', MAX_TOKEN_RESULTS);
   });
 });
