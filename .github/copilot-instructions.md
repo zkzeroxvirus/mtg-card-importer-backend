@@ -140,10 +140,6 @@ npm run start:cluster
 - `SCRYFALL_API_COMPLIANCE.md` - API compliance requirements
 - `PERFORMANCE_GUIDE.md` - Performance tuning and benchmarks
 - `CUSTOM_IMAGE_PROXY_GUIDE.md` - Custom card image feature
-- `DEPLOYMENT_SUMMARY.md` - Deployment instructions
-- `BULK_DATA_FIXES.md` - Bulk data bug fixes and changes
-- `UNRAID_CRASH_FIX.md` - Memory leak fixes for Docker/Unraid
-- `UNRAID_DOCKER_HANG_FIX.md` - Docker container startup issues
 
 ## Key Features and Behavior
 

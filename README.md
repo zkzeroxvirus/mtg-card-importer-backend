@@ -366,8 +366,6 @@ docker build --no-cache -t mtg-card-importer-backend .
 docker restart mtg-card-importer-backend
 ```
 
-See [UNRAID_CRASH_FIX.md](UNRAID_CRASH_FIX.md) for detailed information about the fix and monitoring.
-
 ### Docker Container Won't Start - "Cannot find module 'express'"
 
 If your Docker container crashes immediately with errors like:
