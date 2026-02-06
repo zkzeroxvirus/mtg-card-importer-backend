@@ -150,6 +150,14 @@ function isTokenOrEmblemCard(card) {
   return typeLine.includes('token') || typeLine.includes('emblem');
 }
 
+function sanitizeTokenSearchName(name) {
+  return String(name || '')
+    .replace(/[\\"]/g, '')
+    .replace(/[^\w\s'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function getBulkCardFromUri(uri) {
   if (!USE_BULK_DATA || !bulkData.isLoaded()) {
     return null;
@@ -199,7 +207,7 @@ async function getTokensFromBulkData(cardName) {
   }
 
   const MAX_TOKENS = 16;
-  const sanitizedName = String(cardName || '').replace(/"/g, '').trim();
+  const sanitizedName = sanitizeTokenSearchName(cardName);
   if (!sanitizedName) {
     return [];
   }
