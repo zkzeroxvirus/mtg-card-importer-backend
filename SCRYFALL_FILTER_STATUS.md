@@ -81,6 +81,7 @@ This document provides a comprehensive overview of which Scryfall API filters ar
   - Operators: `=`, `<`, `>`, `<=`, `>=`
 - `tix:` - MTGO ticket price filter
   - Operators: `=`, `<`, `>`, `<=`, `>=`
+- **Requires** `BULK_DATA_TYPE=default_cards` (price fields are not present in `oracle_cards`) or API mode.
 
 ### Game & Availability
 - `game:` - Filter by game availability (paper, arena, mtgo)
