@@ -295,6 +295,7 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 ### Bulk Data Settings
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
 - `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data, Docker/Unraid: /app/data)
+- `BULK_DATA_TYPE` — Scryfall bulk dataset to load (default: `oracle_cards`; `default_cards` includes all printings, with random results deduped by oracle_id)
 
 See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for detailed tuning recommendations.
 

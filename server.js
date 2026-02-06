@@ -17,6 +17,18 @@ const MAX_DECK_SIZE = parseInt(process.env.MAX_DECK_SIZE || '500');
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
+const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
+const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
+  'named',
+  'search',
+  'random',
+  'collection',
+  'autocomplete',
+  'multiverse',
+  'arena',
+  'mtgo',
+  'tcgplayer'
+]);
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -129,6 +141,127 @@ function normalizeError(error, defaultStatus = 502) {
     'Request failed';
 
   return { status, details };
+}
+
+function filterTokenParts(allParts) {
+  if (!Array.isArray(allParts)) {
+    return [];
+  }
+  return allParts.filter(part => {
+    const typeLine = (part.type_line || '').toLowerCase();
+    const component = (part.component || '').toLowerCase();
+    return typeLine.includes('token') ||
+      typeLine.includes('emblem') ||
+      component === 'token' ||
+      component === 'emblem';
+  });
+}
+
+function isTokenOrEmblemCard(card) {
+  const typeLine = (card?.type_line || '').toLowerCase();
+  return typeLine.includes('token') || typeLine.includes('emblem');
+}
+
+/**
+ * Normalize a token name for bulk-data search queries.
+ * Strips characters that can break query parsing and collapses whitespace.
+ */
+function sanitizeTokenQueryName(name) {
+  const cleaned = String(name || '')
+    .replace(/["\\]/g, '')
+    .replace(/[^\w\s'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned;
+}
+
+/**
+ * Resolve a Scryfall card URI against bulk data when possible.
+ * Returns null for unsupported endpoints or when bulk data isn't available.
+ */
+function getBulkCardFromUri(uri) {
+  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+    return null;
+  }
+  try {
+    const urlObj = new URL(uri);
+    const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+    if (pathSegments[0] !== 'cards') {
+      return null;
+    }
+
+    if (pathSegments.length === 2) {
+      const cardId = pathSegments[1];
+      if (BULK_URI_BLOCKED_IDENTIFIERS.has(cardId)) {
+        return null;
+      }
+      return bulkData.getCardById(cardId);
+    }
+
+    if (pathSegments.length >= 3) {
+      if (BULK_URI_BLOCKED_IDENTIFIERS.has(pathSegments[1]) || pathSegments[2] === 'rulings') {
+        return null;
+      }
+      return bulkData.getCardBySetNumber(pathSegments[1], pathSegments[2], pathSegments[3] || 'en');
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Attempt to find tokens/emblems using bulk data.
+ * Tries all_parts first, then name-based token search, then oracle text search.
+ * Returns [] when bulk data finds no tokens for a known card, and null to allow API fallback.
+ */
+async function tryGetTokensFromBulkData(cardName) {
+  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+    return null;
+  }
+
+  const queryName = sanitizeTokenQueryName(cardName);
+  if (!queryName) {
+    return [];
+  }
+  const quotedName = JSON.stringify(queryName);
+
+  let baseCard = null;
+  let hasBaseCard = false;
+
+  try {
+    baseCard = bulkData.getCardByName(queryName);
+    hasBaseCard = Boolean(baseCard);
+  } catch (error) {
+    console.debug('[BulkData] Token base card lookup failed:', error.message);
+    baseCard = null;
+  }
+
+  if (baseCard?.all_parts?.length) {
+    const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKEN_RESULTS);
+    const tokensFromParts = tokenParts
+      .map(part => bulkData.getCardById(part.id))
+      .filter(Boolean);
+    if (tokensFromParts.length > 0) {
+      return tokensFromParts;
+    }
+  }
+
+  const typeQuery = `t:token name:${quotedName}`;
+  const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKEN_RESULTS);
+  if (Array.isArray(typeResults) && typeResults.length > 0) {
+    return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
+  }
+
+  const createPhrase = `create ${queryName}`;
+  const quotedCreatePhrase = JSON.stringify(createPhrase);
+  const createQuery = `o:${quotedCreatePhrase}`;
+  const createResults = await bulkData.searchCards(createQuery, MAX_TOKEN_RESULTS);
+  if (Array.isArray(createResults) && createResults.length > 0) {
+    return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
+  }
+
+  return hasBaseCard ? [] : null;
 }
 
 /**
@@ -459,10 +592,7 @@ app.get('/card/:name', async (req, res) => {
     
     // Filter all_parts to only include tokens and emblems (for TTS token spawning)
     if (scryfallCard.all_parts && Array.isArray(scryfallCard.all_parts)) {
-      scryfallCard.all_parts = scryfallCard.all_parts.filter(part => {
-        const typeLine = (part.type_line || '').toLowerCase();
-        return typeLine.includes('token') || typeLine.includes('emblem');
-      });
+      scryfallCard.all_parts = filterTokenParts(scryfallCard.all_parts);
     }
     
     // Return raw Scryfall format - Lua code will convert to TTS
@@ -1342,7 +1472,13 @@ app.get('/tokens/:name', async (req, res) => {
       return res.status(400).json({ error: 'Card name required' });
     }
 
-    const tokens = await scryfallLib.getTokens(name);
+    let tokens = null;
+    if (USE_BULK_DATA && bulkData.isLoaded()) {
+      tokens = await tryGetTokensFromBulkData(name);
+    }
+    if (tokens === null) {
+      tokens = await scryfallLib.getTokens(name);
+    }
     
     // Return array of Scryfall token cards
     res.json(tokens);
@@ -1481,6 +1617,11 @@ app.get('/proxy', async (req, res) => {
       });
     }
     
+    const bulkCard = getBulkCardFromUri(uri);
+    if (bulkCard) {
+      return res.json(bulkCard);
+    }
+
     const cardData = await scryfallLib.proxyUri(uri);
     res.json(cardData);
     

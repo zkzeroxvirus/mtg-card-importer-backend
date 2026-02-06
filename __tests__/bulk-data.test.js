@@ -5,6 +5,7 @@
 
 // Mock dependencies before requiring bulk-data
 jest.mock('axios');
+const bulkData = require('../lib/bulk-data');
 
 describe('Bulk Data - Download Retry Logic', () => {
   test('should retry on network failure', async () => {
@@ -202,6 +203,22 @@ describe('Bulk Data - Progress Tracking', () => {
       const calculatedPercent = Math.floor((bytes / expectedSize) * 100);
       expect(calculatedPercent).toBe(percent);
     });
+  });
+});
+
+describe('Bulk Data - Random Pool Deduplication', () => {
+  test('should dedupe cards by oracle_id for random selection', () => {
+    const cards = [
+      { id: 'print-1', oracle_id: 'oracle-1' },
+      { id: 'print-2', oracle_id: 'oracle-1' },
+      { id: 'print-3', oracle_id: 'oracle-2' },
+      { id: 'unique-1' }
+    ];
+
+    const deduped = bulkData.dedupeCardsByOracleId(cards);
+
+    expect(deduped).toHaveLength(3);
+    expect(deduped.map(card => card.id)).toEqual(['print-1', 'print-3', 'unique-1']);
   });
 });
 
