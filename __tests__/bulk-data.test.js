@@ -5,6 +5,8 @@
 
 // Mock dependencies before requiring bulk-data
 jest.mock('axios');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const bulkData = require('../lib/bulk-data');
 
@@ -240,16 +242,99 @@ describe('Bulk Data - Atomic File Operations', () => {
 });
 
 describe('Bulk Data - Cross-Process Locking', () => {
-  test('should derive download lock file path from data dir', () => {
-    const bulkDataDir = '/app/data';
-    const cardBasename = 'oracle_cards';
-    const lockFile = path.join(bulkDataDir, `${cardBasename}.download.lock`);
-    expect(lockFile).toBe('/app/data/oracle_cards.download.lock');
-  });
-
   test('should treat locks older than 30 minutes as stale', () => {
     const staleThresholdMs = 30 * 60 * 1000; // 30 minutes
     expect(staleThresholdMs).toBe(1800000);
+  });
+});
+
+describe('Bulk Data - Cross-Process Lock Integration', () => {
+  test('should wait for lock release and reuse existing download', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const lockFile = path.join(tempDir, `${cardBasename}.download.lock`);
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      jest.resetModules();
+      let isolatedBulkData;
+      let isolatedAxios;
+      jest.isolateModules(() => {
+        isolatedAxios = require('axios');
+        isolatedAxios.get.mockReset();
+        isolatedAxios.get.mockImplementation(() => {
+          throw new Error('axios should not be called');
+        });
+        isolatedBulkData = require('../lib/bulk-data');
+      });
+
+      const releaseDelayMs = 100;
+      fs.writeFileSync(lockFile, `${process.pid}\n${new Date().toISOString()}\n`);
+      setTimeout(() => {
+        if (fs.existsSync(lockFile)) {
+          fs.unlinkSync(lockFile);
+        }
+        fs.writeFileSync(cardFile, 'existing data');
+      }, releaseDelayMs);
+
+      await isolatedBulkData.downloadBulkData();
+      expect(isolatedAxios.get).not.toHaveBeenCalled();
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('should clean up stale locks before continuing', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const lockFile = path.join(tempDir, `${cardBasename}.download.lock`);
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      jest.resetModules();
+      let isolatedBulkData;
+      let isolatedAxios;
+      jest.isolateModules(() => {
+        isolatedAxios = require('axios');
+        isolatedAxios.get.mockReset();
+        isolatedAxios.get.mockImplementation(() => {
+          throw new Error('axios should not be called');
+        });
+        isolatedBulkData = require('../lib/bulk-data');
+      });
+
+      const staleTimestamp = new Date(Date.now() - (31 * 60 * 1000)).toISOString();
+      fs.writeFileSync(lockFile, `${process.pid}\n${staleTimestamp}\n`);
+      fs.writeFileSync(cardFile, 'existing data');
+
+      await isolatedBulkData.downloadBulkData();
+      expect(fs.existsSync(lockFile)).toBe(false);
+      expect(isolatedAxios.get).not.toHaveBeenCalled();
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 
