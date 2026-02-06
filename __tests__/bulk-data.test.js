@@ -248,9 +248,9 @@ describe('Bulk Data - Cross-Process Locking', () => {
   });
 
   test('should use load lock filenames with .load.lock suffix', () => {
-    const cardBasename = 'oracle_cards';
-    const lockFile = path.join('/data', `${cardBasename}.load.lock`);
+    const lockFile = bulkData.__test?.loadLockFile;
 
+    expect(lockFile).toBeDefined();
     expect(lockFile.endsWith('.load.lock')).toBe(true);
   });
 });
