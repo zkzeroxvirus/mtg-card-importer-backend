@@ -131,6 +131,107 @@ function normalizeError(error, defaultStatus = 502) {
   return { status, details };
 }
 
+function filterTokenParts(allParts) {
+  if (!Array.isArray(allParts)) {
+    return [];
+  }
+  return allParts.filter(part => {
+    const typeLine = (part.type_line || '').toLowerCase();
+    const component = (part.component || '').toLowerCase();
+    return typeLine.includes('token') ||
+      typeLine.includes('emblem') ||
+      component === 'token' ||
+      component === 'emblem';
+  });
+}
+
+function isTokenOrEmblemCard(card) {
+  const typeLine = (card?.type_line || '').toLowerCase();
+  return typeLine.includes('token') || typeLine.includes('emblem');
+}
+
+function getBulkCardFromUri(uri) {
+  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+    return null;
+  }
+  try {
+    const urlObj = new URL(uri);
+    const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+    if (pathSegments[0] !== 'cards') {
+      return null;
+    }
+
+    const blockedIdentifiers = new Set([
+      'named',
+      'search',
+      'random',
+      'collection',
+      'autocomplete',
+      'multiverse',
+      'arena',
+      'mtgo',
+      'tcgplayer'
+    ]);
+
+    if (pathSegments.length === 2) {
+      const cardId = pathSegments[1];
+      if (blockedIdentifiers.has(cardId)) {
+        return null;
+      }
+      return bulkData.getCardById(cardId);
+    }
+
+    if (pathSegments.length >= 3) {
+      if (blockedIdentifiers.has(pathSegments[1]) || pathSegments[2] === 'rulings') {
+        return null;
+      }
+      return bulkData.getCardBySetNumber(pathSegments[1], pathSegments[2], pathSegments[3] || 'en');
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function getTokensFromBulkData(cardName) {
+  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+    return null;
+  }
+
+  const MAX_TOKENS = 16;
+  let baseCard = null;
+
+  try {
+    baseCard = bulkData.getCardByName(cardName);
+  } catch {
+    baseCard = null;
+  }
+
+  if (baseCard?.all_parts?.length) {
+    const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKENS);
+    const tokensFromParts = tokenParts
+      .map(part => bulkData.getCardById(part.id))
+      .filter(Boolean);
+    if (tokensFromParts.length > 0) {
+      return tokensFromParts;
+    }
+  }
+
+  const typeQuery = `t:token name:"${cardName}"`;
+  const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKENS);
+  if (Array.isArray(typeResults) && typeResults.length > 0) {
+    return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKENS);
+  }
+
+  const createQuery = `o:"create ${cardName}"`;
+  const createResults = await bulkData.searchCards(createQuery, MAX_TOKENS);
+  if (Array.isArray(createResults) && createResults.length > 0) {
+    return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKENS);
+  }
+
+  return [];
+}
+
 /**
  * Analyzes a Scryfall query and provides helpful hints for common syntax errors
  */
@@ -459,10 +560,7 @@ app.get('/card/:name', async (req, res) => {
     
     // Filter all_parts to only include tokens and emblems (for TTS token spawning)
     if (scryfallCard.all_parts && Array.isArray(scryfallCard.all_parts)) {
-      scryfallCard.all_parts = scryfallCard.all_parts.filter(part => {
-        const typeLine = (part.type_line || '').toLowerCase();
-        return typeLine.includes('token') || typeLine.includes('emblem');
-      });
+      scryfallCard.all_parts = filterTokenParts(scryfallCard.all_parts);
     }
     
     // Return raw Scryfall format - Lua code will convert to TTS
@@ -1342,7 +1440,13 @@ app.get('/tokens/:name', async (req, res) => {
       return res.status(400).json({ error: 'Card name required' });
     }
 
-    const tokens = await scryfallLib.getTokens(name);
+    let tokens = null;
+    if (USE_BULK_DATA && bulkData.isLoaded()) {
+      tokens = await getTokensFromBulkData(name);
+    }
+    if (tokens === null) {
+      tokens = await scryfallLib.getTokens(name);
+    }
     
     // Return array of Scryfall token cards
     res.json(tokens);
@@ -1481,6 +1585,11 @@ app.get('/proxy', async (req, res) => {
       });
     }
     
+    const bulkCard = getBulkCardFromUri(uri);
+    if (bulkCard) {
+      return res.json(bulkCard);
+    }
+
     const cardData = await scryfallLib.proxyUri(uri);
     res.json(cardData);
     
