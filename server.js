@@ -151,7 +151,8 @@ function isTokenOrEmblemCard(card) {
   return typeLine.includes('token') || typeLine.includes('emblem');
 }
 
-function sanitizeTokenSearchName(name) {
+// Sanitize token names for safe bulk-data search queries (used inside quoted filters).
+function sanitizeTokenQueryName(name) {
   const cleaned = String(name || '')
     .replace(/[\\"]/g, '')
     .replace(/[^\w\s'-]/g, ' ')
@@ -211,16 +212,16 @@ async function getTokensFromBulkData(cardName) {
     return null;
   }
 
-  const sanitizedName = sanitizeTokenSearchName(cardName);
-  if (!sanitizedName) {
+  const queryName = sanitizeTokenQueryName(cardName);
+  if (!queryName) {
     return [];
   }
-  const quotedName = JSON.stringify(sanitizedName);
+  const jsonEncodedName = JSON.stringify(queryName);
 
   let baseCard = null;
 
   try {
-    baseCard = bulkData.getCardByName(sanitizedName);
+    baseCard = bulkData.getCardByName(queryName);
   } catch {
     baseCard = null;
   }
@@ -235,14 +236,15 @@ async function getTokensFromBulkData(cardName) {
     }
   }
 
-  const typeQuery = `t:token name:${quotedName}`;
+  const typeQuery = `t:token name:${jsonEncodedName}`;
   const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(typeResults) && typeResults.length > 0) {
     return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
   }
 
-  const createPhrase = `create ${sanitizedName}`;
-  const createQuery = `o:${JSON.stringify(createPhrase)}`;
+  const createPhrase = `create ${queryName}`;
+  const jsonEncodedCreatePhrase = JSON.stringify(createPhrase);
+  const createQuery = `o:${jsonEncodedCreatePhrase}`;
   const createResults = await bulkData.searchCards(createQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(createResults) && createResults.length > 0) {
     return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
