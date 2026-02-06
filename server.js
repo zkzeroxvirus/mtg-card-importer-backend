@@ -168,7 +168,7 @@ function isTokenOrEmblemCard(card) {
  */
 function sanitizeTokenQueryName(name) {
   const cleaned = String(name || '')
-    .replace(/[\\"]/g, '')
+    .replace(/["\\]/g, '')
     .replace(/[^\w\s'-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -241,8 +241,7 @@ async function tryGetTokensFromBulkData(cardName) {
     const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKEN_RESULTS);
     const tokensFromParts = tokenParts
       .map(part => bulkData.getCardById(part.id))
-      .filter(Boolean)
-      .slice(0, MAX_TOKEN_RESULTS);
+      .filter(Boolean);
     if (tokensFromParts.length > 0) {
       return tokensFromParts;
     }
