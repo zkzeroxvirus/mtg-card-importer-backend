@@ -1047,12 +1047,7 @@ Importer=setmetatable({
           return
         end
         local obj=JSON.decode(wr.text)
-        if obj.object=='card' and obj.type_line and obj.type_line:match('Token') then
-          -- Card is a token, find all unique tokens of this type (e.g., all Bird tokens)
-          WebRequest.get(BACKEND_URL..'/search?unique=card&q=t:token+'..encodedName,function(wr)
-              spawnList(wr,qTbl)end)
-          return false
-        elseif obj.object=='error' then
+        if obj.object=='error' then
           if obj.details then
             Player[qTbl.color].broadcast(obj.details,{1,0,0})
           end
