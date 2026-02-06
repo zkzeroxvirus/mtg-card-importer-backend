@@ -1387,7 +1387,10 @@ app.get('/search', async (req, res) => {
 
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
     // Security: Enforce maximum limit to prevent memory exhaustion
-    const limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
+    let limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
+    if (/\b(t|type|is):(token|emblem)\b/i.test(q)) {
+      limitNum = Math.min(limitNum, MAX_TOKEN_RESULTS);
+    }
     
     let scryfallCards = null;
     
