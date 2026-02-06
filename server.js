@@ -155,7 +155,6 @@ function isTokenOrEmblemCard(card) {
  * Normalize a token name for bulk-data search queries.
  * Strips characters that can break query parsing and collapses whitespace.
  */
-// Sanitize token names for safe bulk-data search queries (used inside quoted filters).
 function sanitizeTokenQueryName(name) {
   const cleaned = String(name || '')
     .replace(/[\\"]/g, '')
@@ -226,7 +225,7 @@ async function tryGetTokensFromBulkData(cardName) {
   if (!queryName) {
     return [];
   }
-  const jsonEncodedName = JSON.stringify(queryName);
+  const quotedName = JSON.stringify(queryName);
 
   let baseCard = null;
   let hasBaseCard = false;
@@ -248,15 +247,15 @@ async function tryGetTokensFromBulkData(cardName) {
     }
   }
 
-  const typeQuery = `t:token name:${jsonEncodedName}`;
+  const typeQuery = `t:token name:${quotedName}`;
   const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(typeResults) && typeResults.length > 0) {
     return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
   }
 
   const createPhrase = `create ${queryName}`;
-  const jsonEncodedCreatePhrase = JSON.stringify(createPhrase);
-  const createQuery = `o:${jsonEncodedCreatePhrase}`;
+  const quotedCreatePhrase = JSON.stringify(createPhrase);
+  const createQuery = `o:${quotedCreatePhrase}`;
   const createResults = await bulkData.searchCards(createQuery, MAX_TOKEN_RESULTS);
   if (Array.isArray(createResults) && createResults.length > 0) {
     return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
