@@ -18,6 +18,17 @@ const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
+const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
+  'named',
+  'search',
+  'random',
+  'collection',
+  'autocomplete',
+  'multiverse',
+  'arena',
+  'mtgo',
+  'tcgplayer'
+]);
 
 // Random card deduplication constants
 // When fetching multiple random cards, request extra to account for duplicates
@@ -179,28 +190,16 @@ function getBulkCardFromUri(uri) {
       return null;
     }
 
-    const blockedIdentifiers = new Set([
-      'named',
-      'search',
-      'random',
-      'collection',
-      'autocomplete',
-      'multiverse',
-      'arena',
-      'mtgo',
-      'tcgplayer'
-    ]);
-
     if (pathSegments.length === 2) {
       const cardId = pathSegments[1];
-      if (blockedIdentifiers.has(cardId)) {
+      if (BULK_URI_BLOCKED_IDENTIFIERS.has(cardId)) {
         return null;
       }
       return bulkData.getCardById(cardId);
     }
 
     if (pathSegments.length >= 3) {
-      if (blockedIdentifiers.has(pathSegments[1]) || pathSegments[2] === 'rulings') {
+      if (BULK_URI_BLOCKED_IDENTIFIERS.has(pathSegments[1]) || pathSegments[2] === 'rulings') {
         return null;
       }
       return bulkData.getCardBySetNumber(pathSegments[1], pathSegments[2], pathSegments[3] || 'en');
@@ -233,7 +232,8 @@ async function tryGetTokensFromBulkData(cardName) {
   try {
     baseCard = bulkData.getCardByName(queryName);
     hasBaseCard = Boolean(baseCard);
-  } catch {
+  } catch (error) {
+    console.debug('[BulkData] Token base card lookup failed:', error.message);
     baseCard = null;
   }
 
@@ -241,7 +241,8 @@ async function tryGetTokensFromBulkData(cardName) {
     const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKEN_RESULTS);
     const tokensFromParts = tokenParts
       .map(part => bulkData.getCardById(part.id))
-      .filter(Boolean);
+      .filter(Boolean)
+      .slice(0, MAX_TOKEN_RESULTS);
     if (tokensFromParts.length > 0) {
       return tokensFromParts;
     }
