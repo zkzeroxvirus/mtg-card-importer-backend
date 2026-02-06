@@ -32,8 +32,12 @@ Removed the automatic "search for all token variants" behavior when a valid toke
 This maintains the intended functionality for the error case (finding tokens when the exact card doesn't exist) while fixing the issue where valid token lookups would spawn all printings.
 
 ## Testing
-The backend correctly returns a single token when queried:
+The backend endpoint `/card/treasure` proxies to Scryfall's API and correctly returns a single token:
 ```bash
+# Backend endpoint (what the Lua script calls)
+curl "https://your-backend.com/card/treasure"
+
+# Which proxies to Scryfall's API
 curl "https://api.scryfall.com/cards/named?fuzzy=treasure"
 # Returns: "Dinosaur // Treasure" (single double-faced token)
 ```
