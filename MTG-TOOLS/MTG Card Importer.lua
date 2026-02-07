@@ -2,7 +2,7 @@
 -- MTG Card Importer for Tabletop Simulator
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
-mod_name, version = 'Card Importer', '1.906'
+mod_name, version = 'Card Importer', '1.907'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -1651,6 +1651,9 @@ end
 --[[Tabletop Callbacks]]
 function onSave()self.script_state=JSON.encode(Back)end
 function onLoad(data)
+  -- Reset registration guard on load
+  isRegistered = false
+  
   -- Guard against nil objects or missing properties during load
   local objs = getObjects() or {}
   for _, o in pairs(objs) do
@@ -1677,6 +1680,9 @@ function onLoad(data)
   -- Auto-update check (can be disabled by setting AUTO_UPDATE_ENABLED = false)
   if AUTO_UPDATE_ENABLED then
     WebRequest.get(GITURL, self, 'uVersion')
+  else
+    -- If auto-update is disabled, register immediately
+    registerModule()
   end
   
   -- Load saved card back settings
@@ -1722,7 +1728,7 @@ function onLoad(data)
   -- Less intrusive chat message - full help in notebook (SHelp)
   printToAll('[b][77FF77]' .. self.getName() .. ' [/b] Check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
   
-  -- Start the timeout monitor for hung requests
+  -- Registration happens in uVersion() after update check, or above if auto-update is disabledeout monitor for hung requests
   startTimeoutMonitor()
   
   registerModule()
@@ -1876,9 +1882,12 @@ end
 
 --[[Card Encoder]]
 pID=mod_name
+local isRegistered = false  -- Guard to prevent double registration
+
 function registerModule()
   enc=Global.getVar('Encoder')
-  if enc then
+  if enc and not isRegistered then
+    isRegistered = true
     local prop={name=pID,funcOwner=self,activateFunc='toggleMenu'}
     local v=enc.getVar('version')
     buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Set Sleeve','Reverse Card'}
