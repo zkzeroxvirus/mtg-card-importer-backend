@@ -18,6 +18,7 @@ isSpawning = false
 spawnIndicatorText = nil
 cardsSpawned = 0
 totalCardsToSpawn = 0
+NUMBER_BUTTON_COUNT = 22
 --------------------------------------------------------------------------
 function onLoad()
     local item = self
@@ -99,6 +100,16 @@ function endSpawning()
     destroySpawningIndicator()
 end
 
+local function makeSpawnRandomCardsHandler(count)
+    return function()
+        spawnRandomCardsByNumber(count)
+    end
+end
+
+for i = 1, NUMBER_BUTTON_COUNT do
+    _G["spawnRandomCards" .. i] = makeSpawnRandomCardsHandler(i)
+end
+
 function buildDeckFromList(list, nickname, description, idOffset)
     local deckDat = {
         Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
@@ -126,6 +137,67 @@ function buildDeckFromList(list, nickname, description, idOffset)
     end
 
     return deckDat
+end
+
+function buildDeckFromListAsync(list, nickname, description, idOffset, onComplete, batchSize)
+    local deckDat = {
+        Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
+        Name = "Deck",
+        Nickname = nickname,
+        Description = description,
+        DeckIDs = {},
+        CustomDeck = {},
+        ContainedObjects = {}
+    }
+
+    local index = 1
+    local total = #list
+    local batch = batchSize or 8
+
+    local function processBatch()
+        local processed = 0
+        while index <= total and processed < batch do
+            local cardData = list[index]
+            local deckId = idOffset + index
+            local cardDat = getCardDatFromJSON(cardData, deckId)
+            if cardDat then
+                deckDat.DeckIDs[index] = cardDat.CardID
+                deckDat.CustomDeck[deckId] = cardDat.CustomDeck[deckId]
+                deckDat.ContainedObjects[index] = cardDat
+                cardsSpawned = cardsSpawned + 1
+                updateSpawningIndicator()
+            else
+                print("Error processing card data for card " .. tostring(index))
+            end
+            index = index + 1
+            processed = processed + 1
+        end
+
+        if index <= total then
+            Wait.time(processBatch, 0)
+        else
+            onComplete(deckDat)
+        end
+    end
+
+    processBatch()
+end
+
+function spawnSingleCardFromData(cardData, spawnPos, idOffset)
+    local cardDat = getCardDatFromJSON(cardData, idOffset)
+    if not cardDat then
+        print("No valid card data to spawn")
+        endSpawning()
+        return
+    end
+    spawnObjectData({
+        data = cardDat,
+        position = spawnPos,
+        rotation = self.getRotation()
+    })
+    Wait.time(function()
+        endSpawning()
+    end, 0.5)
 end
 
 
@@ -194,27 +266,27 @@ function spawnRandomCommandersWO(shouldCreateButton)
             return
         end
 
-        local deckDat = buildDeckFromList(list, "Random Commanders", "Random commanders", 2000)
-
-        if #deckDat.ContainedObjects > 0 then
-            spawnObjectData({
-                data = deckDat,
-                position = spawnPos,
-                rotation = self.getRotation()
-            })
-            Wait.time(function()
+        buildDeckFromListAsync(list, "Random Commanders", "Random commanders", 2000, function(deckDat)
+            if #deckDat.ContainedObjects > 0 then
+                spawnObjectData({
+                    data = deckDat,
+                    position = spawnPos,
+                    rotation = self.getRotation()
+                })
+                Wait.time(function()
+                    endSpawning()
+                    if shouldCreateButton then
+                        createSpawnButton()
+                    end
+                end, 1.0)
+            else
+                print("No valid commanders to spawn")
                 endSpawning()
                 if shouldCreateButton then
                     createSpawnButton()
                 end
-            end, 1.0)
-        else
-            print("No valid commanders to spawn")
-            endSpawning()
-            if shouldCreateButton then
-                createSpawnButton()
             end
-        end
+        end)
     end)
 end
 function createSpawnButton()
@@ -314,7 +386,7 @@ function createSpawnButton()
     local startZ = -0.1        -- first row directly under Random Cards button
     local spacingX = 0.65      -- horizontal spacing so buttons are touching
     local spacingZ = -0.65     -- vertical spacing for second row
-    for i = 1, 22 do
+    for i = 1, NUMBER_BUTTON_COUNT do
         local row = math.floor((i - 1) / numPerRow)
         local col = (i - 1) % numPerRow
         local posX = startX + col * spacingX
@@ -331,9 +403,6 @@ function createSpawnButton()
             font_size = 150,
             color = Color.Grey
         })
-        _G["spawnRandomCards" .. i] = function()
-            spawnRandomCardsByNumber(i)
-        end
     end
 end
 
@@ -581,28 +650,34 @@ printToAll(id)
             return
         end
 
-        local deckDat = buildDeckFromList(
+        if #list == 1 then
+            spawnSingleCardFromData(list[1], spawnPos, 1000)
+            return
+        end
+
+        buildDeckFromListAsync(
             list,
             "Random Cards (" .. tostring(#list) .. ")",
             "Random cards matching color identity: " .. id,
-            1000
+            1000,
+            function(deckDat)
+                -- Spawn entire deck at once for optimal performance
+                if #deckDat.ContainedObjects > 0 then
+                    spawnObjectData({
+                        data = deckDat,
+                        position = spawnPos,
+                        rotation = self.getRotation()
+                    })
+                    -- Wait a moment before clearing the indicator so user sees completion
+                    Wait.time(function()
+                        endSpawning()
+                    end, 1.0)
+                else
+                    print("No valid cards to spawn")
+                    endSpawning()
+                end
+            end
         )
-
-        -- Spawn entire deck at once for optimal performance
-        if #deckDat.ContainedObjects > 0 then
-            spawnObjectData({
-                data = deckDat,
-                position = spawnPos,
-                rotation = self.getRotation()
-            })
-            -- Wait a moment before clearing the indicator so user sees completion
-            Wait.time(function()
-                endSpawning()
-            end, 1.0)
-        else
-            print("No valid cards to spawn")
-            endSpawning()
-        end
     end)
 end
 function destroySelf()
