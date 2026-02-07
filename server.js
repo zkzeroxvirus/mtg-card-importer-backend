@@ -1318,7 +1318,7 @@ app.get('/random', randomLimiter, async (req, res) => {
             }
           }
         } else {
-          // Single-card requests keep /cards/random semantics.
+          // Single-card requests and query-less random requests keep /cards/random semantics.
           // API - Test first request to validate query before fetching all cards
           // If query is malformed, this fails fast instead of wasting API calls
           let firstCard;
