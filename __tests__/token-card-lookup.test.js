@@ -39,4 +39,20 @@ describe('Token card lookup', () => {
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Treasure');
   });
+
+  test('GET /card/:name falls back to fuzzy token when no exact match exists', async () => {
+    scryfallLib.getCard.mockResolvedValue({
+      object: 'card',
+      name: 'Dinosaur // Treasure',
+      type_line: 'Token Creature — Dinosaur // Token Artifact — Treasure',
+      layout: 'double_faced_token'
+    });
+
+    scryfallLib.searchCards.mockResolvedValue([]);
+
+    const response = await request(app).get('/card/treasure');
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('Dinosaur // Treasure');
+  });
 });

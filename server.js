@@ -277,7 +277,7 @@ async function findExactTokenMatch(tokenName) {
   }
 
   const normalizedQuery = queryName.toLowerCase();
-  const tokenQuery = `t:token name:${JSON.stringify(queryName)}`;
+  const tokenQuery = `t:token name:"${queryName}"`;
   let tokenResults = null;
 
   if (USE_BULK_DATA && bulkData.isLoaded()) {
