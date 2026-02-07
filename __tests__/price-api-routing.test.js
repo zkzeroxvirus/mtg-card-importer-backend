@@ -44,10 +44,14 @@ describe('Price and Token Filter API Routing', () => {
     );
     
     scryfallLib.searchCards.mockResolvedValue([
-      { id: '3', name: 'API Card 1', prices: { usd: '15.00' } }
+      { id: '3', name: 'API Card 1', prices: { usd: '15.00' } },
+      { id: '4', name: 'API Card 2', prices: { usd: '7.50' } },
+      { id: '5', name: 'API Card 3', prices: { usd: '12.00' } },
+      { id: '6', name: 'API Card 4', prices: { usd: '20.00' } },
+      { id: '7', name: 'API Card 5', prices: { usd: '25.00' } }
     ]);
     scryfallLib.getRandomCard.mockResolvedValue(
-      { id: '4', name: 'API Card 2', prices: { usd: '7.50' } }
+      { id: '8', name: 'API Card 6', prices: { usd: '9.00' } }
     );
   });
 
@@ -61,7 +65,7 @@ describe('Price and Token Filter API Routing', () => {
       expect(bulkData.searchCards).not.toHaveBeenCalled();
       // Should call API
       expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-        't:artifact+usd>=50',
+        't:artifact usd>=50',
         expect.any(Number),
         'cards'
       );
@@ -131,7 +135,13 @@ describe('Price and Token Filter API Routing', () => {
         .expect(200);
 
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).toHaveBeenCalledWith(
+        'eur<10',
+        5,
+        'prints',
+        'random'
+      );
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
     test('should use bulk data for non-price random queries', async () => {
@@ -166,7 +176,13 @@ describe('Price and Token Filter API Routing', () => {
         .expect(200);
 
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).toHaveBeenCalledWith(
+        'is:token',
+        5,
+        'prints',
+        'random'
+      );
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
   });
 

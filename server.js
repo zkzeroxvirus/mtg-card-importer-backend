@@ -35,6 +35,8 @@ const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
 // A 1.5x multiplier balances between API efficiency and getting enough unique cards
 const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
+const RANDOM_SEARCH_UNIQUE = 'prints';
+const RANDOM_SEARCH_ORDER = 'random';
 
 // Security: Validate card back URL is from allowed domains
 function isValidCardBackURL(url) {
@@ -1284,78 +1286,113 @@ app.get('/random', randomLimiter, async (req, res) => {
           }
         }
       } else {
-        // API - Test first request to validate query before fetching all cards
-        // If query is malformed, this fails fast instead of wasting API calls
-        let firstCard;
-        try {
-          firstCard = await scryfallLib.getRandomCard(q);
-          seenCardIds.add(firstCard.id);
-          cards.push(firstCard);
-        } catch (error) {
-          // First request failed - likely invalid query
-          if (error.response?.status === 404) {
-            const hint = getQueryHint(q);
+        const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
+        if (numCards > 1 && hasRandomQuery) {
+          const randomCards = await scryfallLib.searchCards(q, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
 
+          if (!randomCards || randomCards.length === 0) {
+            const hint = getQueryHint(q);
             const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
             cacheFailedQuery(q, enhancedError);
             throw new Error(enhancedError);
           }
-          throw error;
-        }
-        
-        // First card succeeded, fetch the rest in parallel with deduplication
-        if (numCards > 1) {
-          console.log(`Fetching ${numCards - 1} additional random cards (logs suppressed)...`);
-          const cardPromises = [];
-          const fetchStartTime = Date.now();
-          const baseDelay = 100; // Base delay in ms between request starts
-          
-          // Request extra cards to account for potential duplicates
-          const cardsToFetch = Math.ceil((numCards - 1) * DUPLICATE_BUFFER_MULTIPLIER);
-          
-          for (let i = 0; i < cardsToFetch; i++) {
-            // Stagger request starts to spread load and avoid overwhelming rate limits
-            // Use linear staggering to space out requests evenly
-            const staggerDelay = i * baseDelay;
-            
-            const promise = new Promise(resolve => {
-              setTimeout(async () => {
-                try {
-                  // Suppress individual API call logs for bulk operations
-                  const scryfallCard = await scryfallLib.getRandomCard(q, true);
-                  resolve(scryfallCard);
-                } catch (error) {
-                  console.warn(`Random card ${i + 1} failed: ${error.message}`);
-                  resolve(null);
-                }
-              }, staggerDelay);
-            });
-            cardPromises.push(promise);
-          }
-          const results = await Promise.all(cardPromises);
-          
-          // Calculate failures from results and deduplicate
-          let failedCount = 0;
-          let duplicateCount = 0;
-          
-          for (const card of results) {
-            if (card === null) {
-              failedCount++;
-            } else if (cards.length < numCards) {
-              if (!seenCardIds.has(card.id)) {
-                seenCardIds.add(card.id);
-                cards.push(card);
-              } else {
-                duplicateCount++;
-              }
-            } else {
-              // Already have enough unique cards, count any remaining as excess
-              duplicateCount++;
+
+          for (const card of randomCards) {
+            if (!seenCardIds.has(card.id)) {
+              seenCardIds.add(card.id);
+              cards.push(card);
             }
           }
+
+          if (cards.length < numCards) {
+            const remaining = numCards - cards.length;
+            let apiAttempts = 0;
+            const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
+            while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+              apiAttempts++;
+              const card = await scryfallLib.getRandomCard(q, true);
+              if (card && !seenCardIds.has(card.id)) {
+                seenCardIds.add(card.id);
+                cards.push(card);
+              }
+            }
+          }
+        } else {
+          // Single-card requests and query-less random requests keep /cards/random semantics.
+          // API - Test first request to validate query before fetching all cards
+          // If query is malformed, this fails fast instead of wasting API calls
+          let firstCard;
+          try {
+            firstCard = await scryfallLib.getRandomCard(q);
+            seenCardIds.add(firstCard.id);
+            cards.push(firstCard);
+          } catch (error) {
+            // First request failed - likely invalid query
+            if (error.response?.status === 404) {
+              const hint = getQueryHint(q);
+
+              const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
+              cacheFailedQuery(q, enhancedError);
+              throw new Error(enhancedError);
+            }
+            throw error;
+          }
           
-          const fetchDuration = Date.now() - fetchStartTime;
-          console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates/excess skipped)`);
+          // First card succeeded, fetch the rest in parallel with deduplication
+          if (numCards > 1) {
+            console.log(`Fetching ${numCards - 1} additional random cards (logs suppressed)...`);
+            const cardPromises = [];
+            const fetchStartTime = Date.now();
+            const baseDelay = 100; // Base delay in ms between request starts
+            
+            // Request extra cards to account for potential duplicates
+            const cardsToFetch = Math.ceil((numCards - 1) * DUPLICATE_BUFFER_MULTIPLIER);
+            
+            for (let i = 0; i < cardsToFetch; i++) {
+              // Stagger request starts to spread load and avoid overwhelming rate limits
+              // Use linear staggering to space out requests evenly
+              const staggerDelay = i * baseDelay;
+              
+              const promise = new Promise(resolve => {
+                setTimeout(async () => {
+                  try {
+                    // Suppress individual API call logs for bulk operations
+                    const scryfallCard = await scryfallLib.getRandomCard(q, true);
+                    resolve(scryfallCard);
+                  } catch (error) {
+                    console.warn(`Random card ${i + 1} failed: ${error.message}`);
+                    resolve(null);
+                  }
+                }, staggerDelay);
+              });
+              cardPromises.push(promise);
+            }
+            const results = await Promise.all(cardPromises);
+            
+            // Calculate failures from results and deduplicate
+            let failedCount = 0;
+            let duplicateCount = 0;
+            
+            for (const card of results) {
+              if (card === null) {
+                failedCount++;
+              } else if (cards.length < numCards) {
+                if (!seenCardIds.has(card.id)) {
+                  seenCardIds.add(card.id);
+                  cards.push(card);
+                } else {
+                  duplicateCount++;
+                }
+              } else {
+                // Already have enough unique cards, count any remaining as excess
+                duplicateCount++;
+              }
+            }
+            
+            const fetchDuration = Date.now() - fetchStartTime;
+            console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates/excess skipped)`);
+          }
         }
       }
       
