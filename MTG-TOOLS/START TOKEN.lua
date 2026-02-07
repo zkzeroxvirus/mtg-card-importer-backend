@@ -20,10 +20,7 @@ cardsSpawned = 0
 totalCardsToSpawn = 0
 --------------------------------------------------------------------------
 function onLoad()
-
     local item = self
-
-
     item.createButton({
         label = "Spawn Commanders",  -- Button text
         click_function = "spawnRandomCommanders",  -- Function to call when clicked
@@ -130,8 +127,6 @@ function buildDeckFromList(list, nickname, description, idOffset)
 
     return deckDat
 end
-
-
 
 
 ---------------------------------------------------------------------------

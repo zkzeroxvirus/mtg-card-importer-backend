@@ -2,6 +2,7 @@
 -- Card Importer for Tabletop Simulator
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
+-- Metadata
 mod_name, version = 'Card Importer', '1.907'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
@@ -1054,7 +1055,17 @@ Importer=setmetatable({
           return
         end
         local obj=JSON.decode(wr.text)
-        if obj.object=='card' and obj.type_line and obj.type_line:match('Token') then
+        -- Force token search if result is a Token, art_series, or other non-playable card type
+        local shouldForceTokenSearch = false
+        if obj.object=='card' then
+          if obj.type_line and obj.type_line:match('Token') then
+            shouldForceTokenSearch = true
+          elseif obj.layout and (obj.layout == 'art_series' or obj.layout == 'token' or obj.layout == 'double_faced_token' or obj.layout == 'emblem') then
+            shouldForceTokenSearch = true
+          end
+        end
+        
+        if shouldForceTokenSearch then
           WebRequest.get(BACKEND_URL..'/search?unique=card&q=t:token+'..encodedName,function(wr)
               spawnList(wr,qTbl)end)
           return false
