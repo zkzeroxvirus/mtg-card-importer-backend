@@ -270,8 +270,8 @@ async function tryGetTokensFromBulkData(cardName) {
  * When a fuzzy token lookup returns a different token name (e.g., "Treasure" -> "Dinosaur // Treasure"),
  * try to find an exact-name token match instead.
  */
-async function findExactTokenMatch(tokenName) {
-  const queryName = sanitizeTokenQueryName(tokenName);
+async function findExactTokenMatch(tokenName, sanitizedName = null) {
+  const queryName = sanitizedName || sanitizeTokenQueryName(tokenName);
   if (!queryName) {
     return null;
   }
@@ -284,7 +284,7 @@ async function findExactTokenMatch(tokenName) {
     try {
       tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true);
     } catch (error) {
-      console.debug('[BulkData] Token exact-name search failed:', error.message);
+      console.debug('[TokenLookup] Bulk data exact-name search failed:', error.message);
       tokenResults = null;
     }
   }
@@ -293,7 +293,7 @@ async function findExactTokenMatch(tokenName) {
     try {
       tokenResults = await scryfallLib.searchCards(tokenQuery, MAX_TOKEN_RESULTS);
     } catch (error) {
-      console.debug('Token exact-name search failed:', error.message);
+      console.debug('[TokenLookup] API exact-name search failed:', error.message);
       return null;
     }
   }
@@ -633,10 +633,11 @@ app.get('/card/:name', async (req, res) => {
     }
 
     if (scryfallCard && isTokenOrEmblemCard(scryfallCard)) {
-      const normalizedRequestName = sanitizeTokenQueryName(name).toLowerCase();
+      const sanitizedRequestName = sanitizeTokenQueryName(name);
+      const normalizedRequestName = sanitizedRequestName.toLowerCase();
       const normalizedCardName = sanitizeTokenQueryName(scryfallCard.name || '').toLowerCase();
       if (normalizedRequestName && normalizedCardName && normalizedCardName !== normalizedRequestName) {
-        const exactToken = await findExactTokenMatch(name);
+        const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
         if (exactToken) {
           scryfallCard = exactToken;
         }
