@@ -636,11 +636,19 @@ app.get('/card/:name', async (req, res) => {
       scryfallCard = await scryfallLib.getCard(name, set);
     }
 
+    const sanitizedRequestName = sanitizeTokenQueryName(name);
+    const normalizedRequestName = sanitizedRequestName.toLowerCase();
+    const normalizedCardName = sanitizeTokenQueryName(scryfallCard?.name || '').toLowerCase();
+    if (scryfallCard && normalizedRequestName && normalizedCardName && normalizedCardName !== normalizedRequestName) {
+      const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
+      if (exactToken) {
+        scryfallCard = exactToken;
+      }
+    }
+
     if (scryfallCard && isTokenOrEmblemCard(scryfallCard)) {
-      const sanitizedRequestName = sanitizeTokenQueryName(name);
-      const normalizedRequestName = sanitizedRequestName.toLowerCase();
-      const normalizedCardName = sanitizeTokenQueryName(scryfallCard.name || '').toLowerCase();
-      if (normalizedRequestName && normalizedCardName && normalizedCardName !== normalizedRequestName) {
+      const normalizedTokenCardName = sanitizeTokenQueryName(scryfallCard.name || '').toLowerCase();
+      if (normalizedRequestName && normalizedTokenCardName && normalizedTokenCardName !== normalizedRequestName) {
         const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
         if (exactToken) {
           scryfallCard = exactToken;
