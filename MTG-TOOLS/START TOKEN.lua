@@ -102,6 +102,35 @@ function endSpawning()
     destroySpawningIndicator()
 end
 
+function buildDeckFromList(list, nickname, description, idOffset)
+    local deckDat = {
+        Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
+        Name = "Deck",
+        Nickname = nickname,
+        Description = description,
+        DeckIDs = {},
+        CustomDeck = {},
+        ContainedObjects = {}
+    }
+
+    for i, cardData in ipairs(list) do
+        local deckId = idOffset + i
+        local cardDat = getCardDatFromJSON(cardData, deckId)
+        if cardDat then
+            deckDat.DeckIDs[i] = cardDat.CardID
+            deckDat.CustomDeck[deckId] = cardDat.CustomDeck[deckId]
+            deckDat.ContainedObjects[i] = cardDat
+
+            cardsSpawned = cardsSpawned + 1
+            updateSpawningIndicator()
+        else
+            print("Error processing card data for card " .. tostring(i))
+        end
+    end
+
+    return deckDat
+end
+
 
 
 
@@ -111,36 +140,87 @@ end
 ---------------------------------------------------------------------------
 function spawnRandomCommanders()
     self.removeButton(0)  -- removes the button with index 0
-    local commanderCount = 5
-    local startPos = getSpawnAnchor()
-    
-    for i = 1, commanderCount do
-        local delay = (i - 1) * 1.0
-        Wait.time(function()
-            fetchRandomCommander(startPos, i)
-        end, delay)
-    end
-
-    -- Create button after all commanders have spawned
-    Wait.time(function()
-        createSpawnButton()
-    end, commanderCount)  -- Waits 5 seconds (since last spawn is at 4s)
+    spawnRandomCommandersWO(true)
 end
-function spawnRandomCommandersWO()
-    local commanderCount = 5
-    local startPos = getSpawnAnchor()
-    
-    for i = 1, commanderCount do
-        local delay = (i - 1) * 1.0
-        Wait.time(function()
-            fetchRandomCommander(startPos, i)
-        end, delay)
+
+function spawnRandomCommandersWO(shouldCreateButton)
+    if shouldCreateButton == nil then
+        shouldCreateButton = true
+    end
+    if isSpawning then
+        printToAll("Cards are still spawning! Please wait...", Color.Red)
+        return
     end
 
-    -- Create button after all commanders have spawned
-    Wait.time(function()
-        createSpawnButton()
-    end, commanderCount)  -- Waits 5 seconds (since last spawn is at 4s)
+    local commanderCount = 5
+    local spawnPos = getSpawnAnchor()
+
+    isSpawning = true
+    totalCardsToSpawn = commanderCount
+    cardsSpawned = 0
+    createSpawningIndicator(spawnPos)
+
+    local query = "is:commander"
+    local url = BACKEND_URL .. "/random?q=" .. URLencode(query) .. "&count=" .. tostring(commanderCount)
+
+    WebRequest.get(url, function(response)
+        if response.is_error or not response.text then
+            print("Error fetching commanders from backend.")
+            endSpawning()
+            if shouldCreateButton then
+                createSpawnButton()
+            end
+            return
+        end
+
+        local decoded = JSONdecode(response.text)
+        if not decoded then
+            print("Error: Invalid JSON from backend")
+            endSpawning()
+            if shouldCreateButton then
+                createSpawnButton()
+            end
+            return
+        end
+
+        local list = nil
+        if decoded.object == "list" and decoded.data and type(decoded.data) == "table" then
+            list = decoded.data
+        elseif decoded.object == "card" or decoded.name then
+            list = { decoded }
+        elseif type(decoded) == "table" and decoded[1] then
+            list = decoded
+        else
+            print("Error: Invalid response format from backend")
+            endSpawning()
+            if shouldCreateButton then
+                createSpawnButton()
+            end
+            return
+        end
+
+        local deckDat = buildDeckFromList(list, "Random Commanders", "Random commanders", 2000)
+
+        if #deckDat.ContainedObjects > 0 then
+            spawnObjectData({
+                data = deckDat,
+                position = spawnPos,
+                rotation = self.getRotation()
+            })
+            Wait.time(function()
+                endSpawning()
+                if shouldCreateButton then
+                    createSpawnButton()
+                end
+            end, 1.0)
+        else
+            print("No valid commanders to spawn")
+            endSpawning()
+            if shouldCreateButton then
+                createSpawnButton()
+            end
+        end
+    end)
 end
 function createSpawnButton()
     -- Clear any existing buttons to avoid duplicates after mulligans
@@ -265,23 +345,6 @@ end
 
    
 ------------------------------------------------------------------------------------------
-
-function fetchRandomCommander(spawnPos, n)
-    local query = "is:commander"
-    local url = BACKEND_URL .. "/random?q=" .. URLencode(query)
-    WebRequest.get(url, function(response)
-        if response.is_error or not response.text then
-            print("Error fetching commander from backend.")
-            return
-        end
-        local cardDat = getCardDatFromJSON(response.text, n)
-        if cardDat then
-            spawnObjectData({ data = cardDat, position = spawnPos, rotation = self.getRotation() })
-        else
-            print("Error processing commander card data: " .. tostring(response.text))
-        end
-    end)
-end
 
 ---------------------------------------------------------------------------
 -- getCardDatFromJSON converts Scryfall JSON into a TTS card data table.
@@ -523,33 +586,12 @@ printToAll(id)
             return
         end
 
-        -- Build deck object (like MTG Importer does) for optimal performance
-        local deckDat = {
-            Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
-            Name = "Deck",
-            Nickname = "Random Cards (" .. tostring(#list) .. ")",
-            Description = "Random cards matching color identity: " .. id,
-            DeckIDs = {},
-            CustomDeck = {},
-            ContainedObjects = {}
-        }
-
-        -- Process all cards and add to deck
-        for i, cardData in ipairs(list) do
-            local cardDat = getCardDatFromJSON(cardData, 1000 + i)
-            if cardDat then
-                -- Add card to deck
-                deckDat.DeckIDs[i] = cardDat.CardID
-                deckDat.CustomDeck[1000 + i] = cardDat.CustomDeck[1000 + i]
-                deckDat.ContainedObjects[i] = cardDat
-                
-                -- Update spawning indicator
-                cardsSpawned = cardsSpawned + 1
-                updateSpawningIndicator()
-            else
-                print("Error processing card data for card " .. tostring(i))
-            end
-        end
+        local deckDat = buildDeckFromList(
+            list,
+            "Random Cards (" .. tostring(#list) .. ")",
+            "Random cards matching color identity: " .. id,
+            1000
+        )
 
         -- Spawn entire deck at once for optimal performance
         if #deckDat.ContainedObjects > 0 then
