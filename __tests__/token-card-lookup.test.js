@@ -17,7 +17,7 @@ describe('Token card lookup', () => {
     jest.clearAllMocks();
   });
 
-  test('GET /card/:name prefers exact token match when fuzzy token name differs', async () => {
+  test('should return exact token match when fuzzy match returns different name', async () => {
     scryfallLib.getCard.mockResolvedValue({
       object: 'card',
       name: 'Dinosaur // Treasure',
@@ -42,7 +42,7 @@ describe('Token card lookup', () => {
     expect(response.body.type_line).toContain('Token Artifact');
   });
 
-  test('GET /card/:name falls back to fuzzy token when no exact match exists', async () => {
+  test('should fall back to fuzzy token match when exact match not found', async () => {
     scryfallLib.getCard.mockResolvedValue({
       object: 'card',
       name: 'Dinosaur // Treasure',

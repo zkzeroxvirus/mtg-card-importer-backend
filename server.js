@@ -287,7 +287,7 @@ async function findExactTokenMatch(tokenName, sanitizedName = null) {
     try {
       tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true);
     } catch (error) {
-      console.debug('[TokenLookup] Bulk data exact-name search failed:', error.message);
+      console.debug('[TokenLookup] Bulk data exact-match search failed:', error.message);
       tokenResults = null;
     }
   }
@@ -296,7 +296,7 @@ async function findExactTokenMatch(tokenName, sanitizedName = null) {
     try {
       tokenResults = await scryfallLib.searchCards(tokenQuery, MAX_TOKEN_RESULTS);
     } catch (error) {
-      console.debug('[TokenLookup] API exact-name search failed:', error.message);
+      console.debug('[TokenLookup] API exact-match search failed:', error.message);
       return null;
     }
   }
