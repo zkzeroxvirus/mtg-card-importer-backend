@@ -270,7 +270,7 @@ async function tryGetTokensFromBulkData(cardName) {
  * When a fuzzy token lookup returns a different token name (e.g., "Treasure" -> "Dinosaur // Treasure"),
  * try to find an exact-name token match instead.
  * @param {string} tokenName Original token name from the request.
- * @param {string|null} sanitizedName Optional pre-sanitized token name to avoid redundant cleanup.
+ * @param {string|null} sanitizedName Optional pre-sanitized token name; when provided, no extra sanitization is applied.
  * @returns {Promise<object|null>} Matching token card, or null if none found.
  */
 async function findExactTokenMatch(tokenName, sanitizedName = null) {
@@ -285,7 +285,8 @@ async function findExactTokenMatch(tokenName, sanitizedName = null) {
 
   if (USE_BULK_DATA && bulkData.isLoaded()) {
     try {
-      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true);
+      const suppressBulkLogs = true;
+      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, suppressBulkLogs);
     } catch (error) {
       console.debug('[TokenLookup] Bulk data exact-match search failed:', error.message);
       tokenResults = null;
