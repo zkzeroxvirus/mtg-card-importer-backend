@@ -267,6 +267,50 @@ async function tryGetTokensFromBulkData(cardName) {
 }
 
 /**
+ * When a fuzzy token lookup returns a different token name (e.g., "Treasure" -> "Dinosaur // Treasure"),
+ * try to find an exact-name token match instead.
+ * @param {string} tokenName Original token name from the request.
+ * @param {string|null} sanitizedName Optional pre-sanitized token name; when provided, no extra sanitization is applied.
+ * @returns {Promise<object|null>} Matching token card, or null if none found.
+ */
+async function findExactTokenMatch(tokenName, sanitizedName = null) {
+  const queryName = sanitizedName || sanitizeTokenQueryName(tokenName);
+  if (!queryName) {
+    return null;
+  }
+
+  const expectedName = queryName.toLowerCase();
+  const tokenQuery = `t:token name:"${queryName}"`;
+  let tokenResults = null;
+
+  if (USE_BULK_DATA && bulkData.isLoaded()) {
+    try {
+      const suppressBulkLogs = true;
+      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, suppressBulkLogs);
+    } catch (error) {
+      console.debug('[TokenLookup] Bulk data exact-match search failed:', error.message);
+      tokenResults = null;
+    }
+  }
+
+  if (!Array.isArray(tokenResults)) {
+    try {
+      tokenResults = await scryfallLib.searchCards(tokenQuery, MAX_TOKEN_RESULTS);
+    } catch (error) {
+      console.debug('[TokenLookup] API exact-match search failed:', error.message);
+      return null;
+    }
+  }
+
+  const exactMatch = tokenResults.find(card => {
+    const cardName = sanitizeTokenQueryName(card?.name || '').toLowerCase();
+    return cardName === expectedName && isTokenOrEmblemCard(card);
+  });
+
+  return exactMatch || null;
+}
+
+/**
  * Analyzes a Scryfall query and provides helpful hints for common syntax errors
  */
 function getQueryHint(query) {
@@ -590,6 +634,18 @@ app.get('/card/:name', async (req, res) => {
     if (!scryfallCard) {
       // Fall back to API for fuzzy matching
       scryfallCard = await scryfallLib.getCard(name, set);
+    }
+
+    if (scryfallCard && isTokenOrEmblemCard(scryfallCard)) {
+      const sanitizedRequestName = sanitizeTokenQueryName(name);
+      const normalizedRequestName = sanitizedRequestName.toLowerCase();
+      const normalizedCardName = sanitizeTokenQueryName(scryfallCard.name || '').toLowerCase();
+      if (normalizedRequestName && normalizedCardName && normalizedCardName !== normalizedRequestName) {
+        const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
+        if (exactToken) {
+          scryfallCard = exactToken;
+        }
+      }
     }
     
     // Filter all_parts to only include tokens and emblems (for TTS token spawning)
