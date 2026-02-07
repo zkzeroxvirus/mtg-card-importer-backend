@@ -282,7 +282,7 @@ async function findExactTokenMatch(tokenName) {
 
   if (USE_BULK_DATA && bulkData.isLoaded()) {
     try {
-      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true); // suppress bulk-data logs for token fallback lookups
+      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true);
     } catch (error) {
       console.debug('[BulkData] Token exact-name search failed:', error.message);
       tokenResults = null;
