@@ -267,7 +267,7 @@ async function tryGetTokensFromBulkData(cardName) {
 }
 
 /**
- * When a fuzzy token lookup returns the wrong token (ex: "Treasure" -> "Dinosaur // Treasure"),
+ * When a fuzzy token lookup returns a different token name (e.g., "Treasure" -> "Dinosaur // Treasure"),
  * try to find an exact-name token match instead.
  */
 async function findExactTokenMatch(tokenName) {
@@ -282,7 +282,7 @@ async function findExactTokenMatch(tokenName) {
 
   if (USE_BULK_DATA && bulkData.isLoaded()) {
     try {
-      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true);
+      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, true); // suppress bulk-data logs
     } catch (error) {
       console.debug('[BulkData] Token exact-name search failed:', error.message);
       tokenResults = null;
