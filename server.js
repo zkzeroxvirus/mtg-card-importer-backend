@@ -1286,7 +1286,9 @@ app.get('/random', randomLimiter, async (req, res) => {
       } else {
         if (numCards > 1 && q) {
           let randomCards;
-          randomCards = await scryfallLib.searchCards(q, numCards, 'prints', 'random');
+          const randomUnique = 'prints';
+          const randomOrder = 'random';
+          randomCards = await scryfallLib.searchCards(q, numCards, randomUnique, randomOrder);
 
           if (!randomCards || randomCards.length === 0) {
             const hint = getQueryHint(q);
