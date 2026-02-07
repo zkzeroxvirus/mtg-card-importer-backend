@@ -35,6 +35,8 @@ const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
 // A 1.5x multiplier balances between API efficiency and getting enough unique cards
 const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
+const RANDOM_SEARCH_UNIQUE = 'prints';
+const RANDOM_SEARCH_ORDER = 'random';
 
 // Security: Validate card back URL is from allowed domains
 function isValidCardBackURL(url) {
@@ -1286,9 +1288,7 @@ app.get('/random', randomLimiter, async (req, res) => {
       } else {
         if (numCards > 1 && q) {
           let randomCards;
-          const randomUnique = 'prints';
-          const randomOrder = 'random';
-          randomCards = await scryfallLib.searchCards(q, numCards, randomUnique, randomOrder);
+          randomCards = await scryfallLib.searchCards(q, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
 
           if (!randomCards || randomCards.length === 0) {
             const hint = getQueryHint(q);
