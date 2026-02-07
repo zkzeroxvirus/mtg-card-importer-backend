@@ -1286,7 +1286,8 @@ app.get('/random', randomLimiter, async (req, res) => {
           }
         }
       } else {
-        if (numCards > 1 && q) {
+        const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
+        if (numCards > 1 && hasRandomQuery) {
           const randomCards = await scryfallLib.searchCards(q, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
 
           if (!randomCards || randomCards.length === 0) {
