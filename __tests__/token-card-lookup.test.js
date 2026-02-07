@@ -38,6 +38,8 @@ describe('Token card lookup', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Treasure');
+    expect(response.body.layout).toBe('token');
+    expect(response.body.type_line).toContain('Token Artifact');
   });
 
   test('GET /card/:name falls back to fuzzy token when no exact match exists', async () => {
@@ -54,5 +56,6 @@ describe('Token card lookup', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Dinosaur // Treasure');
+    expect(response.body.layout).toBe('double_faced_token');
   });
 });

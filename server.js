@@ -279,7 +279,7 @@ async function findExactTokenMatch(tokenName, sanitizedName = null) {
     return null;
   }
 
-  const normalizedQuery = queryName.toLowerCase();
+  const expectedName = queryName.toLowerCase();
   const tokenQuery = `t:token name:"${queryName}"`;
   let tokenResults = null;
 
@@ -303,7 +303,7 @@ async function findExactTokenMatch(tokenName, sanitizedName = null) {
 
   const exactMatch = tokenResults.find(card => {
     const cardName = sanitizeTokenQueryName(card?.name || '').toLowerCase();
-    return cardName === normalizedQuery && isTokenOrEmblemCard(card);
+    return cardName === expectedName && isTokenOrEmblemCard(card);
   });
 
   return exactMatch || null;
