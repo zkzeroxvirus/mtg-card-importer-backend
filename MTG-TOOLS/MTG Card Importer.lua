@@ -1,5 +1,5 @@
 -- ============================================================================
--- MTG Card Importer for Tabletop Simulator
+-- Card Importer for Tabletop Simulator
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 mod_name, version = 'Card Importer', '1.907'
@@ -11,6 +11,7 @@ coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
 GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG-TOOLS/MTG%20Card%20Importer.lua'
 lang = 'en'
+-- Modified by Sirin
 
 -- ============================================================================
 -- Backend Configuration
@@ -139,6 +140,12 @@ function handleWebError(wr, qTbl, context)
   end
 
   return false
+end
+
+function urlEncode(str)
+  return (tostring(str or ''):gsub('([^%w%-%.%_%~])', function(c)
+    return string.format('%%%02X', string.byte(c))
+  end))
 end
 
 --Image Handler
@@ -331,7 +338,7 @@ function setCard(wr,qTbl,originalData)
           setCard(a,qTbl)
         end)
         if not success then
-          log('[MTG Importer] Error in fallback request: ' .. tostring(result))
+          log('[Card Importer] Error in fallback request: ' .. tostring(result))
           endLoop()
         end
       end)
@@ -396,7 +403,7 @@ WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
           end)
           if not success then
             -- If any error occurs in the nested request, spawn the original card and clean up
-            log('[MTG Importer] Error in art_series nested request: ' .. tostring(result))
+            log('[Card Importer] Error in art_series nested request: ' .. tostring(result))
             Card(json,qTbl)
           end
         end)
@@ -419,7 +426,7 @@ WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
           end)
           if not success then
             -- If any error occurs in the nested request, spawn the English card and clean up
-            log('[MTG Importer] Error in language fallback nested request: ' .. tostring(result))
+            log('[Card Importer] Error in language fallback nested request: ' .. tostring(result))
             Card(json,qTbl)
           end
         end)
@@ -430,7 +437,7 @@ WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
           end)
           if not success then
             -- If any error occurs, spawn the original card and clean up
-            log('[MTG Importer] Error in English fallback nested request: ' .. tostring(result))
+            log('[Card Importer] Error in English fallback nested request: ' .. tostring(result))
             Card(json,qTbl)
           end
         end)
@@ -448,7 +455,7 @@ WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
         end)
         if not success then
           -- If any error occurs, broadcast error and clean up
-          log('[MTG Importer] Error in originalData name search: ' .. tostring(result))
+          log('[Card Importer] Error in originalData name search: ' .. tostring(result))
           Player[qTbl.color].broadcast('Error processing card data.',{1,0,0})
           endLoop()
         end
@@ -1035,7 +1042,7 @@ Importer=setmetatable({
     -- Encode name if not already encoded (handle both onChat and direct Importer() calls)
     local encodedName = qTbl.name
     if not encodedName:find('%%') then
-      encodedName = encodedName:gsub(' ','%%20')
+      encodedName = urlEncode(encodedName)
     end
     WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
         if handleWebError(wr, qTbl, 'Card lookup failed') then
@@ -1047,6 +1054,11 @@ Importer=setmetatable({
           return
         end
         local obj=JSON.decode(wr.text)
+        if obj.object=='card' and obj.type_line and obj.type_line:match('Token') then
+          WebRequest.get(BACKEND_URL..'/search?unique=card&q=t:token+'..encodedName,function(wr)
+              spawnList(wr,qTbl)end)
+          return false
+        end
         if obj.object=='error' then
           if obj.details then
             Player[qTbl.color].broadcast(obj.details,{1,0,0})
@@ -1060,7 +1072,7 @@ Importer=setmetatable({
   Token=function(qTbl)
     -- Get the card name - either from target or command
     local cardName = qTbl.target and qTbl.target.getName():gsub('\n.*','') or qTbl.name
-    local encodedName = cardName:gsub(' ','%%20')
+    local encodedName = urlEncode(cardName)
     
     -- Fetch the card via generic endpoint (all_parts already filtered to tokens/emblems)
     WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
@@ -1510,7 +1522,7 @@ function checkRequestTimeout()
       local playerColor = failedRequest.color or 'White'
       local requestInfo = failedRequest.full or failedRequest.name or 'Unknown'
       
-      log('[MTG Importer] Request timeout detected after ' .. elapsed .. 's: ' .. requestInfo)
+      log('[Card Importer] Request timeout detected after ' .. elapsed .. 's: ' .. requestInfo)
       broadcastToAll('[b][FF7700]⚠️ Request Timeout[/b]\n' ..
                      '[FFFFFF]Request took too long (>' .. elapsed .. 's):\n' ..
                      '[AAAAAA]' .. requestInfo .. '\n' ..
@@ -1581,14 +1593,14 @@ function uNotebook(t,b,c)local p={index=-1,title=t,body=b or'',color=c or'Grey'}
 function uVersion(wr)
   -- Check if WebRequest failed
   if wr.is_error then
-    log('[MTG Importer] Update check failed - WebRequest error: ' .. tostring(wr.error))
+    log('[Card Importer] Update check failed - WebRequest error: ' .. tostring(wr.error))
     registerModule()
     return
   end
   
   -- Check if we got valid text response
   if not wr.text or wr.text == '' then
-    log('[MTG Importer] Update check failed - Empty response from GitHub')
+    log('[Card Importer] Update check failed - Empty response from GitHub')
     registerModule()
     return
   end
@@ -1597,7 +1609,7 @@ function uVersion(wr)
   local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
   
   if not v then
-    log('[MTG Importer] Update check failed - Could not parse version from GitHub response')
+    log('[Card Importer] Update check failed - Could not parse version from GitHub response')
     log('Response preview: ' .. wr.text:sub(1, 200))
     registerModule()
     return
@@ -1608,7 +1620,7 @@ function uVersion(wr)
   local versionNum = tonumber(version)
   
   if not vNum or not versionNum then
-    log('[MTG Importer] Update check failed - Invalid version format')
+    log('[Card Importer] Update check failed - Invalid version format')
     registerModule()
     return
   end
@@ -1624,19 +1636,19 @@ function uVersion(wr)
     statusMsg = '\n[b][00FF00]🔄 Updating Importer...[/b]'
     statusMsg = statusMsg .. '\n[FFFFFF]New version [b]v' .. v .. '[/b] available (you have [b]v' .. version .. '[/b])'
     statusMsg = statusMsg .. '\n[00CCFF]Downloading from GitHub...'
-    broadcastToAll('[b][MTG Importer][/b] ' .. statusMsg, {0.4, 1, 0.4})
+    broadcastToAll('[b][Card Importer][/b]' .. statusMsg, {0.4, 1, 0.4})
     
     -- Update the script
     self.setLuaScript(wr.text)
     
     Wait.time(function()
-      broadcastToAll('[b][MTG Importer][/b] [00FF00]✓ Update complete![/b] Reloading...', {0.4, 1, 0.4})
+      broadcastToAll('[b][Card Importer][/b] [00FF00]✓ Update complete![/b] Reloading...', {0.4, 1, 0.4})
       self.reload()
     end, 1)
     return
   else
     statusMsg = '\n[ffffff]You have the latest version!'
-    broadcastToAll('[b][MTG Importer][/b] [00FF00]✓ Up to date![/b] Running version [b]' .. version .. '[/b]', {0.4, 1, 0.4})
+    broadcastToAll('[b][Card Importer][/b] [00FF00]✓ Up to date![/b] Running version [b]' .. version .. '[/b]', {0.4, 1, 0.4})
   end
   
   registerModule()
@@ -1644,7 +1656,7 @@ end
 
 -- Manual update check function (callable from button)
 function checkForUpdates()
-  broadcastToAll('[b][MTG Importer][/b] [00CCFF]🔄 Checking for updates from GitHub...', {0.7, 0.7, 1})
+  broadcastToAll('[b][Card Importer][/b] [00CCFF]🔄 Checking for updates from GitHub...', {0.7, 0.7, 1})
   WebRequest.get(GITURL, self, 'uVersion')
 end
 
