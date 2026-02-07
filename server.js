@@ -1287,8 +1287,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         }
       } else {
         if (numCards > 1 && q) {
-          let randomCards;
-          randomCards = await scryfallLib.searchCards(q, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+          const randomCards = await scryfallLib.searchCards(q, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
 
           if (!randomCards || randomCards.length === 0) {
             const hint = getQueryHint(q);
@@ -1319,6 +1318,7 @@ app.get('/random', randomLimiter, async (req, res) => {
             }
           }
         } else {
+          // Single-card requests keep /cards/random semantics.
           // API - Test first request to validate query before fetching all cards
           // If query is malformed, this fails fast instead of wasting API calls
           let firstCard;
