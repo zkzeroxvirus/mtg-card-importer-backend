@@ -293,6 +293,7 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `MAX_CACHE_SIZE` — Maximum entries in caches (default: 5000)
   - Higher values = more memory, fewer cache misses
   - Lower values = less memory, more cache misses
+- `STATUS_PAGE_REFRESH_MS` — Refresh interval for the `/status` page (default: 10000)
 
 ### Scryfall API Settings
 - `SCRYFALL_DELAY` — Rate limit delay in ms for API mode (default: 100)
@@ -316,6 +317,7 @@ PORT=3000
 # Performance (for 500+ concurrent users)
 WORKERS=auto
 MAX_CACHE_SIZE=5000
+STATUS_PAGE_REFRESH_MS=10000
 
 # Scryfall API
 SCRYFALL_DELAY=100

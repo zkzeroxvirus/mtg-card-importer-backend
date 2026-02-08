@@ -20,6 +20,7 @@ describe('Performance and Monitoring Endpoints', () => {
       expect(response.body.metrics).toHaveProperty('errorRate');
       expect(response.body.metrics).toHaveProperty('memoryMB');
       expect(response.body).toHaveProperty('endpoints');
+      expect(response.body.endpoints.constructor).toBe(Object);
       expect(response.body.endpoints).toHaveProperty('metrics', 'GET /metrics');
       expect(response.body.endpoints).toHaveProperty('statusPage', 'GET /status');
     });
@@ -80,6 +81,7 @@ describe('Performance and Monitoring Endpoints', () => {
 
       expect(response.text).toContain('MTG Card Importer Status');
       expect(response.text).toContain('health-output');
+      expect(response.text).toContain('fetchJson');
     });
   });
 

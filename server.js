@@ -20,6 +20,10 @@ const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
+const RAW_STATUS_PAGE_REFRESH_MS = parseInt(process.env.STATUS_PAGE_REFRESH_MS || '10000', 10);
+const STATUS_PAGE_REFRESH_MS = Number.isFinite(RAW_STATUS_PAGE_REFRESH_MS) && RAW_STATUS_PAGE_REFRESH_MS > 0
+  ? RAW_STATUS_PAGE_REFRESH_MS
+  : 10000;
 const STATUS_PAGE_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -104,21 +108,21 @@ const STATUS_PAGE_HTML = `<!doctype html>
     </header>
     <section class="grid">
       <div class="card">
-        <h2>Health</h2>
+        <h2>Health (/)</h2>
         <pre id="health-output">Loading...</pre>
       </div>
       <div class="card">
-        <h2>Metrics</h2>
+        <h2>Metrics (/metrics)</h2>
         <pre id="metrics-output">Loading...</pre>
       </div>
       <div class="card">
-        <h2>Ready</h2>
+        <h2>Ready (/ready)</h2>
         <pre id="ready-output">Loading...</pre>
       </div>
     </section>
   </main>
   <script>
-    const refreshIntervalMs = 10000;
+    const refreshIntervalMs = ${JSON.stringify(STATUS_PAGE_REFRESH_MS)};
     const lastUpdated = document.getElementById('last-updated');
     const healthOutput = document.getElementById('health-output');
     const metricsOutput = document.getElementById('metrics-output');
