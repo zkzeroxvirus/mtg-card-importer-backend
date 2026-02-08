@@ -1085,7 +1085,7 @@ Importer=setmetatable({
     local cardName = qTbl.target and qTbl.target.getName():gsub('\n.*','') or qTbl.name
     local encodedName = urlEncode(cardName)
     
-    -- Fetch the card via generic endpoint (all_parts already filtered to tokens/emblems)
+    -- Fetch the card via generic endpoint (we filter all_parts to tokens/emblems below)
     WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
       if handleWebError(wr, qTbl, 'Token lookup failed') then
         return
@@ -1103,7 +1103,10 @@ Importer=setmetatable({
           -- Filter out the card itself, only spawn tokens/related cards
           local tokensToSpawn = {}
           for _,tokenPart in ipairs(json.all_parts)do
-            if tokenPart.id ~= json.id then  -- Don't spawn the card itself
+            local partType = (tokenPart.type_line or ''):lower()
+            local partComponent = (tokenPart.component or ''):lower()
+            local isTokenPart = partType:find('token') or partType:find('emblem') or partComponent == 'token' or partComponent == 'emblem'
+            if tokenPart.id ~= json.id and isTokenPart then  -- Only spawn tokens/emblems, not the card itself
               table.insert(tokensToSpawn, tokenPart)
             end
           end
@@ -1751,10 +1754,9 @@ function onLoad(data)
   -- Less intrusive chat message - full help in notebook (SHelp)
   printToAll('[b][77FF77]' .. self.getName() .. ' [/b] Check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
   
-  -- Registration happens in uVersion() after update check, or above if auto-update is disabledeout monitor for hung requests
+  -- Registration happens in uVersion() after update check, or above if auto-update is disabled
   startTimeoutMonitor()
-  
-  registerModule()
+
   onChat('Scryfall clear back')
 end
 function onDestroy()
