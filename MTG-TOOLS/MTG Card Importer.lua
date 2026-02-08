@@ -21,7 +21,7 @@ lang = 'en'
 --   - For local testing: 'http://localhost:3000'
 --   - For production: Your deployed backend URL
 -- Example: BACKEND_URL = 'https://your-backend.onrender.com'
-BACKEND_URL = 'https://api.mtginfo.org'
+BACKEND_URL = 'http://localhost:3000'
 
 -- Auto-update configuration (checks GitHub for newer version on load)
 AUTO_UPDATE_ENABLED = true
