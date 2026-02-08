@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.908'
+mod_name, version = 'Card Importer', '1.909'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -1470,7 +1470,7 @@ for k,v in pairs(Importer)do if not('request'):find(k)then
 MODES=MODES..' '..k end end
 --[[Functions used everywhere else]]
 local Usage = [[━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    [b]%s
+  [b][854FD9]%s [49D54F]%s
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [b][00CCFF]⚡ QUICK START - BASIC COMMANDS
@@ -1520,7 +1520,6 @@ Stuck requests are automatically cleared and the queue continues.
 
 [b][AAAAAA]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [i]Modified by Sirin • Custom backend support
-Backend: ]] .. BACKEND_URL .. [[
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━]]
 
 -- Check for hung requests and auto-recover
@@ -1745,7 +1744,7 @@ function onLoad(data)
   })
   
   -- Setup usage text and description
-  Usage = Usage:format(self.getName())
+  Usage = Usage:format(mod_name, version)
   uNotebook('SHelp', Usage)
   local u = Usage:gsub('\n\n.*', '\n\n[b][FFFF77]📖 Full help available in Notebook tab: SHelp[/b]')
   u = u .. '\n\n[b][77FF77]✨ Ready to import cards![/b]'
