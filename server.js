@@ -20,6 +20,163 @@ const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
+const STATUS_PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MTG Card Importer Status</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: #f6f7fb;
+      color: #1f2430;
+      margin: 0;
+      padding: 24px;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    header {
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 14px;
+      color: #4a5160;
+    }
+    .badge {
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-weight: 600;
+      background: #e2f7e9;
+      color: #1a7f4b;
+    }
+    .badge.error {
+      background: #fde8e8;
+      color: #a02828;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(31, 36, 48, 0.08);
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+    pre {
+      background: #f0f2f7;
+      padding: 12px;
+      border-radius: 8px;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MTG Card Importer Status</h1>
+      <div class="status-line">
+        <span id="ready-badge" class="badge">Checking readiness...</span>
+        <span id="last-updated">Loading status...</span>
+      </div>
+    </header>
+    <section class="grid">
+      <div class="card">
+        <h2>Health</h2>
+        <pre id="health-output">Loading...</pre>
+      </div>
+      <div class="card">
+        <h2>Metrics</h2>
+        <pre id="metrics-output">Loading...</pre>
+      </div>
+      <div class="card">
+        <h2>Ready</h2>
+        <pre id="ready-output">Loading...</pre>
+      </div>
+    </section>
+  </main>
+  <script>
+    const refreshIntervalMs = 10000;
+    const lastUpdated = document.getElementById('last-updated');
+    const healthOutput = document.getElementById('health-output');
+    const metricsOutput = document.getElementById('metrics-output');
+    const readyOutput = document.getElementById('ready-output');
+    const readyBadge = document.getElementById('ready-badge');
+
+    function formatJson(payload) {
+      return JSON.stringify(payload, null, 2);
+    }
+
+    async function fetchJson(url) {
+      try {
+        const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        const data = await response.json();
+        return { ok: response.ok, status: response.status, data };
+      } catch (error) {
+        return { ok: false, status: 0, data: { error: error.message } };
+      }
+    }
+
+    function renderPayload(element, result) {
+      if (result.ok) {
+        element.textContent = formatJson(result.data);
+        return;
+      }
+
+      element.textContent = formatJson({
+        status: result.status,
+        error: result.data && result.data.error ? result.data.error : 'Request failed'
+      });
+    }
+
+    function updateReadyBadge(result) {
+      const ready = result.ok && result.data && result.data.ready === true;
+      readyBadge.textContent = ready ? 'Ready' : 'Not Ready';
+      readyBadge.className = ready ? 'badge' : 'badge error';
+    }
+
+    async function refresh() {
+      lastUpdated.textContent = 'Refreshing...';
+      const [health, metrics, ready] = await Promise.all([
+        fetchJson('/'),
+        fetchJson('/metrics'),
+        fetchJson('/ready')
+      ]);
+
+      renderPayload(healthOutput, health);
+      renderPayload(metricsOutput, metrics);
+      renderPayload(readyOutput, ready);
+      updateReadyBadge(ready);
+      lastUpdated.textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+    }
+
+    refresh();
+    setInterval(refresh, refreshIntervalMs);
+  </script>
+</body>
+</html>`;
 
 // Bulk data URI guardrails
 const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
@@ -544,6 +701,11 @@ function shouldShowDetailedError(query) {
   return false;
 }
 
+// Basic status page UI
+app.get('/status', (req, res) => {
+  res.type('html').send(STATUS_PAGE_HTML);
+});
+
 // Health check with metrics
 app.get('/', (req, res) => {
   const bulkStats = bulkData.getStats();
@@ -572,7 +734,8 @@ app.get('/', (req, res) => {
       random: 'GET /random',
       search: 'GET /search',
       bulkStats: 'GET /bulk/stats',
-      metrics: 'GET /metrics'
+      metrics: 'GET /metrics',
+      statusPage: 'GET /status'
     }
   });
 });

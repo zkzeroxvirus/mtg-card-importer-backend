@@ -226,6 +226,10 @@ Example: `GET /sets/dom`
 - Returns: `{"ready": true}` when server is ready to accept traffic
 - Returns HTTP 503 if server is not ready (bulk data loading, high memory)
 
+**GET `/status`**
+- Basic status webpage for quick monitoring
+- Displays `/`, `/metrics`, and `/ready` responses with auto-refresh
+
 **GET `/bulk/stats`**
 - Get bulk data statistics
 - Returns: File size, card count, memory usage, last update time, and enabled status

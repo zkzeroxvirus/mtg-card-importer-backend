@@ -20,7 +20,8 @@ describe('Performance and Monitoring Endpoints', () => {
       expect(response.body.metrics).toHaveProperty('errorRate');
       expect(response.body.metrics).toHaveProperty('memoryMB');
       expect(response.body).toHaveProperty('endpoints');
-      expect(response.body.endpoints).toContain('GET /metrics');
+      expect(response.body.endpoints).toHaveProperty('metrics', 'GET /metrics');
+      expect(response.body.endpoints).toHaveProperty('statusPage', 'GET /status');
     });
   });
 
@@ -67,6 +68,18 @@ describe('Performance and Monitoring Endpoints', () => {
       // Should be ready in test mode (no bulk data required)
       expect(response.body.ready).toBe(true);
       expect(response.statusCode).toBe(200);
+    });
+  });
+
+  describe('GET /status', () => {
+    it('should return the status webpage', async () => {
+      const response = await request(app)
+        .get('/status')
+        .expect('Content-Type', /html/)
+        .expect(200);
+
+      expect(response.text).toContain('MTG Card Importer Status');
+      expect(response.text).toContain('health-output');
     });
   });
 
