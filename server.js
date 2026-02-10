@@ -1335,6 +1335,8 @@ app.get('/random', randomLimiter, async (req, res) => {
     
     // Check if query contains token type filters (t:token, type:token, is:token)
     const hasTokenFilter = q && /\b(?:t|type|is):token\b/i.test(q);
+    // Route funny filters to API for authoritative set_type handling
+    const hasFunnyFilter = q && /\b-?is[:=]funny\b/i.test(q);
     
     if (hasPriceFilter) {
       console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
@@ -1342,13 +1344,19 @@ app.get('/random', randomLimiter, async (req, res) => {
     if (hasTokenFilter) {
       console.log(`[BulkData] Token filter detected in query: "${q}", using bulk data first with API fallback`);
     }
+    if (hasFunnyFilter) {
+      console.log(`[API] Funny filter detected in query: "${q}", using Scryfall API for accurate classification`);
+      if (USE_BULK_DATA) {
+        console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
+      }
+    }
 
     if (numCards === 1) {
       // Single random card
       let scryfallCard = null;
       
-      // Skip bulk mode for price filters to ensure real-time data
-      if (!hasPriceFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      // Skip bulk mode for price/funny filters to ensure accurate data
+      if (!hasPriceFilter && !hasFunnyFilter && USE_BULK_DATA && bulkData.isLoaded()) {
         scryfallCard = await bulkData.getRandomCard(q);
       }
       
@@ -1374,8 +1382,8 @@ app.get('/random', randomLimiter, async (req, res) => {
       const cards = [];
       const seenCardIds = new Set(); // Track card IDs to avoid duplicates
       
-      // Skip bulk mode for price filters to ensure real-time data
-      if (!hasPriceFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      // Skip bulk mode for price/funny filters to ensure accurate data
+      if (!hasPriceFilter && !hasFunnyFilter && USE_BULK_DATA && bulkData.isLoaded()) {
         // Bulk data - instant responses (with logging suppressed)
         // Try up to numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER attempts to account for duplicates
         const maxAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
@@ -1421,7 +1429,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         }
       } else {
         const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
-        if (numCards > 1 && hasRandomQuery) {
+        if (numCards > 1 && hasRandomQuery && !hasFunnyFilter) {
           const randomCards = await scryfallLib.searchCards(q, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
 
           if (!randomCards || randomCards.length === 0) {
@@ -1585,11 +1593,19 @@ app.get('/search', async (req, res) => {
     
     // Check if query contains token type filters (t:token, type:token, is:token)
     const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(q);
+    // Route funny filters to API for authoritative set_type handling
+    const hasFunnyFilter = /\b-?is[:=]funny\b/i.test(q);
     
-    // For full printings list or price filters, prefer live API to ensure completeness/freshness
-    if (requestedUnique === 'prints' || hasPriceFilter) {
+    // For full printings list, funny filters, or price filters, prefer live API to ensure completeness/freshness
+    if (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter) {
       if (hasPriceFilter) {
         console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
+      }
+      if (hasFunnyFilter) {
+        console.log(`[API] Funny filter detected in query: "${q}", using Scryfall API for accurate classification`);
+        if (USE_BULK_DATA) {
+          console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
+        }
       }
       scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
     } else if (USE_BULK_DATA && bulkData.isLoaded()) {

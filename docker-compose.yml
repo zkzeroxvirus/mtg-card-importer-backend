@@ -1,6 +1,8 @@
 services:
   mtg-card-importer:
     image: mtg-card-importer-backend
+    build:
+      context: .
     container_name: mtg-card-importer
     ports:
       - "3000:3000"
@@ -17,3 +19,9 @@ services:
 
     volumes:
       - ./data:/app/data
+    networks:
+      - mtg-net
+
+networks:
+  mtg-net:
+    name: mtg-net
