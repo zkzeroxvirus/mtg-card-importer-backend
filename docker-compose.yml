@@ -24,4 +24,5 @@ services:
 
 networks:
   mtg-net:
+    external: true
     name: mtg-net
