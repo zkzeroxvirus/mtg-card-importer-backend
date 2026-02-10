@@ -234,6 +234,31 @@ function sanitizeCardsForResponse(cards) {
   return cards.map(sanitizeCardForResponse);
 }
 
+const COLON_ONLY_PREFIXES = [
+  'is', 't', 'type', 's', 'set', 'r', 'rarity', 'o', 'oracle', 'name',
+  'a', 'artist', 'ft', 'flavor', 'kw', 'keyword', 'layout', 'wm', 'watermark',
+  'lang', 'language', 'game', 'format', 'f', 'legal', 'banned', 'restricted',
+  'block', 'stamp', 'frame', 'border', 'has'
+];
+const COLON_ONLY_PREFIX_PATTERN = COLON_ONLY_PREFIXES.join('|');
+const COLON_ONLY_PREFIX_REPLACE = new RegExp(`(^|[\\s+\\(])(-?(?:${COLON_ONLY_PREFIX_PATTERN}))=`, 'gi');
+
+function normalizeQueryOperators(rawQuery) {
+  if (!rawQuery || typeof rawQuery !== 'string') {
+    return { query: rawQuery || '', warning: null };
+  }
+
+  const normalized = rawQuery.replace(COLON_ONLY_PREFIX_REPLACE, '$1$2:');
+  if (normalized !== rawQuery) {
+    return {
+      query: normalized,
+      warning: `Normalized query operators: "${rawQuery}" -> "${normalized}" (use ":" for keyword filters).`
+    };
+  }
+
+  return { query: rawQuery, warning: null };
+}
+
 /**
  * Resolve a Scryfall card URI against bulk data when possible.
  * Returns null for unsupported endpoints or when bulk data isn't available.
@@ -372,6 +397,11 @@ async function findExactTokenMatch(tokenName, sanitizedName = null) {
  */
 function getQueryHint(query) {
   const q = query.toLowerCase();
+
+  // Non-numeric keyword filters require a colon operator
+  if (/\b(is|t|type|s|set|r|rarity|o|oracle|name|a|artist|ft|flavor|kw|keyword|layout|wm|watermark|lang|language|game|format|f|legal|banned|restricted|block|stamp|frame|border|has)=/i.test(q)) {
+    return ' (Use ":" for keyword filters, e.g., is:funny or t:token)';
+  }
   
   // Check for common typos in color identity
   // Match "idXX" where XX are 2-3 lowercase letters (like "idgu" or "idub")
@@ -1295,7 +1325,11 @@ app.post('/deck/parse', async (req, res) => {
  */
 app.get('/random', randomLimiter, async (req, res) => {
   try {
-    const { count, q = '' } = req.query;
+    const { count } = req.query;
+    const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
+    if (queryWarning) {
+      res.setHeader('X-Query-Warning', queryWarning);
+    }
     // Security: Enforce maximum count to prevent resource exhaustion
     const numCards = count ? Math.min(Math.max(parseInt(count) || 1, 1), 100) : 1;
     
@@ -1336,7 +1370,7 @@ app.get('/random', randomLimiter, async (req, res) => {
     // Check if query contains token type filters (t:token, type:token, is:token)
     const hasTokenFilter = q && /\b(?:t|type|is):token\b/i.test(q);
     // Route funny filters to API for authoritative set_type handling
-    const hasFunnyFilter = q && /\b-?is[:=]funny\b/i.test(q);
+    const hasFunnyFilter = q && /\b-?is:funny\b/i.test(q);
     
     if (hasPriceFilter) {
       console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
@@ -1568,7 +1602,11 @@ app.get('/random', randomLimiter, async (req, res) => {
  */
 app.get('/search', async (req, res) => {
   try {
-    const { q, limit = 100, unique } = req.query;
+    const { limit = 100, unique } = req.query;
+    const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
+    if (queryWarning) {
+      res.setHeader('X-Query-Warning', queryWarning);
+    }
 
     if (!q) {
       return res.status(400).json({ error: 'Query required' });
@@ -1594,7 +1632,7 @@ app.get('/search', async (req, res) => {
     // Check if query contains token type filters (t:token, type:token, is:token)
     const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(q);
     // Route funny filters to API for authoritative set_type handling
-    const hasFunnyFilter = /\b-?is[:=]funny\b/i.test(q);
+    const hasFunnyFilter = /\b-?is:funny\b/i.test(q);
     
     // For full printings list, funny filters, or price filters, prefer live API to ensure completeness/freshness
     if (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter) {

@@ -19,10 +19,4 @@ services:
 
     volumes:
       - ./data:/app/data
-    networks:
-      - mtg-net
-
-networks:
-  mtg-net:
-    external: true
-    name: mtg-net
+  
