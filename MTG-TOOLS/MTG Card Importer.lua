@@ -11,6 +11,7 @@ author = '76561198045776458'
 coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
 GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/master/MTG-TOOLS/MTG%20Card%20Importer.lua'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/master/MTG-TOOLS/MTG%20Card%20Importer.lua'
 lang = 'en'
 -- Modified by Sirin
 
@@ -1625,6 +1626,11 @@ function uVersion(wr)
   if not v then
     v = wr.text:match("mod_name,%s*version%s*=%s*['\"][^'\"]+['\"],%s*['\"]([%d%.]+)['\"]")
   end
+  -- Try to parse version from response (support single/double quotes and extra spacing)
+  local v = wr.text:match("version%s*=%s*['\"]([%d%.]+)['\"]")
+  if not v then
+    v = wr.text:match("mod_name,%s*version%s*=%s*['\"][^'\"]+['\"],%s*['\"]([%d%.]+)['\"]")
+  end
   
   if not v then
     log('[Card Importer] Update check failed - Could not parse version from GitHub response')
@@ -1635,6 +1641,25 @@ function uVersion(wr)
   end
   
   -- Convert both to numbers for comparison
+  local function versionToNumber(value)
+    if not value then
+      return nil
+    end
+    local parts = {}
+    for part in tostring(value):gmatch('%d+') do
+      table.insert(parts, tonumber(part))
+    end
+    if #parts == 0 then
+      return nil
+    end
+    while #parts < 3 do
+      table.insert(parts, 0)
+    end
+    return (parts[1] * 1000000) + (parts[2] * 1000) + parts[3]
+  end
+
+  local vNum = versionToNumber(v)
+  local versionNum = versionToNumber(version)
   local function versionToNumber(value)
     if not value then
       return nil
@@ -1739,6 +1764,7 @@ function onLoad(data)
 
   -- Auto-update check (can be disabled by setting AUTO_UPDATE_ENABLED = false)
   if AUTO_UPDATE_ENABLED then
+    checkForUpdates()
     checkForUpdates()
   else
     -- If auto-update is disabled, register immediately
