@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.909'
+mod_name, version = 'Card Importer', '1.910'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -1607,6 +1607,7 @@ function uVersion(wr)
   -- Check if WebRequest failed
   if wr.is_error then
     log('[Card Importer] Update check failed - WebRequest error: ' .. tostring(wr.error))
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Check connection or trusted URLs.', {1, 0.4, 0.4})
     registerModule()
     return
   end
@@ -1614,26 +1615,49 @@ function uVersion(wr)
   -- Check if we got valid text response
   if not wr.text or wr.text == '' then
     log('[Card Importer] Update check failed - Empty response from GitHub')
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Empty response from GitHub.', {1, 0.4, 0.4})
     registerModule()
     return
   end
   
-  -- Try to parse version from response
-  local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
+  -- Try to parse version from response (support single/double quotes and extra spacing)
+  local v = wr.text:match("version%s*=%s*['\"]([%d%.]+)['\"]")
+  if not v then
+    v = wr.text:match("mod_name,%s*version%s*=%s*['\"][^'\"]+['\"],%s*['\"]([%d%.]+)['\"]")
+  end
   
   if not v then
     log('[Card Importer] Update check failed - Could not parse version from GitHub response')
     log('Response preview: ' .. wr.text:sub(1, 200))
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Invalid version format.', {1, 0.4, 0.4})
     registerModule()
     return
   end
   
   -- Convert both to numbers for comparison
-  local vNum = tonumber(v)
-  local versionNum = tonumber(version)
+  local function versionToNumber(value)
+    if not value then
+      return nil
+    end
+    local parts = {}
+    for part in tostring(value):gmatch('%d+') do
+      table.insert(parts, tonumber(part))
+    end
+    if #parts == 0 then
+      return nil
+    end
+    while #parts < 3 do
+      table.insert(parts, 0)
+    end
+    return (parts[1] * 1000000) + (parts[2] * 1000) + parts[3]
+  end
+
+  local vNum = versionToNumber(v)
+  local versionNum = versionToNumber(version)
   
   if not vNum or not versionNum then
     log('[Card Importer] Update check failed - Invalid version format')
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Invalid version format.', {1, 0.4, 0.4})
     registerModule()
     return
   end
@@ -1704,7 +1728,7 @@ function onLoad(data)
 
   -- Auto-update check (can be disabled by setting AUTO_UPDATE_ENABLED = false)
   if AUTO_UPDATE_ENABLED then
-    WebRequest.get(GITURL, self, 'uVersion')
+    checkForUpdates()
   else
     -- If auto-update is disabled, register immediately
     registerModule()
