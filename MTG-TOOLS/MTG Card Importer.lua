@@ -1936,6 +1936,21 @@ function registerModule()
   enc=Global.getVar('Encoder')
   if enc and not isRegistered then
     isRegistered = true
+    -- Hide legacy registration if it exists to prevent duplicate menu entries.
+    local legacyPropId = 'MTG Card Importer'
+    pcall(function()
+      if enc.call('APIpropertyExists', {propID = legacyPropId}) then
+        enc.call('APIregisterProperty', {
+          propID = legacyPropId,
+          name = legacyPropId,
+          values = {},
+          funcOwner = self,
+          activateFunc = 'toggleMenu',
+          visible = false,
+          tags = 'hidden'
+        })
+      end
+    end)
     local prop={name=pID,funcOwner=self,activateFunc='toggleMenu'}
     local v=enc.getVar('version')
     buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Set Sleeve','Reverse Card'}
