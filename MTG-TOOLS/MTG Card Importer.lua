@@ -3,14 +3,14 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.909'
+mod_name, version = 'Card Importer', '1.911'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
 author = '76561198045776458'
 coauthor = '76561197968157267' -- PIE
 WorkshopID = 'https://steamcommunity.com/sharedfiles/filedetails/?id=1838051922'
-GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/main/MTG-TOOLS/MTG%20Card%20Importer.lua'
+GITURL = 'https://raw.githubusercontent.com/zkzeroxvirus/mtg-card-importer-backend/master/MTG-TOOLS/MTG%20Card%20Importer.lua'
 lang = 'en'
 -- Modified by Sirin
 
@@ -1607,34 +1607,58 @@ function uVersion(wr)
   -- Check if WebRequest failed
   if wr.is_error then
     log('[Card Importer] Update check failed - WebRequest error: ' .. tostring(wr.error))
-    registerModule()
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Check connection or trusted URLs.', {1, 0.4, 0.4})
+    ensureRegisterModule()
     return
   end
   
   -- Check if we got valid text response
   if not wr.text or wr.text == '' then
     log('[Card Importer] Update check failed - Empty response from GitHub')
-    registerModule()
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Empty response from GitHub.', {1, 0.4, 0.4})
+    ensureRegisterModule()
     return
   end
   
-  -- Try to parse version from response
-  local v = wr.text:match("mod_name, version = 'Card Importer', '(%d+%p%d+)'")
+  -- Try to parse version from response (support single/double quotes and extra spacing)
+  local v = wr.text:match("version%s*=%s*['\"]([%d%.]+)['\"]")
+  if not v then
+    v = wr.text:match("mod_name,%s*version%s*=%s*['\"][^'\"]+['\"],%s*['\"]([%d%.]+)['\"]")
+  end
   
   if not v then
     log('[Card Importer] Update check failed - Could not parse version from GitHub response')
     log('Response preview: ' .. wr.text:sub(1, 200))
-    registerModule()
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Invalid version format.', {1, 0.4, 0.4})
+    ensureRegisterModule()
     return
   end
   
   -- Convert both to numbers for comparison
-  local vNum = tonumber(v)
-  local versionNum = tonumber(version)
+  local function versionToNumber(value)
+    if not value then
+      return nil
+    end
+    local parts = {}
+    for part in tostring(value):gmatch('%d+') do
+      table.insert(parts, tonumber(part))
+    end
+    if #parts == 0 then
+      return nil
+    end
+    while #parts < 3 do
+      table.insert(parts, 0)
+    end
+    return (parts[1] * 1000000) + (parts[2] * 1000) + parts[3]
+  end
+
+  local vNum = versionToNumber(v)
+  local versionNum = versionToNumber(version)
   
   if not vNum or not versionNum then
     log('[Card Importer] Update check failed - Invalid version format')
-    registerModule()
+    broadcastToAll('[b][Card Importer][/b] [FF6666]Update check failed.[/b] Invalid version format.', {1, 0.4, 0.4})
+    ensureRegisterModule()
     return
   end
   
@@ -1664,13 +1688,24 @@ function uVersion(wr)
     broadcastToAll('[b][Card Importer][/b] [00FF00]✓ Up to date![/b] Running version [b]' .. version .. '[/b]', {0.4, 1, 0.4})
   end
   
-  registerModule()
+  ensureRegisterModule()
 end
 
 -- Manual update check function (callable from button)
 function checkForUpdates()
   broadcastToAll('[b][Card Importer][/b] [00CCFF]🔄 Checking for updates from GitHub...', {0.7, 0.7, 1})
   WebRequest.get(GITURL, self, 'uVersion')
+end
+
+function ensureRegisterModule()
+  if isRegistered then
+    return
+  end
+  if Global.getVar('Encoder') then
+    registerModule()
+  else
+    Wait.condition(registerModule, function() return Global.getVar('Encoder') ~= nil end)
+  end
 end
 
 --[[Tabletop Callbacks]]
@@ -1704,11 +1739,13 @@ function onLoad(data)
 
   -- Auto-update check (can be disabled by setting AUTO_UPDATE_ENABLED = false)
   if AUTO_UPDATE_ENABLED then
-    WebRequest.get(GITURL, self, 'uVersion')
+    checkForUpdates()
   else
     -- If auto-update is disabled, register immediately
-    registerModule()
+    ensureRegisterModule()
   end
+
+  ensureRegisterModule()
   
   -- Load saved card back settings
   if data ~= '' then
@@ -1910,24 +1947,49 @@ local isRegistered = false  -- Guard to prevent double registration
 
 function registerModule()
   enc=Global.getVar('Encoder')
-  if enc and not isRegistered then
-    isRegistered = true
-    local prop={name=pID,funcOwner=self,activateFunc='toggleMenu'}
-    local v=enc.getVar('version')
-    buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Set Sleeve','Reverse Card'}
-    if v and(type(v)=='string'and tonumber(v:match('%d+%.%d+'))or v)<4.4 then
-      prop.toolID=pID
-      prop.display=true
-      enc.call('APIregisterTool',prop)
-    else
-      prop.values={}
-      prop.visible=true
-      prop.propID=pID
-      prop.tags='tool,cardImporter,Amuzet'
-      enc.call('APIregisterProperty',prop)end
-    function eEmblemAndTokens(o,p)ENC(o,p,'Token')end function eOracle(o,p)ENC(o,p,'Text')end function eRulings(o,p)ENC(o,p,'Rules')end function ePrintings(o,p)ENC(o,p,'Print')end function eRespawn(o,p)ENC(o,p,'Spawn')end function eSetSleeve(o,p)ENC(o,p,'Back')end
-    function eReverseCard(o,p)ENC(o,p)spawnObjectJSON({json=o.getJSON():gsub('BackURL','FaceURL'):gsub('FaceURL','BackURL',1)})
-end end end
+  if not enc or isRegistered then
+    return
+  end
+
+  buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Set Sleeve','Reverse Card'}
+
+  local function versionToNumber(value)
+    if value == nil then
+      return 0
+    end
+    local parts = {}
+    for part in tostring(value):gmatch('%d+') do
+      table.insert(parts, tonumber(part))
+    end
+    if #parts == 0 then
+      return 0
+    end
+    while #parts < 3 do
+      table.insert(parts, 0)
+    end
+    return (parts[1] * 1000000) + (parts[2] * 1000) + parts[3]
+  end
+
+  local encVersionNum = versionToNumber(enc.getVar('version'))
+
+  local prop={name=pID,funcOwner=self,activateFunc='toggleMenu'}
+  if encVersionNum < versionToNumber('4.4.0') then
+    prop.toolID=pID
+    prop.display=true
+    enc.call('APIregisterTool',prop)
+  else
+    prop.values={}
+    prop.visible=true
+    prop.propID=pID
+    prop.tags='tool,cardImporter,Amuzet'
+    enc.call('APIregisterProperty',prop)
+  end
+
+  function eEmblemAndTokens(o,p)ENC(o,p,'Token')end function eOracle(o,p)ENC(o,p,'Text')end function eRulings(o,p)ENC(o,p,'Rules')end function ePrintings(o,p)ENC(o,p,'Print')end function eRespawn(o,p)ENC(o,p,'Spawn')end function eSetSleeve(o,p)ENC(o,p,'Back')end
+  function eReverseCard(o,p)ENC(o,p)spawnObjectJSON({json=o.getJSON():gsub('BackURL','FaceURL'):gsub('FaceURL','BackURL',1)})
+
+  isRegistered = true
+end
 
 function ENC(o,p,m)
   enc.call('APIrebuildButtons',{obj=o})
@@ -1962,4 +2024,5 @@ Button=setmetatable({label='UNDEFINED',click_function='eOracle',function_owner=s
       o.createButton(t)
       t.height=400
       if i%2==1 then t.position[3]=t.position[3]+0.1625 end end})
+  end      
 --EOF

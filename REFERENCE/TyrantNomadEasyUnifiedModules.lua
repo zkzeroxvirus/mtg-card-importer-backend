@@ -1607,7 +1607,7 @@ function createButtons(t)
             --offsets are all over the place rip, but these should fit the vast majority of most common prints
             local typeOffsets = {
                 default = {-0.875, -1.300},
-                battle = {-0.875, 1.20},
+                battle = {-0.89,1.125},
                 MOMback = {0.86,-1.3},
                 planeswalker = {-0.865, -1.330},
                 modal = {-0.875, -1.300},
@@ -1620,10 +1620,7 @@ function createButtons(t)
             }
 
             local MOMbacks = 'Arcee, Acrobatic Coupe-Blaster, Morale Booster-Blitzwing, Adaptive Assailant-Cyclonus, Cybertronian Fighter-Flamewar, Streetwise Operative-Goldbug, Scrappy Scout-Jetfire, Air Guardian-Megatron, Destructive Force-Optimus Prime, Autobot Leader-Prowl, Pursuit Vehicle-Ratchet, Rescue Racer-Slicer, High-Speed Antagonist-Soundwave, Superior Captain-Starscream, Seeker Leader-Ultra Magnus, Armored Carrier-Gitaxian Mindstinger-Ayara, Furnace Queen-Blightsower Thallid-Plated Kilnbeast-Compleated Conjurer-The Argent Etchings-Etali, Primal Sickness-Chrome Host Hulk-Phyrexian Skyflayer-Heliod, the Warped Eclipse-Malady Invoker-The Great Synthesis-Gitaxian Spellstalker-Hideous Fleshwheeler-Order of the Alabaster Host-Polukranos, Engine of Ruin-Glistening Goremonger-Rona, Tolarian Obliterator-Seraph of New Phyrexia-The True Scriptures-Skyclave Invader-Furnace-Blessed Conqueror-Burnished Dunestomper-The Great Work-The Grand Evolution'
-            
-            local cardName, typeLine = t.obj.getName():match("([^\n]*)\n([^\n]*)")
-            cardName = cardName or ""
-            typeLine = typeLine or ""
+            local cardName,typeLine=t.obj.getName():match('(.*)\n(.*)')
 
             local horizontalOffset
             local verticalOffset
@@ -1634,17 +1631,13 @@ function createButtons(t)
             elseif data.doubleFaceType == "werecard" and t.obj.getDescription():find("rtifact") then
                 horizontalOffset = typeOffsets["artifactWerecard"][1]
                 verticalOffset = typeOffsets["artifactWerecard"][2]
-        elseif data.doubleFaceType == "battle" and typeLine:find("[Bb]attle") then
-            horizontalOffset = -0.875
-            verticalOffset   = 1.200
-        elseif MOMbacks:lower():match(cardName:lower())
-           or (data.doubleFaceType == "battle" and not(typeLine:find("[Bb]attle"))) then
-            horizontalOffset = typeOffsets["MOMback"][1]
-            verticalOffset   = typeOffsets["MOMback"][2]
-        else
-            horizontalOffset = typeOffsets[data.doubleFaceType][1]
-            verticalOffset   = typeOffsets[data.doubleFaceType][2]
-        end
+            elseif MOMbacks:lower():match(cardName:lower()) or (data.doubleFaceType == "battle" and not(typeLine:find("[Bb]attle"))) then --backside of a MOMset DFC
+                horizontalOffset = typeOffsets["MOMback"][1]
+                verticalOffset   = typeOffsets["MOMback"][2]
+            else
+                horizontalOffset = typeOffsets[data.doubleFaceType][1]
+                verticalOffset = typeOffsets[data.doubleFaceType][2]
+            end
 
             local dfcSize = 150
             local bgFontSize = 420

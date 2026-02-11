@@ -1254,9 +1254,26 @@ function registerModule()
   enc=Global.getVar('Encoder')
   if enc then
     local prop={name=pID,funcOwner=self,activateFunc='toggleMenu'}
-    local v=enc.getVar('version')
+    local function versionToNumber(value)
+      if value == nil then
+        return 0
+      end
+      local parts = {}
+      for part in tostring(value):gmatch('%d+') do
+        table.insert(parts, tonumber(part))
+      end
+      if #parts == 0 then
+        return 0
+      end
+      while #parts < 3 do
+        table.insert(parts, 0)
+      end
+      return (parts[1] * 1000000) + (parts[2] * 1000) + parts[3]
+    end
+
+    local v=versionToNumber(enc.getVar('version'))
     buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Set Sleeve','Reverse Card'}
-    if v and(type(v)=='string'and tonumber(v:match('%d+%.%d+'))or v)<4.4 then
+    if v < versionToNumber('4.4.0') then
       prop.toolID=pID
       prop.display=true
       enc.call('APIregisterTool',prop)

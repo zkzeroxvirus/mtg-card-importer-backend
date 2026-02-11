@@ -1,11 +1,3 @@
--- this thingy has been modified by π for his table
--- if you take it and try to use it AS-IS it might not work and break other stuff on your table
--- get the vanilla version from the original un-modified mod here, by Tyrant:
--- https://steamcommunity.com/sharedfiles/filedetails/?id=828894732
--- I will not provide support for my version -- I honestly don't remember what I changed to get it to work for me the way I needed
--- just in case, I might have it set to non-interactable to filter out folks who can't script at all
-
-
 --By Tipsy Hobbit
 mod_name = "Encoder"
 postfix = ''
