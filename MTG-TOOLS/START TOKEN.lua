@@ -236,7 +236,7 @@ function spawnRandomCommandersWO(shouldCreateButton)
     cardsSpawned = 0
     createSpawningIndicator(spawnPos)
 
-    local query = "is:commander"
+    local query = "is:commander game:paper"
     local url = BACKEND_URL .. "/random?q=" .. URLencode(query) .. "&count=" .. tostring(commanderCount)
 
     WebRequest.get(url, function(response)
