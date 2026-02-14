@@ -280,4 +280,71 @@ describe('Power and Toughness Filter Regex Parsing', () => {
       expect(result.toughnessEquals).toBe(3);
     });
   });
+
+  describe('Loyalty Filter Tests', () => {
+    function testLoyaltyParsing(part) {
+      let loyaltyEquals = null;
+      let loyaltyGreater = null;
+      let loyaltyGreaterEqual = null;
+      let loyaltyLess = null;
+      let loyaltyLessEqual = null;
+
+      if (part.match(/^loy(alty)?[:=<>]/i)) {
+        // Handle >= first (before >)
+        if (part.match(/loy(alty)?>=(\d+)/i)) {
+          const match = part.match(/loy(alty)?>=(\d+)/i);
+          loyaltyGreaterEqual = parseInt(match[2]);
+        } else if (part.match(/loy(alty)?<=(\d+)/i)) {
+          const match = part.match(/loy(alty)?<=(\d+)/i);
+          loyaltyLessEqual = parseInt(match[2]);
+        } else if (part.match(/loy(alty)?>(\d+)/i)) {
+          const match = part.match(/loy(alty)?>(\d+)/i);
+          loyaltyGreater = parseInt(match[2]);
+        } else if (part.match(/loy(alty)?<(\d+)/i)) {
+          const match = part.match(/loy(alty)?<(\d+)/i);
+          loyaltyLess = parseInt(match[2]);
+        } else if (part.match(/loy(alty)?[:=](\d+)/i)) {
+          const match = part.match(/loy(alty)?[:=](\d+)/i);
+          loyaltyEquals = parseInt(match[2]);
+        }
+      }
+
+      return { loyaltyEquals, loyaltyGreater, loyaltyGreaterEqual, loyaltyLess, loyaltyLessEqual };
+    }
+
+    test('loy:3 should parse to loyaltyEquals=3', () => {
+      const result = testLoyaltyParsing('loy:3');
+      expect(result.loyaltyEquals).toBe(3);
+    });
+
+    test('loyalty:3 should parse to loyaltyEquals=3', () => {
+      const result = testLoyaltyParsing('loyalty:3');
+      expect(result.loyaltyEquals).toBe(3);
+    });
+
+    test('loy=4 should parse to loyaltyEquals=4', () => {
+      const result = testLoyaltyParsing('loy=4');
+      expect(result.loyaltyEquals).toBe(4);
+    });
+
+    test('loy>3 should parse to loyaltyGreater=3', () => {
+      const result = testLoyaltyParsing('loy>3');
+      expect(result.loyaltyGreater).toBe(3);
+    });
+
+    test('loy>=3 should parse to loyaltyGreaterEqual=3', () => {
+      const result = testLoyaltyParsing('loy>=3');
+      expect(result.loyaltyGreaterEqual).toBe(3);
+    });
+
+    test('loy<5 should parse to loyaltyLess=5', () => {
+      const result = testLoyaltyParsing('loy<5');
+      expect(result.loyaltyLess).toBe(5);
+    });
+
+    test('loy<=4 should parse to loyaltyLessEqual=4', () => {
+      const result = testLoyaltyParsing('loy<=4');
+      expect(result.loyaltyLessEqual).toBe(4);
+    });
+  });
 });
