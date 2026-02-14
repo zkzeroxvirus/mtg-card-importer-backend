@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const axios = require('axios');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -20,6 +21,16 @@ const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
 const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
+const MAX_DECK_URL_LENGTH = 2048;
+
+const DECK_IMPORT_ALLOWED_HOSTS = new Set([
+  'tappedout.net',
+  'www.tappedout.net',
+  'moxfield.com',
+  'www.moxfield.com',
+  'archidekt.com',
+  'www.archidekt.com'
+]);
 
 // Bulk data URI guardrails
 const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
@@ -234,6 +245,271 @@ function sanitizeCardsForResponse(cards) {
   return cards.map(sanitizeCardForResponse);
 }
 
+function createHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function isHttpUrlLike(value) {
+  return typeof value === 'string' && /^https?:\/\//i.test(value.trim());
+}
+
+function parseHttpUrlOrNull(value) {
+  if (!isHttpUrlLike(value)) {
+    return null;
+  }
+  try {
+    return new URL(value.trim());
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedDeckImportUrl(urlString) {
+  const urlObj = parseHttpUrlOrNull(urlString);
+  if (!urlObj) {
+    return false;
+  }
+  return DECK_IMPORT_ALLOWED_HOSTS.has(urlObj.hostname.toLowerCase());
+}
+
+function toDeckLine(count, name) {
+  const parsedCount = Math.max(parseInt(count, 10) || 1, 1);
+  const parsedName = String(name || '').trim();
+  if (!parsedName) {
+    return null;
+  }
+  return `${parsedCount} ${parsedName}`;
+}
+
+function pushDeckEntries(lines, entries) {
+  if (!entries) {
+    return;
+  }
+
+  if (Array.isArray(entries)) {
+    for (const entry of entries) {
+      const line = toDeckLine(
+        entry?.quantity || entry?.count || entry?.qty,
+        entry?.card?.name || entry?.name || entry?.cardName || entry?.card_data?.name
+      );
+      if (line) {
+        lines.push(line);
+      }
+    }
+    return;
+  }
+
+  if (typeof entries === 'object') {
+    for (const value of Object.values(entries)) {
+      const line = toDeckLine(
+        value?.quantity || value?.count || value?.qty,
+        value?.card?.name || value?.name || value?.cardName || value?.card_data?.name
+      );
+      if (line) {
+        lines.push(line);
+      }
+    }
+  }
+}
+
+async function fetchMoxfieldDeckAsDecklist(urlObj) {
+  const pathMatch = urlObj.pathname.match(/^\/decks\/([^/?#]+)/i);
+  if (!pathMatch) {
+    throw createHttpError(400, 'Invalid Moxfield deck URL format');
+  }
+
+  const deckId = pathMatch[1];
+  const apiUrl = `https://api2.moxfield.com/v3/decks/all/${encodeURIComponent(deckId)}`;
+  const response = await axios.get(apiUrl, {
+    timeout: 10000,
+    maxRedirects: 0,
+    responseType: 'json'
+  });
+
+  const lines = [];
+  const payload = response.data || {};
+  pushDeckEntries(lines, payload.mainboard || payload.main || payload.mainBoard);
+  pushDeckEntries(lines, payload.commanders);
+  pushDeckEntries(lines, payload.companions);
+
+  if (lines.length === 0) {
+    throw createHttpError(400, 'No cards found in Moxfield deck');
+  }
+
+  return lines.join('\n');
+}
+
+async function fetchArchidektDeckAsDecklist(urlObj) {
+  const pathMatch = urlObj.pathname.match(/^\/decks\/(\d+)(?:\/|$)/i);
+  if (!pathMatch) {
+    throw createHttpError(400, 'Invalid Archidekt deck URL format');
+  }
+
+  const deckId = pathMatch[1];
+  const apiUrl = `https://archidekt.com/api/decks/${encodeURIComponent(deckId)}/`;
+  const response = await axios.get(apiUrl, {
+    timeout: 10000,
+    maxRedirects: 0,
+    responseType: 'json'
+  });
+
+  const lines = [];
+  const cards = Array.isArray(response.data?.cards) ? response.data.cards : [];
+
+  for (const entry of cards) {
+    const cardName =
+      entry?.card?.oracleCard?.name ||
+      entry?.card?.name ||
+      entry?.name;
+
+    const line = toDeckLine(entry?.quantity || entry?.qty || entry?.count, cardName);
+    if (line) {
+      lines.push(line);
+    }
+  }
+
+  if (lines.length === 0) {
+    throw createHttpError(400, 'No cards found in Archidekt deck');
+  }
+
+  return lines.join('\n');
+}
+
+function extractTappedOutTextPayload(payload) {
+  const responseText = String(payload || '');
+
+  if (!responseText.includes('<') || !responseText.includes('>')) {
+    return responseText;
+  }
+
+  const textareaMatch = responseText.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/i);
+  if (textareaMatch && textareaMatch[1]) {
+    return textareaMatch[1];
+  }
+
+  return responseText;
+}
+
+async function fetchTappedOutDeckAsDecklist(urlObj) {
+  if (!/^\/mtg-decks\//i.test(urlObj.pathname)) {
+    throw createHttpError(400, 'Invalid TappedOut deck URL format');
+  }
+
+  const formattedUrl = new URL(urlObj.toString());
+  formattedUrl.searchParams.set('fmt', 'txt');
+
+  const response = await axios.get(formattedUrl.toString(), {
+    timeout: 10000,
+    maxRedirects: 0,
+    responseType: 'text'
+  });
+
+  const textDeck = extractTappedOutTextPayload(response.data).trim();
+  if (!textDeck) {
+    throw createHttpError(400, 'No cards found in TappedOut deck');
+  }
+
+  return textDeck;
+}
+
+async function resolveDecklistInput(input) {
+  if (typeof input !== 'string') {
+    return input;
+  }
+
+  const trimmedInput = input.trim();
+  if (!isHttpUrlLike(trimmedInput)) {
+    return input;
+  }
+
+  if (trimmedInput.length > MAX_DECK_URL_LENGTH) {
+    throw createHttpError(400, `Deck URL too long (max ${MAX_DECK_URL_LENGTH} characters)`);
+  }
+
+  if (!isAllowedDeckImportUrl(trimmedInput)) {
+    throw createHttpError(
+      400,
+      'Unsupported deck URL. Supported providers: tappedout.net, moxfield.com, archidekt.com'
+    );
+  }
+
+  const urlObj = new URL(trimmedInput);
+  const host = urlObj.hostname.toLowerCase();
+
+  try {
+    if (host.endsWith('moxfield.com')) {
+      return await fetchMoxfieldDeckAsDecklist(urlObj);
+    }
+
+    if (host.endsWith('archidekt.com')) {
+      return await fetchArchidektDeckAsDecklist(urlObj);
+    }
+
+    if (host.endsWith('tappedout.net')) {
+      return await fetchTappedOutDeckAsDecklist(urlObj);
+    }
+  } catch (error) {
+    if (error.status) {
+      throw error;
+    }
+
+    const upstreamStatus = error?.response?.status;
+    if (upstreamStatus === 404) {
+      throw createHttpError(404, 'Deck not found at provider URL');
+    }
+
+    throw createHttpError(502, `Failed to fetch deck URL: ${error.message}`);
+  }
+
+  throw createHttpError(400, 'Unsupported deck URL provider');
+}
+
+function isDirectImageUrl(urlString) {
+  const urlObj = parseHttpUrlOrNull(urlString);
+  if (!urlObj) {
+    return false;
+  }
+
+  if (!/^https?:$/i.test(urlObj.protocol)) {
+    return false;
+  }
+
+  return true;
+}
+
+function createSingleImageSpawnCard(imageUrl) {
+  const normalized = imageUrl.trim();
+  return {
+    object: 'card',
+    id: `image-spawn-${Buffer.from(normalized).toString('base64').slice(0, 24)}`,
+    oracle_id: '',
+    name: 'Custom Image',
+    lang: 'en',
+    released_at: null,
+    uri: null,
+    scryfall_uri: null,
+    layout: 'normal',
+    highres_image: true,
+    image_status: 'highres_scan',
+    image_uris: {
+      small: normalized,
+      normal: normalized,
+      large: normalized,
+      png: normalized,
+      art_crop: normalized,
+      border_crop: normalized
+    },
+    mana_cost: '',
+    cmc: 0,
+    type_line: 'Custom Image',
+    oracle_text: '',
+    power: null,
+    toughness: null
+  };
+}
+
 const COLON_ONLY_PREFIXES = [
   'is', 't', 'type', 's', 'set', 'r', 'rarity', 'o', 'oracle', 'name',
   'a', 'artist', 'ft', 'flavor', 'kw', 'keyword', 'layout', 'wm', 'watermark',
@@ -242,13 +518,23 @@ const COLON_ONLY_PREFIXES = [
 ];
 const COLON_ONLY_PREFIX_PATTERN = COLON_ONLY_PREFIXES.join('|');
 const COLON_ONLY_PREFIX_REPLACE = new RegExp(`(^|[\\s+\\(])(-?(?:${COLON_ONLY_PREFIX_PATTERN}))=`, 'gi');
+const POWER_TOUGHNESS_OPERATOR_WITH_SPACED_EQUAL_REPLACE = new RegExp(
+  '(^|[\\s+\\(])(-?(?:pow|power|tou|toughness))\\s*([<>])\\s*=\\s*(-?\\d+)\\b',
+  'gi'
+);
+const POWER_TOUGHNESS_OPERATOR_SPACING_REPLACE = new RegExp(
+  '(^|[\\s+\\(])(-?(?:pow|power|tou|toughness))\\s*([=<>])\\s*(-?\\d+)\\b',
+  'gi'
+);
 
 function normalizeQueryOperators(rawQuery) {
   if (!rawQuery || typeof rawQuery !== 'string') {
     return { query: rawQuery || '', warning: null };
   }
 
-  const normalized = rawQuery.replace(COLON_ONLY_PREFIX_REPLACE, '$1$2:');
+  let normalized = rawQuery.replace(COLON_ONLY_PREFIX_REPLACE, '$1$2:');
+  normalized = normalized.replace(POWER_TOUGHNESS_OPERATOR_WITH_SPACED_EQUAL_REPLACE, '$1$2$3=$4');
+  normalized = normalized.replace(POWER_TOUGHNESS_OPERATOR_SPACING_REPLACE, '$1$2$3$4');
   if (normalized !== rawQuery) {
     return {
       query: normalized,
@@ -677,6 +963,10 @@ app.get('/card/:name', async (req, res) => {
       return res.status(400).json({ object: 'error', details: 'Card name required' });
     }
 
+    if (isDirectImageUrl(name)) {
+      return res.json(createSingleImageSpawnCard(name));
+    }
+
     // Security: Validate input length to prevent DoS
     if (name.length > MAX_INPUT_LENGTH) {
       return res.status(400).json({ 
@@ -955,6 +1245,8 @@ app.post('/deck', async (req, res) => {
       return res.status(400).json({ error: 'decklist required' });
     }
 
+    decklist = await resolveDecklistInput(decklist);
+
     const cards = scryfallLib.parseDecklist(decklist);
     
     console.log(`POST /deck: parsed decklist. decklist length: ${decklist.length}, cards found: ${cards.length}`);
@@ -996,7 +1288,8 @@ app.post('/deck', async (req, res) => {
     res.end();
   } catch (error) {
     console.error('Error building deck:', error.message);
-    res.status(500).json({ error: error.message });
+    const status = error?.status || 500;
+    res.status(status).json({ error: error.message });
   }
 });
 
@@ -1052,6 +1345,8 @@ app.post('/build', async (req, res) => {
       return res.status(400).json({ error: 'Decklist required' });
     }
 
+    data = await resolveDecklistInput(data);
+
     const cards = scryfallLib.parseDecklist(data);
     
     if (cards.length === 0) {
@@ -1101,7 +1396,8 @@ app.post('/build', async (req, res) => {
     res.end();
   } catch (error) {
     console.error('Error building deck:', error.message);
-    res.status(500).json({ error: error.message });
+    const status = error?.status || 500;
+    res.status(status).json({ error: error.message });
   }
 });
 

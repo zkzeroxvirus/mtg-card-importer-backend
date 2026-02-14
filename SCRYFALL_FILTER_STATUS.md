@@ -25,14 +25,17 @@ This document provides a comprehensive overview of which Scryfall API filters ar
 
 ### Numeric Properties
 - `manavalue:` / `mv:` / `cmc:` - Converted mana cost
-  - Operators: `=`, `<`, `>`, `<=`, `>=`
+  - Operators: `:`, `=`, `<`, `>`, `<=`, `>=`
   - **NEW:** Supports `mv:odd` and `mv:even` for odd/even CMC
 - `power:` / `pow:` - Creature power
-  - Operators: `=`, `<`, `>`, `<=`, `>=`
-- `toughness:` / `tou:` / `toughness:` - Creature toughness
-  - Operators: `=`, `<`, `>`, `<=`, `>=`
-- `loyalty:` / `loy:` / `loyalty:` - Planeswalker loyalty
-  - Operators: `=`, `<`, `>`, `<=`, `>=`
+  - Operators: `:`, `=`, `<`, `>`, `<=`, `>=`
+  - **FIXED:** All operators now work correctly (previously `:` and `=` were not parsing)
+- `toughness:` / `tou:` - Creature toughness
+  - Operators: `:`, `=`, `<`, `>`, `<=`, `>=`
+  - **FIXED:** All operators now work correctly (previously `:` and `=` were not parsing)
+- `loyalty:` / `loy:` - Planeswalker loyalty
+  - Operators: `:`, `=`, `<`, `>`, `<=`, `>=`
+  - **FIXED:** All operators now work correctly (previously `:` and `=` were not parsing)
 
 ### Text & Abilities
 - `oracle:` / `o:` - Search oracle text
@@ -251,4 +254,13 @@ The `is:fetchland` and `is:shockland` filters use heuristics based on:
 
 This approach captures most common cases but may miss edge cases or non-standard lands.
 
-Last Updated: 2026-02-04
+## Recent Fixes
+
+### Power/Toughness/Loyalty Filter Operators (2026-02-14)
+Fixed a bug where the `:` and `=` operators were not working for power, toughness, and loyalty filters. The issue was in the regex patterns which used incorrect optional quantifiers:
+- **Problem**: `/pow(er)?>=?(\d+)/i` only matched when `>` was present
+- **Impact**: Queries like `pow:3`, `power=4`, `tou:5`, `loyalty:3` were not parsing correctly
+- **Solution**: Restructured regex patterns to check each operator separately in priority order
+- **Status**: All operators (`:`, `=`, `<`, `>`, `<=`, `>=`) now work correctly for power, toughness, and loyalty filters
+
+Last Updated: 2026-02-14

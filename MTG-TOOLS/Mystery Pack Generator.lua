@@ -18,6 +18,14 @@ function onLoad()
   boosterDats={}
 end
 
+function onDestroy()
+  nBooster = 0
+  boosterDats = {}
+end
+
+local BOOSTER_BUILD_TIMEOUT = 25
+local BOOSTER_REST_TIMEOUT = 8
+
 --------------------------------------------------------------------------------
 ---- Booster Set Lookup Function
 ---- should be correct for all sets?
@@ -185,22 +193,49 @@ function onObjectLeaveContainer(container, leave_object)
     font_color={1,1,1,100},
   })
 
+  local buildDone = false
+  local replaced = false
+
   Wait.condition(function()
+    if replaced then return end
+    buildDone = true
     leave_object.clearButtons()
+
+    local restDone = false
     Wait.condition(function()
+      if restDone or replaced then return end
+      restDone = true
+      replaced = true
       bDat = leave_object.getData()
       bDat.ContainedObjects={boosterDats[boosterN]}
       leave_object.destruct()
       spawnObjectData({data=bDat})
+      boosterDats[boosterN] = nil
     end,
     function()
-      -- print('obj resting')
       return leave_object.resting
     end)
+
+    Wait.time(function()
+      if restDone or replaced then return end
+      restDone = true
+      replaced = true
+      bDat = leave_object.getData()
+      bDat.ContainedObjects={boosterDats[boosterN]}
+      leave_object.destruct()
+      spawnObjectData({data=bDat})
+      boosterDats[boosterN] = nil
+    end, BOOSTER_REST_TIMEOUT)
   end,function()
-    -- print('nil data')
     return boosterDats[boosterN]~=nil
   end)
+
+  Wait.time(function()
+    if buildDone or replaced then return end
+    buildDone = true
+    leave_object.clearButtons()
+    printToAll('Mystery Pack: build timed out, please try again.', {1, 0.5, 0.2})
+  end, BOOSTER_BUILD_TIMEOUT)
 end
 
 
@@ -209,7 +244,7 @@ end
 -- generates TTS deckData object with the cards (saved to boosterDats[boosterN])
 function getDeckDat(urlTable,boosterN)
 
-  deckDat={
+  local deckDat={
     Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=180,rotZ=180,scaleX=1,scaleY=1,scaleZ=1},
     Name="Deck",
     Nickname=cardStackName,
@@ -226,7 +261,7 @@ function getDeckDat(urlTable,boosterN)
     nLoading=nLoading+1
 
     WebRequest.get(url,function(wr)
-      cardDat=getCardDatFromJSON(wr.text,n)
+      local cardDat=getCardDatFromJSON(wr.text,n)
       deckDat.ContainedObjects[n]=cardDat
       deckDat.DeckIDs[n]=cardDat.CardID      -- add card info into deckDat
       deckDat.CustomDeck[n]=cardDat.CustomDeck[n]
@@ -235,18 +270,23 @@ function getDeckDat(urlTable,boosterN)
 
   end
 
-  Wait.condition(function()   -- once all the queries come back from scryfall
+  local finalized = false
+  local function finalizeDeckDat()
+    if finalized then return end
+    finalized = true
 
     -- check for doubles
     local doubles=false
-    local names={}
+    local namesSeen={}
     for _,card in pairs(deckDat.ContainedObjects) do
-      for _,prevName in pairs(names) do
-        if card.Nickname==prevName then
+      local cardName = card and card.Nickname
+      if cardName then
+        if namesSeen[cardName] then
           doubles=true
+          break
         end
+        namesSeen[cardName]=true
       end
-      table.insert(names,card.Nickname)
     end
 
     if doubles then   -- just redo the search
@@ -254,8 +294,18 @@ function getDeckDat(urlTable,boosterN)
     else              -- update the boosterDats
       boosterDats[boosterN]=deckDat
     end
+  end
+
+  Wait.condition(function()   -- once all the queries come back from scryfall
+    finalizeDeckDat()
   end,
   function() return nLoading==nLoaded end)
+
+  Wait.time(function()
+    if finalized then return end
+    printToAll('Mystery Pack: card fetch timeout, using partial results.', {1, 0.6, 0.2})
+    finalizeDeckDat()
+  end, BOOSTER_BUILD_TIMEOUT)
 
 end
 

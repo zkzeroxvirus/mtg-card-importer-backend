@@ -16,6 +16,16 @@ scryfall island https://your-custom-art.com/island.jpg
 
 See [CUSTOM_IMAGE_PROXY_GUIDE.md](CUSTOM_IMAGE_PROXY_GUIDE.md) for full documentation.
 
+## 🖼️ New Feature: Single Image Spawning
+
+You can now spawn a blank card directly from any image URL (no card lookup/proxy data):
+
+```
+scryfall https://cards.scryfall.io/large/front/0/0/0058be07-a8a1-448e-8c3d-61718cb384ec.jpg?1562875117
+```
+
+This mode is intentionally separate from custom image proxies.
+
 ## Overview
 
 This backend acts as a middleware between the Amuzet Card Importer (Tabletop Simulator Lua script) and Scryfall's API. It:
@@ -195,11 +205,13 @@ Example: `GET /sets/dom`
 **POST `/deck`**
 - Build deck from decklist text
 - Consumes: `{ "decklist": "2 Black Lotus\n4 Mountain", "back": "URL" }`
+- Also accepts deck URLs from: TappedOut, Moxfield, and Archidekt
 - Returns: NDJSON (one TTS card object per line)
 
 **POST `/build`**
 - Build deck with optional hand position (TTS spawning)
 - Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
+- Also accepts deck URLs from: TappedOut, Moxfield, and Archidekt
 - Returns: NDJSON (one TTS card object per line)
 
 **POST `/deck/parse`**
@@ -346,6 +358,7 @@ Supported formats:
 - **Deckstats format**: With brackets `[2x] Black Lotus`
 - **TappedOut CSV**: Comma-separated format
 - **Scryfall deck exports**: Official Scryfall export format
+- **Deck URLs**: `https://tappedout.net/mtg-decks/...`, `https://moxfield.com/decks/...`, `https://archidekt.com/decks/...`
 
 All formats can be parsed and validated using the `/deck/parse` endpoint.
 

@@ -4,6 +4,8 @@ WEB_URL = "https://script.google.com/macros/s/AKfycbwIVox39JBPeMswdPtZHfELAH7XJF
 DEBOUNCE_SECONDS = 1.5
 local TOOLTIP_WRAP = 80
 local BAG_MARKER = "[from-bag]"
+local CAPTURE_NOTE_PREFIX = "CAPTURE_TICKET_V1"
+local CAPTURE_TICKET_LABEL = "Capture Ticket:"
 
 -- Relative anchor for spawned reward tokens
 SPAWN_BUTTON_LOCAL = Vector{2, 0.2, 0}
@@ -95,20 +97,15 @@ local lastDescription = ""
 local lastAchievements = ""
 local lastCrypt = ""
 local lastTickets = ""
+local lastCaptures = ""
 local localPlayerKey = nil
 local isSyncEnabled = false
 local pendingHandle = nil
+local recentlyHandledGuids = {}
+local watcherActive = false
+local watcherHandle = nil
 
--- GUID-based tracking variables
-local trackedGuid = "PLACEHOLDER_GUID"  -- Hardcoded GUID placeholder - replace with actual player zone GUID
-local currentSeatedPlayer = nil  -- Steam ID of player currently seated at tracked GUID
-local AUTO_DETECT_ENABLED = true
-
--- Alternative: Track by player color directly (simpler setup)
-local trackedColor = nil  -- Set to player color string (e.g., "White", "Blue", "Red") to track that color
-local USE_COLOR_TRACKING = false  -- Set to true to use color tracking instead of GUID tracking
-
-local state = { value = 0, achievements = {}, crypt = {}, tickets = {} }
+local state = { value = 0, achievements = {}, crypt = {}, tickets = {}, captures = {} }
 local plusSteps = { 5, 10, 50 }
 local minusSteps = { -5, -10, -50 }
 
@@ -269,18 +266,81 @@ local function spawnRewardToken(reward_name)
     return spawned
 end
 
+local function buildCaptureTicketName(captureName)
+    return "[b]" .. CAPTURE_TICKET_LABEL .. "[/b]  " .. tostring(captureName or "")
+end
+
+local function buildCaptureNotes(captureName, imageUrl)
+    return CAPTURE_NOTE_PREFIX .. "\n" .. tostring(captureName or "") .. "\n" .. tostring(imageUrl or "")
+end
+
+local function spawnCaptureToken(captureItem)
+    if not captureItem then return nil end
+    if captureItem.bagData then
+        local bagData = JSON.decode(JSON.encode(captureItem.bagData))
+        local spawnPos = getSpawnAnchor()
+        local counterRot = self.getRotation()
+        bagData.Transform = bagData.Transform or {}
+        bagData.Transform.posX = spawnPos.x
+        bagData.Transform.posY = spawnPos.y
+        bagData.Transform.posZ = spawnPos.z
+        bagData.Transform.rotX = counterRot.x
+        bagData.Transform.rotY = counterRot.y + 180
+        bagData.Transform.rotZ = counterRot.z
+        bagData.Nickname = buildCaptureTicketName(captureItem.name)
+        bagData.GMNotes = buildCaptureNotes(captureItem.name, captureItem.url or "")
+
+        local spawned = spawnObjectData({ data = bagData })
+        if spawned then
+            spawned.setGMNotes(buildCaptureNotes(captureItem.name, captureItem.url or ""))
+            spawned.setLock(false)
+        else
+            log("Spawn failed for bag capture: " .. tostring(captureItem.name))
+        end
+        return spawned
+    end
+
+    local imageUrl = captureItem.url or ""
+    if imageUrl == "" then
+        log("No capture image URL for: " .. tostring(captureItem.name))
+        return nil
+    end
+
+    local spawnData = JSON.decode(JSON.encode(BASE_SPAWN_TEMPLATE))
+    local spawnPos = getSpawnAnchor()
+    local counterRot = self.getRotation()
+    spawnData.Transform.posX = spawnPos.x
+    spawnData.Transform.posY = spawnPos.y
+    spawnData.Transform.posZ = spawnPos.z
+    spawnData.Transform.rotX = counterRot.x
+    spawnData.Transform.rotY = counterRot.y + 180
+    spawnData.Transform.rotZ = counterRot.z
+    spawnData.CustomMesh.DiffuseURL = imageUrl
+
+    local spawned = spawnObjectData({ data = spawnData })
+    if spawned then
+        spawned.setName(buildCaptureTicketName(captureItem.name))
+        spawned.setGMNotes(buildCaptureNotes(captureItem.name, imageUrl))
+        spawned.setLock(false)
+    else
+        log("Spawn failed for capture: " .. tostring(captureItem.name))
+    end
+    return spawned
+end
+
 -- Rewards UI state
 local uiVisible = false
-local uiTab = "crypt" -- crypt | achievements | tickets
+local uiTab = "crypt" -- crypt | achievements | tickets | captures
 local uiSelectedTab = nil
 local uiSelectedId = nil
 local PAGE_SIZE = 26
 
-local uiSlotMap = { crypt = {}, achievements = {}, tickets = {} }
+local uiSlotMap = { crypt = {}, achievements = {}, tickets = {}, captures = {} }
 
 local function slotPrefixForTab(tabKey)
     if tabKey == "achievements" then return "ach_slot_" end
     if tabKey == "tickets" then return "ticket_slot_" end
+    if tabKey == "captures" then return "capture_slot_" end
     return "crypt_slot_"
 end
 
@@ -407,296 +467,167 @@ local function normalizeName(s)
     return s
 end
 
------------------------------------------------------------------------
--- GUID-BASED PLAYER TRACKING
--- Counter tracks player at a specific GUID (player zone)
------------------------------------------------------------------------
+local function stripBbcode(s)
+    return (tostring(s or ""):gsub("%[/?[biuBIU]%]", ""))
+end
 
--- Helper function to get player color from hand zone
-local function getPlayerColorFromHandZone(handZone)
-    if not handZone then
-        return nil
-    end
-    
-    -- Try to get player color from the hand zone's variable
-    -- Note: This may require custom setup depending on your hand zone configuration
-    local playerColor = handZone.getVar("player_color")
-    
-    if not playerColor then
-        -- Alternative: extract color from zone name (e.g., "White Hand", "Blue Hand")
-        local zoneName = handZone.getName()
-        if zoneName then
-            -- Try to extract color from name
-            local colorMatch = zoneName:match("^(%a+)")
-            if colorMatch then
-                -- Capitalize first letter to match TTS color format (White, Blue, etc.)
-                playerColor = colorMatch:sub(1,1):upper() .. colorMatch:sub(2):lower()
+local function parseCaptureTicketName(rawName)
+    if rawName == nil then return nil end
+    local plain = stripBbcode(rawName)
+    local lower = string.lower(plain)
+    local idx = lower:find(string.lower(CAPTURE_TICKET_LABEL), 1, true)
+    if not idx then return nil end
+    local after = plain:sub(idx + #CAPTURE_TICKET_LABEL)
+    local name = trim(after)
+    if name == "" then return nil end
+    return name
+end
+
+local function parseCaptureNotes(notes)
+    if notes == nil or notes == "" then return nil, nil end
+    local header, nameLine, rest = tostring(notes):match("^([^\r\n]*)\r?\n([^\r\n]*)\r?\n?(.*)$")
+    if header ~= CAPTURE_NOTE_PREFIX then return nil, nil end
+    local urlLine = rest and rest:match("^([^\r\n]+)") or ""
+    return trim(nameLine or ""), trim(urlLine or "")
+end
+
+local function sanitizeCaptureBagData(data)
+    if type(data) ~= "table" then return nil end
+    data.GUID = nil
+    data.LuaScript = nil
+    data.LuaScriptState = nil
+    if type(data.ContainedObjects) == "table" then
+        for _, contained in ipairs(data.ContainedObjects) do
+            if type(contained) == "table" then
+                contained.GUID = nil
+                contained.LuaScript = nil
+                contained.LuaScriptState = nil
             end
         end
     end
-    
-    return playerColor
+    return data
 end
 
--- Check if a player is occupying the zone at the tracked GUID (hand zone)
-local function isPlayerAtGUID()
-    if not trackedGuid or trackedGuid == "PLACEHOLDER_GUID" then
-        return false
+local function extractCaptureBagData(obj)
+    if not obj or not obj.getData then return nil end
+    local ok, data = pcall(function() return obj.getData() end)
+    if not ok or type(data) ~= "table" then return nil end
+    if type(data.ContainedObjects) ~= "table" or #data.ContainedObjects == 0 then
+        return nil
     end
-    
-    local handZone = getObjectFromGUID(trackedGuid)
-    if not handZone then
-        return false
-    end
-    
-    -- Get the player color associated with this hand zone
-    local playerColor = getPlayerColorFromHandZone(handZone)
-    if not playerColor then
-        return false
-    end
-    
-    -- Check if a player is seated at that color
-    local player = Player[playerColor]
-    return player and player.seated
+    return sanitizeCaptureBagData(data)
 end
 
--- Get player info from the GUID's hand zone
-local function getPlayerInfoFromGUID()
-    if not trackedGuid or trackedGuid == "PLACEHOLDER_GUID" then
-        return nil, nil
+local function tryRegisterCaptureFromObject(obj)
+    if not obj then return false end
+    local rawName = obj.getName() or ""
+    local noteName, noteUrl = parseCaptureNotes(obj.getGMNotes and obj.getGMNotes() or "")
+    local captureName = (noteName and noteName ~= "" and noteName) or parseCaptureTicketName(rawName)
+    if not captureName then return false end
+
+    local bagData = extractCaptureBagData(obj)
+
+    local imageUrl = noteUrl or ""
+    if imageUrl == "" and obj.getCustomObject then
+        local custom = obj.getCustomObject()
+        if custom then
+            imageUrl = custom.diffuse or custom.face or ""
+        end
     end
-    
-    local handZone = getObjectFromGUID(trackedGuid)
-    if not handZone then
-        return nil, nil
-    end
-    
-    -- Get the player color associated with this hand zone
-    local playerColor = getPlayerColorFromHandZone(handZone)
-    if not playerColor then
-        return nil, nil
-    end
-    
-    -- Get the player object for that color
-    local player = Player[playerColor]
-    if not player or not player.seated then
-        return nil, nil
-    end
-    
-    -- Return the player's Steam ID and name
-    local pname = player.steam_name or player.name
-    local pid = player.steam_id
-    
-    if pid and pid ~= "" then
-        return tostring(pid), pname
-    end
-    
-    return nil, nil
+
+    local id = toId(captureName)
+    state.captures[id] = {
+        id = id,
+        name = captureName,
+        unlocked = true,
+        url = imageUrl,
+        bagData = bagData,
+        desc = "Capture ticket for " .. captureName .. "."
+    }
+    return id
 end
 
--- Initialize GUID-based tracking
-local function initializeGUIDTracking()
-    if not trackedGuid or trackedGuid == "PLACEHOLDER_GUID" then
-        log("ERROR: trackedGuid is not configured!")
-        log("Please edit Essence Counter.lua and replace 'PLACEHOLDER_GUID' with your hand zone's GUID")
-        log("To get a hand zone GUID: Right-click the hand zone → Copy GUID")
-        printToAll("Essence Counter: trackedGuid not configured. Check scripting log for details.", {1, 0, 0})
-        return false
+local function normalizeCapturesTable(captures)
+    local out = {}
+    if type(captures) ~= "table" then return out end
+    for key, item in pairs(captures) do
+        if type(item) == "table" then
+            local name = item.name or item.capture_name or item.title or (type(key) == "string" and key or "")
+            if name ~= "" then
+                local id = item.id or toId(name)
+                local url = item.url or item.imageUrl or item.image or ""
+                local desc = item.desc or ("Capture ticket for " .. name .. ".")
+                local bagData = item.bagData or item.bag_data
+                out[id] = { id = id, name = name, unlocked = (item.unlocked ~= false), url = url, bagData = bagData, desc = desc }
+            end
+        elseif type(item) == "string" and type(key) == "string" then
+            local name = item
+            local id = toId(name)
+            out[id] = { id = id, name = name, unlocked = true, url = "", desc = "Capture ticket for " .. name .. "." }
+        end
     end
-    
-    local obj = getObjectFromGUID(trackedGuid)
-    if not obj then
-        log("ERROR: Hand zone GUID " .. trackedGuid .. " not found in game")
-        log("Verify the GUID is correct and the hand zone object exists")
-        printToAll("Essence Counter: Hand zone not found. Check scripting log for details.", {1, 0, 0})
-        return false
-    end
-    
-    log("Tracking player at hand zone GUID: " .. trackedGuid)
-    return true
+    return out
 end
 
--- Load data for whoever is currently at the tracked GUID
-local function loadPlayerDataFromGUID()
-    if not trackedGuid or trackedGuid == "PLACEHOLDER_GUID" then
-        log("trackedGuid not set")
-        return false
+local function decodeCaptures(value)
+    if value == nil then return {} end
+    if type(value) == "string" then
+        local ok, decoded = pcall(JSON.decode, value)
+        if ok then return normalizeCapturesTable(decoded) end
+        return {}
     end
-    
-    if not isPlayerAtGUID() then
-        log("No player at tracked GUID")
-        return false
+    if type(value) == "table" then
+        return normalizeCapturesTable(value)
     end
-    
-    local pid, pname = getPlayerInfoFromGUID()
-    if not pid then
-        log("No valid player ID at tracked GUID")
-        return false
+    return {}
+end
+
+local function serializeCaptures(captures)
+    return JSON.encode(captures or {})
+end
+
+local function getCaptureIds(catTable)
+    local ids = {}
+    for id, _ in pairs(catTable or {}) do
+        ids[#ids + 1] = id
     end
-    
-    -- Check if this is a different player than currently loaded
-    local newKey = pid .. "_Essence"
-    if newKey == localPlayerKey then
-        -- Same player, nothing to do
+    table.sort(ids, function(a, b)
+        local na = (catTable[a] and catTable[a].name) or a
+        local nb = (catTable[b] and catTable[b].name) or b
+        return string.lower(na) < string.lower(nb)
+    end)
+    return ids
+end
+
+local function getObjectGuidSafe(obj)
+    if not obj then return nil end
+    local ok, guid = pcall(function() return obj.getGUID() end)
+    if not ok or not guid or guid == "" then return nil end
+    return guid
+end
+
+local function markHandledObjectOnce(obj)
+    local guid = getObjectGuidSafe(obj)
+    if not guid then return false end
+    if recentlyHandledGuids[guid] then
         return true
     end
-    
-    -- Different player at this GUID
-    log("Loading data for " .. (pname or "player") .. " at tracked GUID")
-    
-    -- Unregister old player if needed
-    if localPlayerKey then
-        unregisterWithGlobal()
-    end
-    
-    -- Load new player's data
-    localPlayerKey = newKey
-    currentSeatedPlayer = pid
-    
-    -- Fetch saved value for this player
-    if localPlayerKey and not isSyncEnabled then
-        fetchSavedValue()
-    end
-    
-    -- Register with global tracker
-    if localPlayerKey then
-        Wait.time(function()
-            registerWithGlobal()
-        end, 0.5)
-    end
-    
-    return true
+
+    recentlyHandledGuids[guid] = true
+    Wait.time(function()
+        recentlyHandledGuids[guid] = nil
+    end, 0.75)
+
+    return false
 end
 
--- Check for player changes at the tracked GUID
--- Called by events (onPlayerConnect, onPlayerChangeColor)
-local function checkForPlayerChanges()
-    if not AUTO_DETECT_ENABLED then return end
-    if not trackedGuid or trackedGuid == "PLACEHOLDER_GUID" then return end
-    
-    -- Check if a player is at the tracked GUID
-    local isPresent = isPlayerAtGUID()
-    
-    if not isPresent then
-        -- No one at the GUID
-        if localPlayerKey then
-            log("Player left tracked GUID - unregistering")
-            unregisterWithGlobal()
-            currentSeatedPlayer = nil
-            -- Keep localPlayerKey for UI display, but mark as not active
-        end
-        return
-    end
-    
-    -- Someone is present, check if it's a different player
-    local pid, pname = getPlayerInfoFromGUID()
-    
-    if pid and pid ~= currentSeatedPlayer then
-        log("Player change detected at tracked GUID")
-        loadPlayerDataFromGUID()
-    end
-end
-
------------------------------------------------------------------------
--- COLOR-BASED PLAYER TRACKING (Alternative to GUID tracking)
--- Simpler setup - just set the player color to track
------------------------------------------------------------------------
-
--- Initialize color-based tracking
-local function initializeColorTracking()
-    if not USE_COLOR_TRACKING then
-        return false
-    end
-    
-    if not trackedColor or trackedColor == "" then
-        log("ERROR: USE_COLOR_TRACKING is enabled but trackedColor is not configured!")
-        log("Please edit Essence Counter.lua and set trackedColor to a player color (e.g., 'White', 'Blue', 'Red')")
-        printToAll("Essence Counter: trackedColor not configured. Check scripting log for details.", {1, 0, 0})
-        return false
-    end
-    
-    log("Tracking player color: " .. trackedColor)
-    return true
-end
-
--- Load data for player at tracked color
-local function loadPlayerDataFromColor()
-    if not trackedColor or trackedColor == "" then
-        log("trackedColor not set")
-        return false
-    end
-    
-    local player = Player[trackedColor]
-    if not player or not player.seated then
-        log("No player seated at color: " .. trackedColor)
-        return false
-    end
-    
-    local pid = player.steam_id
-    local pname = player.steam_name or player.name
-    
-    if not pid or pid == "" then
-        log("Player at " .. trackedColor .. " has no Steam ID")
-        return false
-    end
-    
-    -- Check if this is a different player than currently loaded
-    local newKey = tostring(pid) .. "_Essence"
-    if newKey == localPlayerKey then
-        -- Same player, nothing to do
-        return true
-    end
-    
-    -- Different player at this color
-    log("Loading data for " .. (pname or "player") .. " at color " .. trackedColor)
-    
-    -- Unregister old player if needed
-    if localPlayerKey then
-        unregisterWithGlobal()
-    end
-    
-    -- Load new player's data
-    localPlayerKey = newKey
-    currentSeatedPlayer = tostring(pid)
-    
-    -- Fetch saved value for this player
-    if localPlayerKey and not isSyncEnabled then
-        fetchSavedValue()
-    end
-    
-    -- Register with global tracker
-    if localPlayerKey then
-        Wait.time(function()
-            registerWithGlobal()
-        end, 0.5)
-    end
-    
-    return true
-end
-
--- Check for player changes at the tracked color
-local function checkForPlayerChangesAtColor()
-    if not USE_COLOR_TRACKING then return end
-    if not trackedColor or trackedColor == "" then return end
-    
-    local player = Player[trackedColor]
-    
-    if not player or not player.seated then
-        -- No one at the color
-        if localPlayerKey then
-            log("Player left tracked color - unregistering")
-            unregisterWithGlobal()
-            currentSeatedPlayer = nil
-        end
-        return
-    end
-    
-    -- Someone is present, check if it's a different player
-    local pid = player.steam_id
-    if pid and tostring(pid) ~= currentSeatedPlayer then
-        log("Player change detected at tracked color")
-        loadPlayerDataFromColor()
-    end
+local function safeDestructObject(obj)
+    if not obj then return end
+    Wait.frames(function()
+        pcall(function()
+            if obj.destruct then obj.destruct() end
+        end)
+    end, 1)
 end
 
 -- Wrap tooltip text so it stays readable inside TTS tooltips.
@@ -895,10 +826,14 @@ end
 local function getCurrentCategoryTable()
     if uiTab == "achievements" then return state.achievements end
     if uiTab == "tickets" then return state.tickets end
+    if uiTab == "captures" then return state.captures end
     return state.crypt
 end
 
 local function getOrderedIds(catTable)
+    if uiTab == "captures" then
+        return getCaptureIds(catTable)
+    end
     local ids = {}
     local seen = {}
 
@@ -961,12 +896,14 @@ uiRefresh = function()
     uiSetActive("Crypt Buffs", uiTab == "crypt")
     uiSetActive("Achievements", uiTab == "achievements")
     uiSetActive("Tickets", uiTab == "tickets")
+    uiSetActive("Captures", uiTab == "captures")
 
     local activeBtn = "#66CC66|#66CC66|#66CC66|#66CC66"
     local inactiveBtn = "#666666|#666666|#666666|#666666"
     uiSetAttr("page_btn_crypt_buffs", "colors", uiTab == "crypt" and activeBtn or inactiveBtn)
     uiSetAttr("page_btn_achievements", "colors", uiTab == "achievements" and activeBtn or inactiveBtn)
     uiSetAttr("page_btn_tickets", "colors", uiTab == "tickets" and activeBtn or inactiveBtn)
+    uiSetAttr("page_btn_captures", "colors", uiTab == "captures" and activeBtn or inactiveBtn)
 
     -- Slot population (per-tab panel slots)
     local prefix = slotPrefixForTab(uiTab)
@@ -1091,6 +1028,7 @@ function onLoad(saved)
             state.achievements = mergeSavedCategory(data.achievements, ACHIEVEMENTS_LIST)
             state.crypt = mergeSavedCategory(data.crypt, CRYPT_REWARDS)
             state.tickets = mergeSavedCategory(data.tickets, TICKETS_LIST)
+            state.captures = decodeCaptures(data.captures)
             if data.playerKey and data.playerKey ~= "" then
                 localPlayerKey = data.playerKey
             end
@@ -1099,6 +1037,7 @@ function onLoad(saved)
         state.achievements = initCategoryFromList(ACHIEVEMENTS_LIST)
         state.crypt = initCategoryFromList(CRYPT_REWARDS)
         state.tickets = initCategoryFromList(TICKETS_LIST)
+        state.captures = {}
     end
 
     -- Keep the watcher/sync source-of-truth in sync with loaded value
@@ -1117,37 +1056,14 @@ function onLoad(saved)
     lastDescription = self.getDescription()
     lastCrypt = serializeCategory(state.crypt)
     lastTickets = serializeCategory(state.tickets)
-    
-    -- Initialize player tracking (GUID-based or Color-based)
-    Wait.time(function()
-        if AUTO_DETECT_ENABLED then
-            if USE_COLOR_TRACKING then
-                -- Use color-based tracking
-                if initializeColorTracking() then
-                    loadPlayerDataFromColor()
-                end
-            else
-                -- Use GUID-based tracking (default)
-                if initializeGUIDTracking() then
-                    loadPlayerDataFromGUID()
-                end
-            end
-        end
-    end, 1.0)  -- Delay to ensure players and game state are loaded
-    
-    startChangeWatcher()
-
-    -- Initial check for player changes
-    -- After this, we rely on events (onPlayerConnect, onPlayerChangeColor) instead of polling
-    if AUTO_DETECT_ENABLED then
-        Wait.time(function()
-            if USE_COLOR_TRACKING then
-                checkForPlayerChangesAtColor()
-            else
-                checkForPlayerChanges()
-            end
-        end, 1.5)  -- One-time check after initialization
+    lastCaptures = serializeCaptures(state.captures)
+    -- If this object already has a saved playerKey (spawned from a player's saved objects),
+    -- pull the latest server state immediately so the UI is up to date before interaction.
+    if localPlayerKey then
+        fetchSavedValue()
     end
+    watcherActive = true
+    startChangeWatcher()
 
     -- Render initial UI state (XML lives on the object; Lua only updates values)
     uiRefreshWhenReady()
@@ -1159,52 +1075,47 @@ function onSave()
         achievements = state.achievements,
         crypt = state.crypt,
         tickets = state.tickets,
+        captures = state.captures,
         playerKey = localPlayerKey
     })
 end
 
 function onPickUp(player_color)
-    -- In tracking mode, pickup is mainly for troubleshooting
-    if USE_COLOR_TRACKING then
-        log("Counter picked up by " .. player_color .. " - counter tracks color: " .. (trackedColor or "not set"))
-    else
-        log("Counter picked up by " .. player_color .. " - counter tracks GUID: " .. (trackedGuid or "not set"))
+    local desc = self.getDescription() or ""
+    local pname = resolveSteamName(player_color)
+    local pid = resolvePlayerId(player_color)
+
+    -- If this was a fresh pull from the bag, claim/rename and strip the marker
+    if string.find(desc, BAG_MARKER, 1, true) then
+        if pname then
+            self.setName(pname)
+            lastName = pname
+        end
+
+        local cleaned = trim(desc:gsub("%[from%-bag%]", ""))
+        self.setDescription(cleaned)
+        lastDescription = cleaned
     end
-end
 
------------------------------------------------------------------------
--- EVENT-BASED PLAYER DETECTION
--- These events trigger when players join/change seats instead of polling
------------------------------------------------------------------------
+    local currentName = trim(self.getName() or "")
+    local keyBase = pid or pname
 
--- Called when a player connects to the game
-function onPlayerConnect(player)
-    if not AUTO_DETECT_ENABLED then return end
-    
-    -- Check for player changes when any player connects
-    log("Player connected - checking tracked location")
-    Wait.time(function()
-        if USE_COLOR_TRACKING then
-            checkForPlayerChangesAtColor()
-        else
-            checkForPlayerChanges()
-        end
-    end, 0.5)  -- Small delay to ensure player is fully loaded
-end
+    -- Only claim a key if we don't already have one AND the object already has a name
+    -- (prevents generating a key for unnamed/placeholder objects).
+    if not localPlayerKey and keyBase and currentName ~= "" then
+        localPlayerKey = keyBase .. "_Essence"
+    end
 
--- Called when a player changes their color/seat
-function onPlayerChangeColor(player_color)
-    if not AUTO_DETECT_ENABLED then return end
-    
-    -- Check if the change involves our tracked location
-    log("Player changed color - checking tracked location")
-    Wait.time(function()
-        if USE_COLOR_TRACKING then
-            checkForPlayerChangesAtColor()
-        else
-            checkForPlayerChanges()
-        end
-    end, 0.5)  -- Small delay to ensure color change is complete
+    -- Fetch saved value before marking as changed (handles fresh pulls and named objects)
+    if localPlayerKey and not isSyncEnabled then
+        fetchSavedValue()
+        return
+    end
+
+    -- Existing counters without the marker still need a key to sync; fetch if we just set one
+    if localPlayerKey and not isSyncEnabled then
+        fetchSavedValue()
+    end
 end
 
 function onNameChanged(new_name)
@@ -1228,7 +1139,11 @@ function onDescriptionChanged(new_desc)
 end
 
 function startChangeWatcher()
-    Wait.time(function()
+    if not watcherActive then return end
+
+    watcherHandle = Wait.time(function()
+        if not watcherActive then return end
+
         if isSyncEnabled then
             local curr = self.getVar("currentValue") or 0
             if curr ~= lastValue then
@@ -1288,6 +1203,17 @@ function startChangeWatcher()
             local tickets_serialized = serializeCategory(state.tickets)
             if tickets_serialized ~= lastTickets then
                 lastTickets = tickets_serialized
+                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
+                pendingHandle = Wait.time(function()
+                    pendingHandle = nil
+                    sendData()
+                end, DEBOUNCE_SECONDS)
+                return
+            end
+
+            local captures_serialized = serializeCaptures(state.captures)
+            if captures_serialized ~= lastCaptures then
+                lastCaptures = captures_serialized
                 if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
                 pendingHandle = Wait.time(function()
                     pendingHandle = nil
@@ -1365,6 +1291,10 @@ function fetchSavedValue()
             state.tickets = deserializeCategory(data.tickets, TICKETS_LIST)
             lastTickets = data.tickets
         end
+        if data.captures then
+            state.captures = decodeCaptures(data.captures)
+            lastCaptures = serializeCaptures(state.captures)
+        end
 
         ensurePlaceholderDescriptions(state.achievements)
         ensurePlaceholderDescriptions(state.crypt)
@@ -1390,7 +1320,8 @@ function sendData()
         value = state.value,
         achievements = serializeCategory(state.achievements),
         crypt = serializeCategory(state.crypt),
-        tickets = serializeCategory(state.tickets)
+        tickets = serializeCategory(state.tickets),
+        captures = serializeCaptures(state.captures)
     }
 
     lastName = payload.name
@@ -1398,6 +1329,7 @@ function sendData()
     lastAchievements = payload.achievements
     lastCrypt = payload.crypt
     lastTickets = payload.tickets
+    lastCaptures = payload.captures
 
     local json = JSON.encode(payload)
     log("BlockSquare [" .. payload.playerKey .. "] sending payload " .. json)
@@ -1425,9 +1357,10 @@ function onObjectEnterScriptingZone(zone, object)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
             if state.crypt[id] and not state.crypt[id].unlocked then
+                if markHandledObjectOnce(object) then return end
                 state.crypt[id].unlocked = true
                 print("[" .. self.getName() .. "] Unlocked Crypt: " .. name)
-                if object.destruct then object.destruct() end
+                safeDestructObject(object)
                 uiVisible = true
                 uiTab = "crypt"
                 uiSelectedTab = "crypt"
@@ -1450,9 +1383,10 @@ function onObjectEnterScriptingZone(zone, object)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
             if state.achievements[id] and not state.achievements[id].unlocked then
+                if markHandledObjectOnce(object) then return end
                 state.achievements[id].unlocked = true
                 print("[" .. self.getName() .. "] Unlocked Achievement: " .. name)
-                if object.destruct then object.destruct() end
+                safeDestructObject(object)
                 uiVisible = true
                 uiTab = "achievements"
                 uiSelectedTab = "achievements"
@@ -1474,9 +1408,10 @@ function onObjectEnterScriptingZone(zone, object)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
             if state.tickets[id] and not state.tickets[id].unlocked then
+                if markHandledObjectOnce(object) then return end
                 state.tickets[id].unlocked = true
                 print("[" .. self.getName() .. "] Unlocked Ticket: " .. name)
-                if object.destruct then object.destruct() end
+                safeDestructObject(object)
                 uiVisible = true
                 uiTab = "tickets"
                 uiSelectedTab = "tickets"
@@ -1507,13 +1442,31 @@ function onObjectDropped(player_color, dropped_object)
     local obj_name = dropped_object.getName() or ""
     local obj_norm = normalizeName(obj_name)
 
+    local captureId = tryRegisterCaptureFromObject(dropped_object)
+    if captureId then
+        if markHandledObjectOnce(dropped_object) then return end
+        safeDestructObject(dropped_object)
+        uiVisible = true
+        uiTab = "captures"
+        uiSelectedTab = "captures"
+        uiSelectedId = captureId
+        uiRefreshWhenReady()
+        if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
+        pendingHandle = Wait.time(function()
+            pendingHandle = nil
+            sendData()
+        end, DEBOUNCE_SECONDS)
+        return
+    end
+
     for _, entry in ipairs(CRYPT_REWARDS) do
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
             if state.crypt[id] and not state.crypt[id].unlocked then
+                if markHandledObjectOnce(dropped_object) then return end
                 state.crypt[id].unlocked = true
-                if dropped_object.destruct then dropped_object.destruct() end
+                safeDestructObject(dropped_object)
                 uiVisible = true
                 uiTab = "crypt"
                 uiSelectedTab = "crypt"
@@ -1535,8 +1488,9 @@ function onObjectDropped(player_color, dropped_object)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
             if state.achievements[id] and not state.achievements[id].unlocked then
+                if markHandledObjectOnce(dropped_object) then return end
                 state.achievements[id].unlocked = true
-                if dropped_object.destruct then dropped_object.destruct() end
+                safeDestructObject(dropped_object)
                 uiVisible = true
                 uiTab = "achievements"
                 uiSelectedTab = "achievements"
@@ -1558,8 +1512,9 @@ function onObjectDropped(player_color, dropped_object)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
             if state.tickets[id] and not state.tickets[id].unlocked then
+                if markHandledObjectOnce(dropped_object) then return end
                 state.tickets[id].unlocked = true
-                if dropped_object.destruct then dropped_object.destruct() end
+                safeDestructObject(dropped_object)
                 uiVisible = true
                 uiTab = "tickets"
                 uiSelectedTab = "tickets"
@@ -1635,9 +1590,16 @@ function ui_tab_tickets(_, _)
     log("Tab set to tickets")
     uiRefreshWhenReady()
 end
+function ui_tab_captures(_, _)
+    uiTab = "captures"
+    uiSelectedTab = uiTab
+    uiSelectedId = nil
+    log("Tab set to captures")
+    uiRefreshWhenReady()
+end
 
 local function set_rewards_tab_internal(tabKey)
-    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" then return end
+    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" and tabKey ~= "captures" then return end
     uiTab = tabKey
     uiSelectedTab = uiTab
     uiSelectedId = nil
@@ -1646,7 +1608,7 @@ end
 function ui_nav_rewards_tab(_, _, id)
     -- Host Helper pattern: infer target from element id
     local tabKey = tostring(id or ""):match("^tab_(%w+)$")
-    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" then return end
+    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" and tabKey ~= "captures" then return end
     set_rewards_tab_internal(tabKey)
     uiRefreshWhenReady()
 end
@@ -1673,20 +1635,22 @@ function ui_select_reward(_, _, id)
     rawId = rawId:gsub("^%s+", ""):gsub("%s+$", "")
 
     -- Accept matches even if there are stray characters around
-    local tid, slotNumStr = string.match(rawId, "(crypt|ach|ticket)_slot_(%d+)")
+    local tid, slotNumStr = string.match(rawId, "(crypt|ach|ticket|capture)_slot_(%d+)")
     local slotNum = tonumber(slotNumStr)
 
     -- Fallback parsing if pattern failed (handles unexpected characters/format)
     if not tid or not slotNum then
         local fallbackTid
         local fallbackSlot
-        fallbackSlot = tonumber(string.match(rawId, "ticket_slot_(%d+)") or string.match(rawId, "ach_slot_(%d+)") or string.match(rawId, "crypt_slot_(%d+)"))
+        fallbackSlot = tonumber(string.match(rawId, "ticket_slot_(%d+)") or string.match(rawId, "ach_slot_(%d+)") or string.match(rawId, "crypt_slot_(%d+)") or string.match(rawId, "capture_slot_(%d+)"))
         if rawId:find("ticket_slot_", 1, true) then
             fallbackTid = "ticket"
         elseif rawId:find("ach_slot_", 1, true) then
             fallbackTid = "ach"
         elseif rawId:find("crypt_slot_", 1, true) then
             fallbackTid = "crypt"
+        elseif rawId:find("capture_slot_", 1, true) then
+            fallbackTid = "capture"
         end
 
         if fallbackTid and fallbackSlot then
@@ -1699,11 +1663,11 @@ function ui_select_reward(_, _, id)
         end
     end
 
-    local tabKey = (tid == "crypt" and "crypt") or (tid == "ach" and "achievements") or "tickets"
+    local tabKey = (tid == "crypt" and "crypt") or (tid == "ach" and "achievements") or (tid == "capture" and "captures") or "tickets"
     local rewardId = uiSlotMap[tabKey] and uiSlotMap[tabKey][slotNum] or nil
 
     -- Fallback: if mapping is missing, derive from the ordered list by index
-    if not rewardId then
+    if not rewardId and tabKey ~= "captures" then
         local sourceList = (tabKey == "crypt" and CRYPT_REWARDS)
             or (tabKey == "achievements" and ACHIEVEMENTS_LIST)
             or TICKETS_LIST
@@ -1730,6 +1694,7 @@ function ui_select_reward(_, _, id)
 
     local catTable = (tabKey == "crypt" and state.crypt)
         or (tabKey == "achievements" and state.achievements)
+        or (tabKey == "captures" and state.captures)
         or state.tickets
     local item = catTable and catTable[rewardId] or nil
 
@@ -1742,7 +1707,11 @@ function ui_select_reward(_, _, id)
     -- Spawn only if unlocked
     if item.unlocked then
         log("UI click spawn: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " rewardId=" .. tostring(rewardId) .. " name=" .. tostring(item.name))
-        spawnRewardToken(item.name)
+        if tabKey == "captures" then
+            spawnCaptureToken(item)
+        else
+            spawnRewardToken(item.name)
+        end
     else
         log("UI click ignored (locked): tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " rewardId=" .. tostring(rewardId))
     end
@@ -1761,6 +1730,8 @@ function ui_nav_page(_, _, id)
         uiTab = "achievements"
     elseif page == "tickets" then
         uiTab = "tickets"
+    elseif page == "captures" then
+        uiTab = "captures"
     else
         return
     end
@@ -1769,82 +1740,18 @@ function ui_nav_page(_, _, id)
     uiRefreshWhenReady()
 end
 
------------------------------------------------------------------------
--- EXTERNAL API FOR OTHER SCRIPTS
--- These functions allow START TOKEN and Global script to interact
------------------------------------------------------------------------
-
--- Get the current essence value
-function getEssence()
-    return state.value or 0
-end
-
--- Get the player key
-function getPlayerKey()
-    return localPlayerKey
-end
-
--- Deduct essence (returns true if successful, false if insufficient)
-function deductEssence(amount)
-    if not amount or amount <= 0 then return false end
-    
-    local currentEssence = state.value or 0
-    if currentEssence < amount then
-        return false  -- Insufficient essence
-    end
-    
-    -- Deduct the essence
-    setValueDirect(currentEssence - amount)
-    return true
-end
-
--- Add essence (for rewards, etc.)
-function addEssence(amount)
-    if not amount or amount <= 0 then return false end
-    
-    local currentEssence = state.value or 0
-    setValueDirect(currentEssence + amount)
-    return true
-end
-
------------------------------------------------------------------------
--- REGISTRATION WITH GLOBAL SCRIPT
------------------------------------------------------------------------
-
--- Register this essence counter with the global tracker when picked up
-function registerWithGlobal()
-    if not localPlayerKey then return end
-    
-    -- Check if Global script exists and has the registration function
-    local hasGlobal, result = pcall(function()
-        return Global.call("registerEssenceCounter", {localPlayerKey, self})
-    end)
-    
-    if hasGlobal then
-        log("Registered with Global essence tracker")
-    end
-end
-
--- Unregister when destroyed
-function unregisterWithGlobal()
-    if not localPlayerKey then return end
-    
-    local hasGlobal, result = pcall(function()
-        return Global.call("unregisterEssenceCounter", localPlayerKey)
-    end)
-    
-    if hasGlobal then
-        log("Unregistered from Global essence tracker")
-    end
-end
-
------------------------------------------------------------------------
-
 -- Initialize UI after load
 function onDestroy()
-    -- Unregister from global tracker
-    unregisterWithGlobal()
-    
+    watcherActive = false
+    if watcherHandle then
+        Wait.stop(watcherHandle)
+        watcherHandle = nil
+    end
+    if pendingHandle then
+        Wait.stop(pendingHandle)
+        pendingHandle = nil
+    end
+
     if self.UI and self.UI.hide then
         self.UI.hide("Navigation")
         self.UI.hide("Unlockables")

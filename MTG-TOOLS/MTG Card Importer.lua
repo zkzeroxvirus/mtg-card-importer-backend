@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.911'
+mod_name, version = 'Card Importer', '1.912'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -99,6 +99,19 @@ local requestStartTime = nil
 local REQUEST_TIMEOUT = 30  -- seconds before considering a request hung (allows for backend cold start)
 local TIMEOUT_CHECK_INTERVAL = 10  -- seconds between timeout checks
 local timeoutMonitorActive = false  -- Prevents multiple monitor chains
+local queuePumpScheduled = false
+
+local function scheduleImporterPump()
+  if queuePumpScheduled then
+    return
+  end
+
+  queuePumpScheduled = true
+  Wait.frames(function()
+    queuePumpScheduled = false
+    Importer()
+  end, 1)
+end
 
 -- Web request error handling (backend and Scryfall proxy)
 function handleWebError(wr, qTbl, context)
@@ -153,6 +166,44 @@ end
 function trunkateURI(uri,q,s)
   if q=='png' then uri=uri:gsub('.jpg','.png')end
   return uri:gsub('%?.*',''):gsub('normal',q)..s
+end
+
+local function spawnImageOnlyCard(qTbl)
+  local faceUrl = qTbl and qTbl.customImage or nil
+  if not faceUrl or faceUrl == '' then
+    endLoop()
+    return
+  end
+
+  local backUrl = Back[qTbl.player] or Back.___ or 'https://i.stack.imgur.com/787gj.png'
+  local cardSeed = math.random(100, 999)
+  local displayName = qTbl.name or ''
+  if displayName == '' or displayName == 'blank card' or displayName == 'blank%20card' then
+    displayName = 'Custom Image Card'
+  end
+
+  local cardDat={
+    Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,scaleX=1,scaleY=1,scaleZ=1},
+    Name='Card',
+    Nickname=displayName,
+    Description='Custom image spawn',
+    CardID=cardSeed*100,
+    CustomDeck={[cardSeed]={
+      FaceURL=faceUrl,
+      BackURL=backUrl,
+      NumWidth=1,NumHeight=1,Type=0,
+      BackIsHidden=true,UniqueBack=false}},
+  }
+
+  local spawnDat={
+    data=cardDat,
+    position=qTbl.position or {0,2,0},
+    rotation=Vector(0,Player[qTbl.color].getPointerRotation(),0)
+  }
+
+  spawnObjectData(spawnDat)
+  Player[qTbl.color].broadcast('Spawned custom image card.',{0.7,0.9,1})
+  endLoop()
 end
 --[[Card Spawning Class]]
 -- pieHere:
@@ -770,6 +821,70 @@ local DeckSites={
       if sideboard~='' then
         Player[qTbl.color].broadcast(deckName..' Sideboard and Maybeboard in notebook.\nType "Scryfall deck" to spawn it now.')
         uNotebook(deckName,sideboard)
+      end
+    end
+  end,
+  archidekt=function(a)
+    local deckID = a:match('archidekt%.com/decks/(%d+)')
+    if not deckID then
+      return a,function(_wr,qTbl)
+        Player[qTbl.color].broadcast('Invalid Archidekt deck URL format',{1,0.2,0.2})
+      end
+    end
+
+    return 'https://archidekt.com/api/decks/' .. deckID .. '/', function(wr,qTbl)
+      if handleWebError(wr, qTbl, 'Archidekt deck fetch failed') then
+        return
+      end
+
+      local ok, deckData = pcall(function() return JSON.decode(wr.text) end)
+      if not ok or type(deckData) ~= 'table' or type(deckData.cards) ~= 'table' then
+        Player[qTbl.color].broadcast('Failed to parse Archidekt deck data',{1,0.2,0.2})
+        return
+      end
+
+      local sideboard=''
+      qTbl.deck=0
+
+      for _,entry in ipairs(deckData.cards) do
+        local quantity = tonumber(entry.quantity or entry.qty or entry.count) or 1
+        local cardObj = entry.card or {}
+        local oracleObj = cardObj.oracleCard or {}
+        local cardName = oracleObj.name or cardObj.name or entry.name or 'Unknown Card'
+        local scryfallId = cardObj.uid or cardObj.scryfallid or cardObj.scryfall_id or oracleObj.scryfall_id
+
+        local isSideboard = false
+        if type(entry.categories) == 'table' then
+          for _,category in ipairs(entry.categories) do
+            local c = tostring(category):lower()
+            if c == 'sideboard' or c == 'maybeboard' then
+              isSideboard = true
+              break
+            end
+          end
+        end
+
+        if isSideboard then
+          sideboard = sideboard .. quantity .. ' ' .. cardName .. '\n'
+        else
+          for _i=1,quantity do
+            qTbl.deck=qTbl.deck+1
+            local cardUrl
+            if scryfallId and scryfallId ~= '' then
+              cardUrl = BACKEND_URL..'/cards/'..scryfallId
+            else
+              cardUrl = BACKEND_URL..'/card/'..cardName:gsub(' ','%%20')
+            end
+            Wait.time(function()
+              WebRequest.get(cardUrl,function(c)setCard(c,qTbl)end)
+            end,qTbl.deck*Tick*2)
+          end
+        end
+      end
+
+      if sideboard~='' then
+        Player[qTbl.color].broadcast('Archidekt sideboard and maybeboard added to Notebook\n"Scryfall deck" to spawn most recent Notebook Tab')
+        uNotebook(qTbl.url,sideboard)
       end
     end
   end,
@@ -1456,8 +1571,12 @@ Importer=setmetatable({
         end
       elseif tbl.customImage then
         -- NEW: Handle custom image proxy
-        Card.image = tbl.customImage
-        t.Spawn(tbl)
+        if (not tbl.mode) or tbl.name == '' or tbl.name == 'blank card' or tbl.name == 'blank%20card' then
+          spawnImageOnlyCard(tbl)
+        else
+          Card.image = tbl.customImage
+          t.Spawn(tbl)
+        end
       elseif t[tbl.mode] then
         t[tbl.mode](tbl)
       else
@@ -1548,8 +1667,8 @@ function checkRequestTimeout()
       table.remove(Importer.request, 1)
       requestStartTime = nil
       
-      -- Process next request
-      Importer()
+      -- Process next request on next frame to reduce spike chaining
+      scheduleImporterPump()
     end
   end
 end
@@ -1590,7 +1709,7 @@ function endLoop()
     table.remove(Importer.request,1)
   end 
   requestStartTime=nil 
-  Importer()
+  scheduleImporterPump()
 end
 function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'}
   if type(tbl)=='table'then timerParams.parameters=tbl end
@@ -1808,6 +1927,46 @@ end
 
 local SMG, SMC = '[b]Scryfall: [/b]', {0.5, 1, 0.8}
 local chatToggle = false
+
+local function isLikelyDeckUrl(url)
+  if not url or url == '' then return false end
+  local u = tostring(url):lower()
+
+  -- If it clearly looks like a direct image, never treat it as a deck URL.
+  if isLikelyImageUrl and isLikelyImageUrl(u) then
+    return false
+  end
+
+  -- Scryfall deck imports must be /decks/... not cards/image CDN URLs.
+  if u:find('scryfall', 1, true) and not u:find('/decks/', 1, true) then
+    return false
+  end
+
+  for key, _ in pairs(DeckSites or {}) do
+    if type(key) == 'string' and u:find(key:lower(), 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+local function isLikelyImageUrl(url)
+  if not url or url == '' then return false end
+  local u = tostring(url):lower()
+  local noFragment = u:gsub('#.*$', '')
+  local noQuery = noFragment:gsub('%?.*$', '')
+
+  if noQuery:match('%.png$') or noQuery:match('%.jpe?g$') or noQuery:match('%.webp$') or noQuery:match('%.gif$') or noQuery:match('%.bmp$') or noQuery:match('%.avif$') then
+    return true
+  end
+
+  if u:find('steamusercontent', 1, true) or u:find('steamuserimages', 1, true) or u:find('i.imgur.com', 1, true) then
+    return true
+  end
+
+  return false
+end
+
 function onChat(msg,p)
   if msg:find('!?[Ss]cryfall ')then
     local a=msg:match('!?[Ss]cryfall (.*)')or false
@@ -1841,19 +2000,44 @@ function onChat(msg,p)
     elseif a then
       -- Parse command: support custom image proxy
       -- Syntax: "scryfall cardname https://custom-image-url"
-      local customImageUrl = a:match('(https?://[^%s]+)$')  -- URL at end
-      local nameWithoutUrl = a:gsub('https?://[^%s]+$', ''):gsub('%s+$', '')  -- Remove trailing URL and spaces
-      
-      -- Extract URL (for deck imports) vs custom image URL
+      local trimmedInput = a:gsub('^%s+',''):gsub('%s+$','')
+      local fullUrlInput = trimmedInput:match('^(https?://[^%s]+)$')
+      local customImageUrl = nil
       local deckUrl = nil
-      if not customImageUrl then
-        -- No custom image, check if entire thing is a URL (deck import)
-        deckUrl = a:match('(https?://[^%s]+)')
-        if deckUrl and deckUrl == a:match('^%s*https?://') then
-          -- URL is at the start, it's a deck import
-          nameWithoutUrl = ''
+      local nameWithoutUrl = trimmedInput
+
+      if fullUrlInput then
+        if isLikelyImageUrl(fullUrlInput) then
+          customImageUrl = fullUrlInput
+        elseif isLikelyDeckUrl(fullUrlInput) then
+          deckUrl = fullUrlInput
         else
-          nameWithoutUrl = a:gsub('https?://[^%s]+', '')
+          deckUrl = fullUrlInput
+        end
+        nameWithoutUrl = ''
+      else
+        local trailingUrl = trimmedInput:match('(https?://[^%s]+)$')
+        if trailingUrl then
+          if isLikelyImageUrl(trailingUrl) then
+            customImageUrl = trailingUrl
+          elseif isLikelyDeckUrl(trailingUrl) then
+            deckUrl = trailingUrl
+          else
+            deckUrl = trailingUrl
+          end
+          nameWithoutUrl = trimmedInput:gsub('https?://[^%s]+$',''):gsub('%s+$','')
+        else
+          local inlineUrl = trimmedInput:match('(https?://[^%s]+)')
+          if inlineUrl then
+            if isLikelyDeckUrl(inlineUrl) then
+              deckUrl = inlineUrl
+            elseif isLikelyImageUrl(inlineUrl) then
+              customImageUrl = inlineUrl
+            else
+              deckUrl = inlineUrl
+            end
+            nameWithoutUrl = trimmedInput:gsub('https?://[^%s]+',''):gsub('%s+$','')
+          end
         end
       end
       
@@ -1861,7 +2045,7 @@ function onChat(msg,p)
         position = p.getPointerPosition(),
         player = p.steam_id,
         color = p.color,
-        url = deckUrl or (not customImageUrl and a:match('(https?://[^%s]+)')),
+        url = deckUrl,
         customImage = customImageUrl,  -- NEW: Store custom image URL separately
         mode = nameWithoutUrl:match('(%S+)'),
         name = nameWithoutUrl,

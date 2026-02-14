@@ -254,4 +254,52 @@ describe('Price and Token Filter API Routing', () => {
       expect(bulkData.searchCards).not.toHaveBeenCalled();
     });
   });
+
+  describe('Power/Toughness equals normalization', () => {
+    test('should normalize spaced power/toughness equals on /search', async () => {
+      const response = await request(app)
+        .get('/search')
+        .query({ q: 't:creature power = 2 toughness = 2' })
+        .expect(200);
+
+      expect(bulkData.searchCards).toHaveBeenCalledWith(
+        't:creature power=2 toughness=2',
+        expect.any(Number)
+      );
+      expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+
+    test('should normalize spaced pow/tou comparisons on /search', async () => {
+      const response = await request(app)
+        .get('/search')
+        .query({ q: 't:creature pow >= 1 tou <= 5' })
+        .expect(200);
+
+      expect(bulkData.searchCards).toHaveBeenCalledWith(
+        't:creature pow>=1 tou<=5',
+        expect.any(Number)
+      );
+      expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+
+    test('should normalize spaced power equals on /random', async () => {
+      const response = await request(app)
+        .get('/random')
+        .query({ q: 'power = 3' })
+        .expect(200);
+
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('power=3');
+      expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+
+    test('should normalize spaced toughness comparison on /random', async () => {
+      const response = await request(app)
+        .get('/random')
+        .query({ q: 'tou >= 5' })
+        .expect(200);
+
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('tou>=5');
+      expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+  });
 });

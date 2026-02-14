@@ -19,8 +19,10 @@ spawnIndicatorText = nil
 cardsSpawned = 0
 totalCardsToSpawn = 0
 NUMBER_BUTTON_COUNT = 22
+scriptActive = true
 --------------------------------------------------------------------------
 function onLoad()
+    scriptActive = true
     local item = self
     item.createButton({
         label = "Spawn Commanders",  -- Button text
@@ -153,8 +155,11 @@ function buildDeckFromListAsync(list, nickname, description, idOffset, onComplet
     local index = 1
     local total = #list
     local batch = batchSize or 8
+    local indicatorUpdateStep = 4
 
     local function processBatch()
+        if not scriptActive then return end
+
         local processed = 0
         while index <= total and processed < batch do
             local cardData = list[index]
@@ -165,7 +170,9 @@ function buildDeckFromListAsync(list, nickname, description, idOffset, onComplet
                 deckDat.CustomDeck[deckId] = cardDat.CustomDeck[deckId]
                 deckDat.ContainedObjects[index] = cardDat
                 cardsSpawned = cardsSpawned + 1
-                updateSpawningIndicator()
+                if cardsSpawned == total or (cardsSpawned % indicatorUpdateStep) == 0 then
+                    updateSpawningIndicator()
+                end
             else
                 print("Error processing card data for card " .. tostring(index))
             end
@@ -174,9 +181,11 @@ function buildDeckFromListAsync(list, nickname, description, idOffset, onComplet
         end
 
         if index <= total then
-            Wait.time(processBatch, 0)
+            Wait.frames(processBatch, 1)
         else
-            onComplete(deckDat)
+            if scriptActive then
+                onComplete(deckDat)
+            end
         end
     end
 
@@ -682,4 +691,9 @@ printToAll(id)
 end
 function destroySelf()
     self.destroy()
+end
+
+function onDestroy()
+    scriptActive = false
+    endSpawning()
 end
