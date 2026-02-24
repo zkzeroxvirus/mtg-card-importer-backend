@@ -1,7 +1,8 @@
 LOG_ENABLED = false
 MAX_VALUE = 999999
 WEB_URL = "https://script.google.com/macros/s/AKfycbwIVox39JBPeMswdPtZHfELAH7XJFo4Ih-ib-BPqR7NDACaxapoO5kqcC1xGwwrS3EX/exec"
-DEBOUNCE_SECONDS = 1.5
+DEBOUNCE_SECONDS = 3.0
+MIN_SYNC_INTERVAL_SECONDS = 8.0
 local TOOLTIP_WRAP = 80
 local BAG_MARKER = "[from-bag]"
 local CAPTURE_NOTE_PREFIX = "CAPTURE_TICKET_V1"
@@ -101,6 +102,11 @@ local lastCaptures = ""
 local localPlayerKey = nil
 local isSyncEnabled = false
 local pendingHandle = nil
+local syncInFlight = false
+local syncQueued = false
+local syncDirty = false
+local lastSyncSentAt = 0
+local lastSyncSignature = ""
 local recentlyHandledGuids = {}
 local watcherActive = false
 local watcherHandle = nil
@@ -154,6 +160,60 @@ local BASE_SPAWN_TEMPLATE = {
         CastShadows = true,
     },
 }
+
+local CAPTURE_BAG_TEMPLATE = {
+    GUID = "",
+    Name = "Custom_Model_Infinite_Bag",
+    Transform = {
+        posX = 0, posY = 0, posZ = 0,
+        rotX = 0, rotY = 0, rotZ = 0,
+        scaleX = 0.7, scaleY = 0.7, scaleZ = 0.7,
+    },
+    Nickname = "",
+    Description = "",
+    GMNotes = "",
+    AltLookAngle = { x = 0, y = 0, z = 0 },
+    ColorDiffuse = { r = 1, g = 1, b = 1 },
+    LayoutGroupSortIndex = 0,
+    Value = 0,
+    Locked = false,
+    Grid = true,
+    Snap = false,
+    IgnoreFoW = false,
+    MeasureMovement = false,
+    DragSelectable = true,
+    Autoraise = true,
+    Sticky = true,
+    Tooltip = true,
+    GridProjection = false,
+    HideWhenFaceDown = false,
+    Hands = false,
+    MaterialIndex = -1,
+    MeshIndex = -1,
+    CustomMesh = {
+        MeshURL = MESH_URL,
+        DiffuseURL = "",
+        NormalURL = "",
+        ColliderURL = MESH_URL,
+        Convex = true,
+        MaterialIndex = 1,
+        TypeIndex = 7,
+        CustomShader = {
+            SpecularColor = { r = 224, g = 208, b = 191 },
+            SpecularIntensity = 0,
+            SpecularSharpness = 2,
+            FresnelStrength = 0.107142858,
+        },
+        CastShadows = true,
+    },
+    LuaScript = "",
+    LuaScriptState = "",
+    XmlUI = "",
+    ContainedObjects = {},
+}
+
+local extractCaptureFaceUrlFromPayload
+local buildCaptureBagSpawnData
 
 -- Image URLs per reward (fill these with real URLs later)
 local SPAWN_IMAGES = {
@@ -277,30 +337,34 @@ end
 local function spawnCaptureToken(captureItem)
     if not captureItem then return nil end
     if captureItem.bagData then
-        local bagData = JSON.decode(JSON.encode(captureItem.bagData))
-        local spawnPos = getSpawnAnchor()
-        local counterRot = self.getRotation()
-        bagData.Transform = bagData.Transform or {}
-        bagData.Transform.posX = spawnPos.x
-        bagData.Transform.posY = spawnPos.y
-        bagData.Transform.posZ = spawnPos.z
-        bagData.Transform.rotX = counterRot.x
-        bagData.Transform.rotY = counterRot.y + 180
-        bagData.Transform.rotZ = counterRot.z
-        bagData.Nickname = buildCaptureTicketName(captureItem.name)
-        bagData.GMNotes = buildCaptureNotes(captureItem.name, captureItem.url or "")
+        local bagData = buildCaptureBagSpawnData(captureItem)
+        if bagData then
+            local spawnPos = getSpawnAnchor()
+            local counterRot = self.getRotation()
+            bagData.Transform = bagData.Transform or {}
+            bagData.Transform.posX = spawnPos.x
+            bagData.Transform.posY = spawnPos.y
+            bagData.Transform.posZ = spawnPos.z
+            bagData.Transform.rotX = counterRot.x
+            bagData.Transform.rotY = counterRot.y + 180
+            bagData.Transform.rotZ = counterRot.z
 
-        local spawned = spawnObjectData({ data = bagData })
-        if spawned then
-            spawned.setGMNotes(buildCaptureNotes(captureItem.name, captureItem.url or ""))
-            spawned.setLock(false)
-        else
+            local spawned = spawnObjectData({ data = bagData })
+            if spawned then
+                spawned.setLock(false)
+                return spawned
+            end
+
             log("Spawn failed for bag capture: " .. tostring(captureItem.name))
+        else
+            log("No usable bag payload for capture: " .. tostring(captureItem.name))
         end
-        return spawned
     end
 
     local imageUrl = captureItem.url or ""
+    if imageUrl == "" and captureItem.bagData then
+        imageUrl = extractCaptureFaceUrlFromPayload(captureItem.bagData)
+    end
     if imageUrl == "" then
         log("No capture image URL for: " .. tostring(captureItem.name))
         return nil
@@ -493,19 +557,144 @@ end
 
 local function sanitizeCaptureBagData(data)
     if type(data) ~= "table" then return nil end
-    data.GUID = nil
-    data.LuaScript = nil
-    data.LuaScriptState = nil
-    if type(data.ContainedObjects) == "table" then
-        for _, contained in ipairs(data.ContainedObjects) do
+
+    -- Keep already-minimized payloads as-is.
+    if data._schema == "capture_payload_v1" then
+        return data
+    end
+
+    -- Build minimal payload from full TTS object data.
+    if data.Name == "Custom_Model_Infinite_Bag" and type(data.ContainedObjects) == "table" and #data.ContainedObjects > 0 then
+        local minimalContained = JSON.decode(JSON.encode(data.ContainedObjects))
+        for _, contained in ipairs(minimalContained) do
             if type(contained) == "table" then
                 contained.GUID = nil
                 contained.LuaScript = nil
                 contained.LuaScriptState = nil
             end
         end
+        return {
+            _schema = "capture_payload_v1",
+            Nickname = data.Nickname or "",
+            DiffuseURL = (data.CustomMesh and data.CustomMesh.DiffuseURL) or "",
+            ContainedObjects = minimalContained,
+        }
     end
-    return data
+
+    -- Backward compatibility: compact/legacy payloads are preserved and handled at spawn time.
+    if data._compact == true or data.Name == "Custom_Model_Infinite_Bag" then
+        return data
+    end
+
+    return nil
+end
+
+extractCaptureFaceUrlFromPayload = function(payload)
+    if type(payload) ~= "table" then return "" end
+
+    if payload.DiffuseURL and payload.DiffuseURL ~= "" then
+        return tostring(payload.DiffuseURL)
+    end
+
+    if payload.CustomMesh and payload.CustomMesh.DiffuseURL and payload.CustomMesh.DiffuseURL ~= "" then
+        return tostring(payload.CustomMesh.DiffuseURL)
+    end
+
+    local contained = payload.ContainedObjects
+    if type(contained) == "table" and #contained > 0 then
+        local first = contained[1]
+        if type(first) == "table" and type(first.CustomDeck) == "table" then
+            for _, deck in pairs(first.CustomDeck) do
+                if type(deck) == "table" and deck.FaceURL and deck.FaceURL ~= "" then
+                    return tostring(deck.FaceURL)
+                end
+            end
+        end
+    end
+
+    if type(payload.card) == "table" and payload.card.faceURL and payload.card.faceURL ~= "" then
+        return tostring(payload.card.faceURL)
+    end
+    if type(payload.bag) == "table" and payload.bag.diffuseURL and payload.bag.diffuseURL ~= "" then
+        return tostring(payload.bag.diffuseURL)
+    end
+
+    return ""
+end
+
+buildCaptureBagSpawnData = function(captureItem)
+    if not captureItem or type(captureItem.bagData) ~= "table" then return nil end
+
+    local payload = captureItem.bagData
+
+    -- Minimal payload: plug data into a fixed full template.
+    if payload._schema == "capture_payload_v1" then
+        local contained = payload.ContainedObjects
+        if type(contained) ~= "table" or #contained == 0 then return nil end
+
+        local out = JSON.decode(JSON.encode(CAPTURE_BAG_TEMPLATE))
+        local faceUrl = payload.DiffuseURL or captureItem.url or extractCaptureFaceUrlFromPayload(payload)
+        out.Nickname = buildCaptureTicketName(captureItem.name)
+        out.GMNotes = buildCaptureNotes(captureItem.name, faceUrl or "")
+        out.CustomMesh.DiffuseURL = faceUrl or ""
+        out.ContainedObjects = JSON.decode(JSON.encode(contained))
+        return out
+    end
+
+    -- Legacy full payload remains supported.
+    if payload.Name == "Custom_Model_Infinite_Bag" and type(payload.ContainedObjects) == "table" and #payload.ContainedObjects > 0 then
+        local out = JSON.decode(JSON.encode(payload))
+        local faceUrl = extractCaptureFaceUrlFromPayload(payload)
+        out.Nickname = buildCaptureTicketName(captureItem.name)
+        out.GMNotes = buildCaptureNotes(captureItem.name, faceUrl)
+        if out.CustomMesh and (not out.CustomMesh.DiffuseURL or out.CustomMesh.DiffuseURL == "") then
+            out.CustomMesh.DiffuseURL = faceUrl
+        end
+        return out
+    end
+
+    -- Backward-compatible conversion for compact payload shape.
+    if payload._compact == true and type(payload.card) == "table" then
+        local faceUrl = extractCaptureFaceUrlFromPayload(payload)
+        local backUrl = payload.card.backURL or "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
+        local cardId = tonumber(payload.card.cardID) or 100
+        if cardId < 100 then cardId = 100 end
+        local deckSlot = math.floor(cardId / 100)
+        if deckSlot < 1 then deckSlot = 1 end
+
+        local contained = {
+            {
+                Name = "Card",
+                Nickname = payload.card.nickname or tostring(captureItem.name or ""),
+                Description = payload.card.description or "",
+                Memo = payload.card.memo or "",
+                CardID = cardId,
+                HideWhenFaceDown = (payload.card.hideWhenFaceDown ~= false),
+                Hands = (payload.card.hands ~= false),
+                SidewaysCard = (payload.card.sideways == true),
+                CustomDeck = {
+                    [deckSlot] = {
+                        FaceURL = faceUrl,
+                        BackURL = backUrl,
+                        NumWidth = payload.card.numWidth or 1,
+                        NumHeight = payload.card.numHeight or 1,
+                        BackIsHidden = (payload.card.backIsHidden ~= false),
+                        UniqueBack = (payload.card.uniqueBack == true),
+                        Type = payload.card.deckType or 0,
+                    }
+                }
+            }
+        }
+
+        local out = JSON.decode(JSON.encode(CAPTURE_BAG_TEMPLATE))
+        out.Nickname = buildCaptureTicketName(captureItem.name)
+        out.GMNotes = buildCaptureNotes(captureItem.name, faceUrl)
+        out.CustomMesh.DiffuseURL = faceUrl
+        out.ContainedObjects = contained
+        return out
+    end
+
+    return nil
 end
 
 local function extractCaptureBagData(obj)
@@ -520,8 +709,19 @@ end
 
 local function tryRegisterCaptureFromObject(obj)
     if not obj then return false end
-    local rawName = obj.getName() or ""
-    local noteName, noteUrl = parseCaptureNotes(obj.getGMNotes and obj.getGMNotes() or "")
+    local rawName = ""
+    if obj.getName then
+        local okName, nameValue = pcall(function() return obj.getName() end)
+        if okName and nameValue then rawName = nameValue end
+    end
+
+    local gmNotes = ""
+    if obj.getGMNotes then
+        local okNotes, notesValue = pcall(function() return obj.getGMNotes() end)
+        if okNotes and notesValue then gmNotes = notesValue end
+    end
+
+    local noteName, noteUrl = parseCaptureNotes(gmNotes)
     local captureName = (noteName and noteName ~= "" and noteName) or parseCaptureTicketName(rawName)
     if not captureName then return false end
 
@@ -529,8 +729,8 @@ local function tryRegisterCaptureFromObject(obj)
 
     local imageUrl = noteUrl or ""
     if imageUrl == "" and obj.getCustomObject then
-        local custom = obj.getCustomObject()
-        if custom then
+        local okCustom, custom = pcall(function() return obj.getCustomObject() end)
+        if okCustom and custom then
             imageUrl = custom.diffuse or custom.face or ""
         end
     end
@@ -557,7 +757,10 @@ local function normalizeCapturesTable(captures)
                 local id = item.id or toId(name)
                 local url = item.url or item.imageUrl or item.image or ""
                 local desc = item.desc or ("Capture ticket for " .. name .. ".")
-                local bagData = item.bagData or item.bag_data
+                local bagData = sanitizeCaptureBagData(item.bagData or item.bag_data)
+                if url == "" and bagData then
+                    url = extractCaptureFaceUrlFromPayload(bagData)
+                end
                 out[id] = { id = id, name = name, unlocked = (item.unlocked ~= false), url = url, bagData = bagData, desc = desc }
             end
         elseif type(item) == "string" and type(key) == "string" then
@@ -771,6 +974,35 @@ local function colorForText()
     return light and { 0, 0, 0, 100 } or { 1, 1, 1, 100 }
 end
 
+local function getNowSeconds()
+    if Time and Time.time ~= nil then
+        if type(Time.time) == "number" then
+            return Time.time
+        end
+        if type(Time.time) == "function" then
+            local ok, t = pcall(Time.time)
+            if ok and type(t) == "number" then return t end
+        end
+    end
+    return os.clock()
+end
+
+local function queueSyncSend(delaySeconds)
+    local delay = tonumber(delaySeconds) or DEBOUNCE_SECONDS
+    if delay < 0 then delay = 0 end
+    if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
+    pendingHandle = Wait.time(function()
+        pendingHandle = nil
+        sendData()
+    end, delay)
+end
+
+local function requestSync(delaySeconds)
+    syncDirty = true
+    if not localPlayerKey or not isSyncEnabled then return end
+    queueSyncSend(delaySeconds or DEBOUNCE_SECONDS)
+end
+
 -- Everything is GUI-based for this object (no self.createButton / self.createInput).
 local function setValueDirect(val)
     if val == nil then return end
@@ -778,15 +1010,13 @@ local function setValueDirect(val)
     self.setVar("currentValue", state.value)
     lastValue = state.value
 
-    if uiRefresh then uiRefresh() end
+    if self.UI then
+        self.UI.setAttribute("ess_value", "text", tostring(state.value))
+    elseif uiRefresh then
+        uiRefresh()
+    end
 
-    -- trigger sync only if we have a player key and sync is enabled
-    if not localPlayerKey or not isSyncEnabled then return end
-    if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-    pendingHandle = Wait.time(function()
-        pendingHandle = nil
-        sendData()
-    end, DEBOUNCE_SECONDS)
+    requestSync(DEBOUNCE_SECONDS)
 end
 
 local function adjustValue(delta)
@@ -1062,8 +1292,6 @@ function onLoad(saved)
     if localPlayerKey then
         fetchSavedValue()
     end
-    watcherActive = true
-    startChangeWatcher()
 
     -- Render initial UI state (XML lives on the object; Lua only updates values)
     uiRefreshWhenReady()
@@ -1120,111 +1348,16 @@ end
 
 function onNameChanged(new_name)
     lastName = new_name
-    if not localPlayerKey or not isSyncEnabled then return end
-    if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-    pendingHandle = Wait.time(function()
-        pendingHandle = nil
-        sendData()
-    end, DEBOUNCE_SECONDS)
+    requestSync(DEBOUNCE_SECONDS)
 end
 
 function onDescriptionChanged(new_desc)
     lastDescription = new_desc
-    if not localPlayerKey or not isSyncEnabled then return end
-    if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-    pendingHandle = Wait.time(function()
-        pendingHandle = nil
-        sendData()
-    end, DEBOUNCE_SECONDS)
+    requestSync(DEBOUNCE_SECONDS)
 end
 
 function startChangeWatcher()
-    if not watcherActive then return end
-
-    watcherHandle = Wait.time(function()
-        if not watcherActive then return end
-
-        if isSyncEnabled then
-            local curr = self.getVar("currentValue") or 0
-            if curr ~= lastValue then
-                lastValue = curr
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-
-            local nm = self.getName()
-            if nm ~= lastName then
-                lastName = nm
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-
-            local ds = self.getDescription()
-            if ds ~= lastDescription then
-                lastDescription = ds
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-            
-            local ach_serialized = serializeCategory(state.achievements)
-            if ach_serialized ~= lastAchievements then
-                lastAchievements = ach_serialized
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-
-            local crypt_serialized = serializeCategory(state.crypt)
-            if crypt_serialized ~= lastCrypt then
-                lastCrypt = crypt_serialized
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-
-            local tickets_serialized = serializeCategory(state.tickets)
-            if tickets_serialized ~= lastTickets then
-                lastTickets = tickets_serialized
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-
-            local captures_serialized = serializeCaptures(state.captures)
-            if captures_serialized ~= lastCaptures then
-                lastCaptures = captures_serialized
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
-                return
-            end
-        end
-
-        startChangeWatcher()
-    end, 0.5)
+    return
 end
 
 function fetchSavedValue()
@@ -1246,7 +1379,7 @@ function fetchSavedValue()
             log("BlockSquare [" .. localPlayerKey .. "] No stored value found; creating entry")
             isSyncEnabled = true
             if localPlayerKey then
-                sendData()
+                sendData(true)
             else
                 log("BlockSquare cannot create entry without playerKey")
             end
@@ -1296,6 +1429,8 @@ function fetchSavedValue()
             lastCaptures = serializeCaptures(state.captures)
         end
 
+        syncDirty = false
+
         ensurePlaceholderDescriptions(state.achievements)
         ensurePlaceholderDescriptions(state.crypt)
         ensurePlaceholderDescriptions(state.tickets)
@@ -1306,11 +1441,21 @@ function fetchSavedValue()
     end)
 end
 
-function sendData()
+function sendData(force)
     if not localPlayerKey then
         log("BlockSquare has no playerKey yet (not picked up)")
         return
     end
+
+    if not force and not syncDirty then
+        return
+    end
+
+    if syncInFlight then
+        syncQueued = true
+        return
+    end
+
     local desc = trim(self.getDescription() or "")
     local payload = {
         playerKey = localPlayerKey,
@@ -1324,22 +1469,60 @@ function sendData()
         captures = serializeCaptures(state.captures)
     }
 
+    local signature = table.concat({
+        tostring(payload.playerKey or ""),
+        tostring(payload.name or ""),
+        tostring(payload.description or ""),
+        tostring(payload.value or ""),
+        tostring(payload.achievements or ""),
+        tostring(payload.crypt or ""),
+        tostring(payload.tickets or ""),
+        tostring(payload.captures or "")
+    }, "\30")
+
+    if signature == lastSyncSignature then
+        syncDirty = false
+        return
+    end
+
+    local now = getNowSeconds()
+    local elapsed = now - (lastSyncSentAt or 0)
+    if elapsed < MIN_SYNC_INTERVAL_SECONDS then
+        queueSyncSend(MIN_SYNC_INTERVAL_SECONDS - elapsed)
+        return
+    end
+
     lastName = payload.name
     lastDescription = payload.description
     lastAchievements = payload.achievements
     lastCrypt = payload.crypt
     lastTickets = payload.tickets
     lastCaptures = payload.captures
+    lastSyncSignature = signature
+    lastSyncSentAt = now
+    syncInFlight = true
 
     local json = JSON.encode(payload)
     log("BlockSquare [" .. payload.playerKey .. "] sending payload " .. json)
 
     WebRequest.post(WEB_URL, json, function(req)
+        syncInFlight = false
         if req.is_error then
             log("BlockSquare [" .. payload.playerKey .. "] POST failed")
+            lastSyncSignature = ""
+            syncDirty = true
+            if syncQueued then
+                syncQueued = false
+                queueSyncSend(DEBOUNCE_SECONDS)
+            end
             return
         end
         log("BlockSquare [" .. payload.playerKey .. "] Synced to Google; response: " .. tostring(req.text))
+        syncDirty = false
+        if syncQueued then
+            syncQueued = false
+            queueSyncSend(DEBOUNCE_SECONDS)
+        end
     end, { ["Content-Type"] = "application/json" })
 end
 
@@ -1367,11 +1550,7 @@ function onObjectEnterScriptingZone(zone, object)
                 uiSelectedId = id
                 -- Reflect in UI and sync
                 uiRefreshWhenReady()
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
+                requestSync(DEBOUNCE_SECONDS)
             end
             return
         end
@@ -1392,11 +1571,7 @@ function onObjectEnterScriptingZone(zone, object)
                 uiSelectedTab = "achievements"
                 uiSelectedId = id
                 if uiRefresh then uiRefresh() end
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
+                requestSync(DEBOUNCE_SECONDS)
             end
             return
         end
@@ -1417,11 +1592,7 @@ function onObjectEnterScriptingZone(zone, object)
                 uiSelectedTab = "tickets"
                 uiSelectedId = id
                 if uiRefresh then uiRefresh() end
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
+                requestSync(DEBOUNCE_SECONDS)
             end
             return
         end
@@ -1431,7 +1602,9 @@ end
 -- Unlocks when an object is dropped onto/near the Block Square
 function onObjectDropped(player_color, dropped_object)
     if not dropped_object then return end
-    local pos = dropped_object.getPosition()
+    if not dropped_object.getPosition then return end
+    local okPos, pos = pcall(function() return dropped_object.getPosition() end)
+    if not okPos or type(pos) ~= "table" then return end
     local my = self.getPosition()
     local dx = pos.x - my.x
     local dz = pos.z - my.z
@@ -1439,10 +1612,20 @@ function onObjectDropped(player_color, dropped_object)
     -- radius threshold ~1.2 world units around the block center
     if dist2 > (1.2*1.2) then return end
 
-    local obj_name = dropped_object.getName() or ""
+    local obj_name = ""
+    if dropped_object.getName then
+        local okName, nameValue = pcall(function() return dropped_object.getName() end)
+        if okName and nameValue then obj_name = nameValue end
+    end
     local obj_norm = normalizeName(obj_name)
 
-    local captureId = tryRegisterCaptureFromObject(dropped_object)
+    local okCapture, captureId = pcall(function()
+        return tryRegisterCaptureFromObject(dropped_object)
+    end)
+    if not okCapture then
+        log("capture drop registration failed")
+        return
+    end
     if captureId then
         if markHandledObjectOnce(dropped_object) then return end
         safeDestructObject(dropped_object)
@@ -1451,11 +1634,7 @@ function onObjectDropped(player_color, dropped_object)
         uiSelectedTab = "captures"
         uiSelectedId = captureId
         uiRefreshWhenReady()
-        if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-        pendingHandle = Wait.time(function()
-            pendingHandle = nil
-            sendData()
-        end, DEBOUNCE_SECONDS)
+        requestSync(DEBOUNCE_SECONDS)
         return
     end
 
@@ -1472,11 +1651,7 @@ function onObjectDropped(player_color, dropped_object)
                 uiSelectedTab = "crypt"
                 uiSelectedId = id
                 uiRefreshWhenReady()
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
+                requestSync(DEBOUNCE_SECONDS)
             end
             return
         end
@@ -1496,11 +1671,7 @@ function onObjectDropped(player_color, dropped_object)
                 uiSelectedTab = "achievements"
                 uiSelectedId = id
                 uiRefreshWhenReady()
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
+                requestSync(DEBOUNCE_SECONDS)
             end
             return
         end
@@ -1520,11 +1691,7 @@ function onObjectDropped(player_color, dropped_object)
                 uiSelectedTab = "tickets"
                 uiSelectedId = id
                 uiRefreshWhenReady()
-                if pendingHandle then Wait.stop(pendingHandle) pendingHandle = nil end
-                pendingHandle = Wait.time(function()
-                    pendingHandle = nil
-                    sendData()
-                end, DEBOUNCE_SECONDS)
+                requestSync(DEBOUNCE_SECONDS)
             end
             return
         end
@@ -1664,27 +1831,44 @@ function ui_select_reward(_, _, id)
     end
 
     local tabKey = (tid == "crypt" and "crypt") or (tid == "ach" and "achievements") or (tid == "capture" and "captures") or "tickets"
-    local rewardId = uiSlotMap[tabKey] and uiSlotMap[tabKey][slotNum] or nil
+    local rewardId
+    if tabKey == "captures" then
+        local captureIds = getCaptureIds(state.captures or {})
+        rewardId = captureIds[slotNum]
+    else
+        rewardId = uiSlotMap[tabKey] and uiSlotMap[tabKey][slotNum] or nil
+    end
 
-    -- Fallback: if mapping is missing, derive from the ordered list by index
-    if not rewardId and tabKey ~= "captures" then
-        local sourceList = (tabKey == "crypt" and CRYPT_REWARDS)
-            or (tabKey == "achievements" and ACHIEVEMENTS_LIST)
-            or TICKETS_LIST
-        local entry = sourceList and sourceList[slotNum] or nil
-        if entry and entry.name then
-            rewardId = toId(entry.name)
-            log("ui_select_reward fallback id=" .. tostring(rewardId) .. " from list name=" .. tostring(entry.name))
-            -- Ensure the table exists and has the item so downstream logic works
-            local targetTable = (tabKey == "crypt" and state.crypt)
-                or (tabKey == "achievements" and state.achievements)
-                or state.tickets
-            if targetTable and not targetTable[rewardId] then
-                targetTable[rewardId] = { id = rewardId, name = entry.name, unlocked = false, desc = entry.desc or PLACEHOLDER_DESC }
+    -- Fallback: if mapping is missing, derive by slot index
+    if not rewardId then
+        if tabKey == "captures" then
+            local captureIds = getCaptureIds(state.captures or {})
+            rewardId = captureIds[slotNum]
+            if rewardId then
+                log("ui_select_reward capture fallback id=" .. tostring(rewardId) .. " slot=" .. tostring(slotNum))
+            else
+                log("UI click but no rewardId: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " (capture fallback failed)")
+                return
             end
         else
-            log("UI click but no rewardId: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " (list fallback failed)")
-            return
+            local sourceList = (tabKey == "crypt" and CRYPT_REWARDS)
+                or (tabKey == "achievements" and ACHIEVEMENTS_LIST)
+                or TICKETS_LIST
+            local entry = sourceList and sourceList[slotNum] or nil
+            if entry and entry.name then
+                rewardId = toId(entry.name)
+                log("ui_select_reward fallback id=" .. tostring(rewardId) .. " from list name=" .. tostring(entry.name))
+                -- Ensure the table exists and has the item so downstream logic works
+                local targetTable = (tabKey == "crypt" and state.crypt)
+                    or (tabKey == "achievements" and state.achievements)
+                    or state.tickets
+                if targetTable and not targetTable[rewardId] then
+                    targetTable[rewardId] = { id = rewardId, name = entry.name, unlocked = false, desc = entry.desc or PLACEHOLDER_DESC }
+                end
+            else
+                log("UI click but no rewardId: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " (list fallback failed)")
+                return
+            end
         end
     end
     if not rewardId then
@@ -1708,7 +1892,15 @@ function ui_select_reward(_, _, id)
     if item.unlocked then
         log("UI click spawn: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " rewardId=" .. tostring(rewardId) .. " name=" .. tostring(item.name))
         if tabKey == "captures" then
-            spawnCaptureToken(item)
+            local okSpawn, spawned = pcall(function()
+                return spawnCaptureToken(item)
+            end)
+            if not okSpawn then
+                print("[" .. self.getName() .. "] Capture spawn error: " .. tostring(item.name))
+                log("capture spawn exception")
+            elseif not spawned then
+                print("[" .. self.getName() .. "] Capture spawn failed: " .. tostring(item.name))
+            end
         else
             spawnRewardToken(item.name)
         end
