@@ -40,6 +40,32 @@ const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
 const RANDOM_SEARCH_UNIQUE = 'prints';
 const RANDOM_SEARCH_ORDER = 'random';
+
+function parseBooleanLike(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'on', 'enable', 'enabled', 'yes'].includes(normalized)) {
+    return true;
+  }
+  if (['false', '0', 'off', 'disable', 'disabled', 'no'].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+}
 function getRandomUniqKey(card) {
   if (!card || typeof card !== 'object') {
     return null;
@@ -290,6 +316,7 @@ app.use((req, res, next) => {
   
   next();
 });
+
 
 // Normalize errors from Scryfall/API calls into consistent JSON for the importer
 function normalizeError(error, defaultStatus = 502) {
@@ -960,6 +987,9 @@ app.get('/ready', (req, res) => {
 app.get('/card/:name', async (req, res) => {
   const { name } = req.params;
   const { set } = req.query;
+  const requestEnforceCommander = req.query.enforceCommander === undefined
+    ? null
+    : parseBooleanLike(String(req.query.enforceCommander)) !== false;
   
   try {
 
@@ -1056,6 +1086,16 @@ app.get('/card/:name', async (req, res) => {
     
     // Preserve full all_parts to match Scryfall API behavior
     
+    if (requestEnforceCommander && scryfallCard && !isTokenOrEmblemCard(scryfallCard)) {
+      const commanderLegality = scryfallCard.legalities && scryfallCard.legalities.commander;
+      if (commanderLegality && commanderLegality !== 'legal') {
+        return res.status(400).json({
+          object: 'error',
+          details: `Card is not legal in Commander: ${scryfallCard.name || name}`
+        });
+      }
+    }
+
     // Return raw Scryfall format - Lua code will convert to TTS
     res.json(sanitizeCardForResponse(scryfallCard));
   } catch (error) {
@@ -1527,7 +1567,10 @@ app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count } = req.query;
     const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
-    const randomQuery = ensureCommanderLegalityQuery(q);
+    const requestEnforceCommander = req.query.enforceCommander === undefined
+      ? true
+      : parseBooleanLike(String(req.query.enforceCommander)) !== false;
+    const randomQuery = requestEnforceCommander ? ensureCommanderLegalityQuery(q) : normalizeCommanderFormatAliases(q);
     if (queryWarning) {
       res.setHeader('X-Query-Warning', queryWarning);
     }
@@ -1830,6 +1873,12 @@ app.get('/search', async (req, res) => {
   try {
     const { limit = 100, unique } = req.query;
     const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
+    const requestEnforceCommander = req.query.enforceCommander === undefined
+      ? null
+      : parseBooleanLike(String(req.query.enforceCommander)) !== false;
+    const searchQuery = requestEnforceCommander === null
+      ? q
+      : (requestEnforceCommander ? ensureCommanderLegalityQuery(q) : normalizeCommanderFormatAliases(q));
     if (queryWarning) {
       res.setHeader('X-Query-Warning', queryWarning);
     }
@@ -1853,38 +1902,38 @@ app.get('/search', async (req, res) => {
     
     // Check if query contains price filters (usd, eur, tix)
     // Price queries always use API for real-time market data
-    const hasPriceFilter = /\b(usd|eur|tix)[:=<>]/i.test(q);
+    const hasPriceFilter = /\b(usd|eur|tix)[:=<>]/i.test(searchQuery);
     
     // Check if query contains token type filters (t:token, type:token, is:token)
-    const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(q);
+    const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(searchQuery);
     // Route funny filters to API for authoritative set_type handling
-    const hasFunnyFilter = /\b-?is:funny\b/i.test(q);
+    const hasFunnyFilter = /\b-?is:funny\b/i.test(searchQuery);
     
     // For full printings list, funny filters, or price filters, prefer live API to ensure completeness/freshness
     if (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter) {
       if (hasPriceFilter) {
-        console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
+        console.log(`[API] Price filter detected in query: "${searchQuery}", using live API for real-time pricing`);
       }
       if (hasFunnyFilter) {
-        console.log(`[API] Funny filter detected in query: "${q}", using Scryfall API for accurate classification`);
+        console.log(`[API] Funny filter detected in query: "${searchQuery}", using Scryfall API for accurate classification`);
         if (USE_BULK_DATA) {
           console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
         }
       }
-      scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
+      scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
     } else if (USE_BULK_DATA && bulkData.isLoaded()) {
       if (hasTokenFilter) {
-        console.log(`[BulkData] Token filter detected in query: "${q}", using bulk data first with API fallback`);
+        console.log(`[BulkData] Token filter detected in query: "${searchQuery}", using bulk data first with API fallback`);
       }
-      scryfallCards = await bulkData.searchCards(q, limitNum);
+      scryfallCards = await bulkData.searchCards(searchQuery, limitNum);
       
       // Fallback to API if bulk data returned null (no matches)
       if (!scryfallCards) {
-        console.log(`[Fallback] Bulk data returned no results for "${q}", using API`);
-        scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
+        console.log(`[Fallback] Bulk data returned no results for "${searchQuery}", using API`);
+        scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
       }
     } else {
-      scryfallCards = await scryfallLib.searchCards(q, limitNum, requestedUnique);
+      scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
     }
     
     // Ensure scryfallCards is an array

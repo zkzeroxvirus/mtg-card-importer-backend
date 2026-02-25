@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.914'
+mod_name, version = 'Card Importer', '1.915'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -22,10 +22,11 @@ lang = 'en'
 --   - For production: Your deployed backend URL
 -- Example: BACKEND_URL = 'https://your-backend.onrender.com'
 BACKEND_URL = 'http://api.mtginfo.org'
+--BACKEND_URL = 'http://localhost:3000'
 
 -- Auto-update configuration (checks GitHub for newer version on load)
 AUTO_UPDATE_ENABLED = true
-
+--AUTO_UPDATE_ENABLED = false
 -- ============================================================================
 -- Classes and Utilities
 -- ============================================================================
@@ -553,6 +554,40 @@ local function createFastProgressTicker(qTbl, count)
   end
 end
 
+local function isCommanderFormatEnforcedForTable()
+  if Global and Global.getVar then
+    local value = Global.getVar('MTG_ENFORCE_COMMANDER_FORMAT')
+    if value == nil then
+      return true
+    end
+    return value ~= false
+  end
+  return true
+end
+
+local function applyCommanderEnforcementToUrl(url)
+  if isCommanderFormatEnforcedForTable() then
+    return url
+  end
+
+  if url:find('enforceCommander=', 1, true) then
+    return url
+  end
+
+  local separator = url:find('?', 1, true) and '&' or '?'
+  return url .. separator .. 'enforceCommander=false'
+end
+
+local function applyCommanderPreferenceToUrl(url)
+  if url:find('enforceCommander=', 1, true) then
+    return url
+  end
+
+  local value = isCommanderFormatEnforcedForTable() and 'true' or 'false'
+  local separator = url:find('?', 1, true) and '&' or '?'
+  return url .. separator .. 'enforceCommander=' .. value
+end
+
 local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
   if not qTbl or not queryRaw or queryRaw == '' or not count or count <= 1 then
     return false
@@ -561,7 +596,8 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
   local payload = {
     q = queryRaw,
     count = count,
-    back = Back[qTbl.player] or Back.___
+    back = Back[qTbl.player] or Back.___,
+    enforceCommander = isCommanderFormatEnforcedForTable()
   }
 
   if qTbl.text then
@@ -656,7 +692,8 @@ Importer=setmetatable({
   request={},
   --Functions
   Search=function(qTbl)
-    WebRequest.get(BACKEND_URL..'/search?q='..qTbl.name,function(wr)
+    local searchUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/search?q='..qTbl.name)
+    WebRequest.get(searchUrl,function(wr)
         spawnList(wr,qTbl)end)end,
 
   Back=function(qTbl)
@@ -665,13 +702,66 @@ Importer=setmetatable({
     Player[qTbl.color].broadcast('Card Backs set to\n'..qTbl.url,{0.9,0.9,0.9})
     endLoop()end,
 
+  Format=function(qTbl)
+    if not qTbl.color or not Player[qTbl.color] or not Player[qTbl.color].host then
+      Player[qTbl.color].broadcast('Only the host can change format enforcement.',{1,0.6,0.2})
+      endLoop()
+      return
+    end
+
+    local action=(urlDecode(qTbl.name or '') or ''):lower():gsub('^%s+',''):gsub('%s+$','')
+    action=action:gsub('^enforcement%s+','')
+
+    local function readState()
+      return isCommanderFormatEnforcedForTable()
+    end
+
+    local function writeState(state)
+      if Global and Global.setVar then
+        Global.setVar('MTG_ENFORCE_COMMANDER_FORMAT', state)
+      end
+    end
+
+    local function broadcastState(prefix, state)
+      local textState=state and 'ON' or 'OFF'
+      local color=state and {0.5,0.9,0.5} or {1,0.65,0.3}
+      Player[qTbl.color].broadcast(prefix..' Format enforcement is now '..textState..'.', color)
+    end
+
+    if action=='' or action=='status' then
+      broadcastState('Status:', readState())
+      endLoop()
+      return
+    end
+
+    if action~='on' and action~='off' and action~='toggle' then
+      Player[qTbl.color].broadcast('Usage: Scryfall format on|off|toggle|status',{1,0.8,0.2})
+      endLoop()
+      return
+    end
+
+    local state = readState()
+    if action == 'on' then
+      state = true
+    elseif action == 'off' then
+      state = false
+    elseif action == 'toggle' then
+      state = not state
+    end
+
+    writeState(state)
+    broadcastState('Updated:', state)
+    endLoop()
+  end,
+
   Spawn=function(qTbl)
     -- Encode name if not already encoded (handle both onChat and direct Importer() calls)
     local encodedName = qTbl.name
     if not encodedName:find('%%') then
       encodedName = urlEncode(encodedName)
     end
-    WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
+    local cardUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/card/'..encodedName)
+    WebRequest.get(cardUrl,function(wr)
         if handleWebError(wr, qTbl, 'Card lookup failed') then
           return
         end
@@ -945,6 +1035,7 @@ Importer=setmetatable({
 
       local encodedQuery = urlEncode(queryRaw)
       url = BACKEND_URL..'/random?q='..encodedQuery
+      url = applyCommanderEnforcementToUrl(url)
 
       uLog(url,qTbl.color..' Importer '..qTbl.full)
       if count then
@@ -978,6 +1069,7 @@ Importer=setmetatable({
     local tst,cmc=qTbl.full:match('([=<>]+)(%d+)')
     if tst then q1=q1..'cmc'..tst..cmc end
     if q1~='?q='then url=url..(q1..' '):gsub('%+ ',''):gsub(' ','')end
+    url = applyCommanderEnforcementToUrl(url)
 
     uLog(url,qTbl.color..' Importer '..qTbl.full)
     if count then
@@ -1094,6 +1186,9 @@ local Usage = [[━━━━━━━━━━━━━━━━━━━━━�
 
 [b][0077ff]Scryfall clear back[/b]
    → Reset custom card backs to default
+
+[b][0077ff]Scryfall format on|off|toggle|status[/b]
+  → Host-only table toggle for commander format enforcement
 
 [b][0077ff]Scryfall hide[/b]
    → Toggle chat message visibility (admin only)
@@ -1380,6 +1475,10 @@ function onLoad(data)
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   -- Less intrusive chat message - full help in notebook (SHelp)
   printToAll('[b][77FF77]' .. self.getName() .. ' [/b] Check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
+  local enforceCommander = isCommanderFormatEnforcedForTable()
+  local formatColor = enforceCommander and '[77FF77]' or '[FFAA00]'
+  local formatLabel = enforceCommander and 'ON' or 'OFF'
+  printToAll('[b][Card Importer][/b] Commander format enforcement: ' .. formatColor .. formatLabel .. '[-] [AAAAAA](host: Scryfall format on|off|toggle|status)[-]', {0.9, 0.9, 0.9})
   
   -- Registration happens in uVersion() after update check, or above if auto-update is disabled
   startTimeoutMonitor()

@@ -267,6 +267,17 @@ describe('Server Endpoints - Random Card', () => {
     expect(response.status).toBe(200);
   });
 
+  test('GET /random should skip commander legality when enforceCommander=false query param is provided', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const randomResponse = await request(app)
+      .get('/random')
+      .query({ q: 't:artifact', count: 1, enforceCommander: 'false' });
+
+    expect(randomResponse.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:artifact');
+  });
+
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
     scryfallLib.searchCards.mockResolvedValueOnce([
       {
@@ -603,6 +614,73 @@ describe('Server Endpoints - Random Card', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].Name).toBe('DeckCustom');
     expect(lines[0].CustomDeck['1'].FaceURL).toBe('https://cards.scryfall.io/normal/front/0/0/mock.jpg');
+  });
+});
+
+describe('Server Endpoints - Format Enforcement Opt-In/Out', () => {
+  test('GET /search should enforce commander legality when enforceCommander=true', async () => {
+    scryfallLib.searchCards.mockClear();
+
+    const response = await request(app)
+      .get('/search')
+      .query({ q: 't:artifact', enforceCommander: 'true' });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith(
+      expect.stringContaining('f:commander'),
+      expect.any(Number),
+      expect.any(String)
+    );
+  });
+
+  test('GET /search should skip commander legality when enforceCommander=false', async () => {
+    scryfallLib.searchCards.mockClear();
+
+    const response = await request(app)
+      .get('/search')
+      .query({ q: 't:artifact', enforceCommander: 'false' });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith('t:artifact', expect.any(Number), expect.any(String));
+  });
+
+  test('GET /card/:name should reject non-commander card when enforceCommander=true', async () => {
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'id-black-lotus',
+      oracle_id: 'oracle-black-lotus',
+      name: 'Black Lotus',
+      type_line: 'Artifact',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      legalities: { commander: 'banned' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .get('/card/Black%20Lotus')
+      .query({ enforceCommander: 'true' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toHaveProperty('details');
+    expect(response.body.details).toContain('not legal in Commander');
+  });
+
+  test('GET /card/:name should allow non-commander card when enforceCommander=false', async () => {
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'id-black-lotus',
+      oracle_id: 'oracle-black-lotus',
+      name: 'Black Lotus',
+      type_line: 'Artifact',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      legalities: { commander: 'banned' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .get('/card/Black%20Lotus')
+      .query({ enforceCommander: 'false' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveProperty('name', 'Black Lotus');
   });
 });
 

@@ -238,10 +238,19 @@ local function spawnDecklistViaBuild(decklist, spawnPos, onComplete)
 end
 
 local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onFallback)
+    local enforceCommander = true
+    if Global and Global.getVar then
+        local globalSetting = Global.getVar('MTG_ENFORCE_COMMANDER_FORMAT')
+        if globalSetting ~= nil then
+            enforceCommander = globalSetting ~= false
+        end
+    end
+
     local rot = self.getRotation()
     local payload = {
         q = query,
         count = count,
+        enforceCommander = enforceCommander,
         back = backURL,
         hand = {
             position = { x = spawnPos.x, y = spawnPos.y, z = spawnPos.z },
