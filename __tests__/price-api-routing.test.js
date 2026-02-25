@@ -1,9 +1,10 @@
 /**
- * Tests to verify price and token filters force API routing for real-time/complete data
+ * Tests to verify routing behavior:
+ * - Price filters force API routing for real-time data
+ * - Token filters use bulk-data first with API fallback
  */
 
 const request = require('supertest');
-const express = require('express');
 
 // Mock modules
 jest.mock('../lib/scryfall');
@@ -136,7 +137,7 @@ describe('Price and Token Filter API Routing', () => {
 
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
       expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-        'eur<10',
+        'eur<10 f:commander',
         5,
         'prints',
         'random'
@@ -161,28 +162,23 @@ describe('Price and Token Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalled();
     });
 
-    test('should use API for single random with token filter', async () => {
+    test('should use bulk first for single random with token filter', async () => {
       await request(app)
         .get('/random?q=t:token')
         .expect(200);
 
-      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('t:token f:commander');
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
-    test('should use API for multiple random with token filter', async () => {
+    test('should use bulk first with API fallback for multiple random token filter', async () => {
       await request(app)
         .get('/random?count=5&q=is:token')
         .expect(200);
 
-      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-        'is:token',
-        5,
-        'prints',
-        'random'
-      );
-      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+      expect(bulkData.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
   });
 
@@ -235,8 +231,8 @@ describe('Price and Token Filter API Routing', () => {
           .expect(200);
 
         if (shouldMatch) {
-          expect(scryfallLib.searchCards).toHaveBeenCalled();
-          expect(bulkData.searchCards).not.toHaveBeenCalled();
+          expect(bulkData.searchCards).toHaveBeenCalled();
+          expect(scryfallLib.searchCards).not.toHaveBeenCalled();
         } else {
           expect(bulkData.searchCards).toHaveBeenCalled();
         }
@@ -288,7 +284,7 @@ describe('Price and Token Filter API Routing', () => {
         .query({ q: 'power = 3' })
         .expect(200);
 
-      expect(bulkData.getRandomCard).toHaveBeenCalledWith('power=3');
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('power=3 f:commander');
       expect(response.headers['x-query-warning']).toContain('Normalized query operators');
     });
 
@@ -298,7 +294,7 @@ describe('Price and Token Filter API Routing', () => {
         .query({ q: 'tou >= 5' })
         .expect(200);
 
-      expect(bulkData.getRandomCard).toHaveBeenCalledWith('tou>=5');
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('tou>=5 f:commander');
       expect(response.headers['x-query-warning']).toContain('Normalized query operators');
     });
   });

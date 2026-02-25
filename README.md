@@ -140,6 +140,26 @@ docker run -d \
 - Set `WORKERS=1` to disable clustering if running on a single-core system
 - Restart policy `unless-stopped` ensures the container restarts automatically
 
+### Local Docker Testing
+
+Use the dedicated local compose file for development/testing without changing production compose settings.
+
+```bash
+# Build and run local test stack
+docker compose -f docker-compose.local.yml up --build
+
+# Stop and remove local test stack
+docker compose -f docker-compose.local.yml down
+```
+
+Local defaults in `docker-compose.local.yml`:
+- Host port: `3001` → Container port: `3000`
+- `NODE_ENV=development`
+- `USE_BULK_DATA=false` (lighter local startup)
+- `WORKERS=1` (single-process local testing)
+
+Test URL: `http://localhost:3001`
+
 ### Deployment Options
 
 **API Mode (No Bulk Data)**
@@ -189,37 +209,23 @@ Example: `GET /search?q=type:creature%20power>5`
 - Fetch random card(s)
 - Query parameters: `?count=5&q=FILTER` (both optional)
 - Returns: Single card or list of cards depending on count
+- Note: Automatically enforces Commander legality (`f:commander`) on random requests
 - Note: Automatically excludes non-playable cards (basic lands, tokens, emblems, art cards, test cards, digital-only cards, meld results, etc.) to match paper Magic gameplay
 - Note: Automatically filters to unique cards (by oracle_id) to prevent skewing results with heavily reprinted cards or alternative arts
 
-### Set Information
+**POST `/random/build`**
+- Build and return a fully assembled random `DeckCustom` object in one request
+- Consumes: `{ "q": "FILTER", "count": 22, "back": "URL", "hand": { ... } }`
+- Returns: NDJSON with a single deck object line (optimized for TTS spawning)
+- Recommended for multi-card random spawns to avoid client-side multi-request assembly
 
-**GET `/sets/:code`**
-- Fetch set information by set code
-- Returns: Scryfall set object
+### Removed Features
 
-Example: `GET /sets/dom`
-
-### Deck Building
-
-**POST `/deck`**
-- Build deck from decklist text
-- Consumes: `{ "decklist": "2 Black Lotus\n4 Mountain", "back": "URL" }`
-- Also accepts deck URLs from: TappedOut, Moxfield, and Archidekt
-- Returns: NDJSON (one TTS card object per line)
-
-**POST `/build`**
-- Build deck with optional hand position (TTS spawning)
-- Consumes: `{ "data": "DECKLIST", "back": "URL", "hand": {...} }`
-- Also accepts deck URLs from: TappedOut, Moxfield, and Archidekt
-- Returns: NDJSON (one TTS card object per line)
-
-**POST `/deck/parse`**
-- Parse and validate decklist text without building TTS objects
-- Consumes: Raw text body (decklist in any supported format)
-- Returns: `{ format: "FORMAT_NAME", cards: [...], sideboard: [...] }`
-- Supports all decklist formats (see Decklist Format section below)
-- Useful for validation and format detection before building
+- `GET /sets/:code` has been removed.
+- `POST /deck` has been removed.
+- `POST /build` has been removed.
+- `POST /deck/parse` has been removed.
+- Deck URL import workflows are no longer supported.
 
 ### System
 
@@ -274,11 +280,11 @@ Example: `GET /sets/dom`
 
 ### Scryfall API Integration
 
-1. **Rate Limiting**: API mode is rate-limited to respect Scryfall guidelines (default 50ms between requests)
+1. **Rate Limiting**: API mode is rate-limited to respect Scryfall guidelines (default 100ms between requests)
 2. **Caching**: Bulk mode keeps the full Oracle bulk file in memory for instant responses; API mode streams results directly
 3. **Error Handling**: Returns 404 when cards are not found, with descriptive error messages
 4. **Price Queries**: Queries with price filters (`usd:`, `eur:`, `tix:`) always use live API for real-time market pricing, regardless of bulk mode settings
-5. **Token Queries**: Queries with token filters (`t:token`, `type:token`, `is:token`) always use live API for complete and current token database, regardless of bulk mode settings
+5. **Token Queries**: Queries with token filters (`t:token`, `type:token`, `is:token`) use bulk data first with API fallback when bulk data returns no matches or insufficient unique random results
 
 ### Tabletop Simulator Format
 
@@ -293,11 +299,13 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 ### Core Settings
 - `NODE_ENV` — `development` or `production` (default: development)
 - `PORT` — Server port (default: 3000)
+- `MAX_DECK_SIZE` — Maximum allowed cards when building/parsing decks (default: 500)
 
 ### Performance Settings
 - `WORKERS` — Number of worker processes for clustering (default: auto = CPU cores, capped by memory)
   - Set to `1` to disable clustering
   - Set to `auto` to use all CPU cores when memory allows (recommended for production)
+- `STARTUP_STAGGER_MS` — Delay between worker forks in cluster mode (default: 500)
 - `MAX_CACHE_SIZE` — Maximum entries in caches (default: 5000)
   - Higher values = more memory, fewer cache misses
   - Lower values = less memory, more cache misses
@@ -310,6 +318,7 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `USE_BULK_DATA` — `true` enables bulk mode (fast, higher RAM); `false` uses Scryfall API
 - `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data, Docker/Unraid: /app/data)
 - `BULK_DATA_TYPE` — Scryfall bulk dataset to load (default: `oracle_cards`; `default_cards` includes all printings and price fields like `usd`/`eur`/`tix`, with random results deduped by oracle_id)
+- `BULK_INCLUDE_RULINGS` — `true` downloads and caches rulings bulk data for faster rulings lookups (default: false)
 
 See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for detailed tuning recommendations.
 
@@ -349,18 +358,7 @@ See [SCRYFALL_API_COMPLIANCE.md](SCRYFALL_API_COMPLIANCE.md) for detailed techni
 
 ## Decklist Format
 
-Supported formats:
-- **Simple text**: `2 Black Lotus`
-- **With set code**: `2 Black Lotus (LEA) 1`
-- **Arena format**: `2 Black Lotus (LEA)`
-- **Moxfield JSON**: `{ "main": [...], "sideboard": [...] }`
-- **Archidekt JSON**: `{ "cards": [...] }`
-- **Deckstats format**: With brackets `[2x] Black Lotus`
-- **TappedOut CSV**: Comma-separated format
-- **Scryfall deck exports**: Official Scryfall export format
-- **Deck URLs**: `https://tappedout.net/mtg-decks/...`, `https://moxfield.com/decks/...`, `https://archidekt.com/decks/...`
-
-All formats can be parsed and validated using the `/deck/parse` endpoint.
+Decklist parsing and deck URL import are no longer supported by this backend.
 
 ## Troubleshooting
 

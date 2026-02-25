@@ -2,7 +2,8 @@
 -- Global variable for the card back image URL:
 backURL = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
 -- Backend Configuration
-BACKEND_URL = "https://api.mtginfo.org"
+-- Local default: change port to 3001 if using docker-compose.local.yml
+BACKEND_URL = "http://api.mtginfo.org"
 
 -- Relative anchor reused from Start Token
 SPAWN_BUTTON_LOCAL = Vector{-4.2, 0, -3.9}
@@ -100,6 +101,255 @@ function endSpawning()
     cardsSpawned = 0
     totalCardsToSpawn = 0
     destroySpawningIndicator()
+end
+
+local function splitLines(resp)
+    local lines = {}
+    for s in (resp or ''):gmatch('[^\r\n]+') do
+        table.insert(lines, s)
+    end
+    return lines
+end
+
+local function spawnNDJSONQueue(respText, onDone, batchSize)
+    local lines = splitLines(respText)
+    local spawnLines = {}
+
+    for _, line in ipairs(lines) do
+        local parsed = JSONdecode(line)
+        if parsed and parsed.object == 'warning' then
+            local warningText = parsed.warning or ((parsed.card_name or 'Card') .. ' was skipped')
+            printToAll(tostring(warningText), Color.Orange)
+        else
+            table.insert(spawnLines, line)
+        end
+    end
+
+    local index = 1
+    local total = #spawnLines
+    local batch = batchSize or 2
+    local indicatorUpdateStep = 2
+
+    local function processBatch()
+        if not scriptActive then
+            return
+        end
+
+        local processed = 0
+        while index <= total and processed < batch do
+            spawnObjectJSON({ json = spawnLines[index] })
+            cardsSpawned = cardsSpawned + 1
+            if cardsSpawned == totalCardsToSpawn or (cardsSpawned % indicatorUpdateStep) == 0 then
+                updateSpawningIndicator()
+            end
+            index = index + 1
+            processed = processed + 1
+        end
+
+        if index <= total then
+            Wait.frames(processBatch, 1)
+        elseif onDone then
+            onDone(total)
+        end
+    end
+
+    processBatch()
+end
+
+local function spawnDecklistViaBuild(decklist, spawnPos, onComplete)
+    local rot = self.getRotation()
+    local payload = {
+        -- Keep both keys for backward compatibility across backend versions.
+        data = decklist,
+        decklist = decklist,
+        spawnMode = 'deck',
+        back = backURL,
+        hand = {
+            position = { x = spawnPos.x, y = spawnPos.y, z = spawnPos.z },
+            rotation = { x = rot.x, y = rot.y, z = rot.z }
+        }
+    }
+
+    local function handleBuildResponse(resp, allowRetry)
+        if not resp.is_done then
+            return
+        end
+
+        if resp.is_error or (resp.response_code and resp.response_code >= 400) then
+            local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
+            if resp.text and resp.text ~= '' then
+                details = details .. ' | ' .. tostring(resp.text)
+            end
+
+            if allowRetry and resp.text and resp.text:find('No valid cards in decklist', 1, true) then
+                WebRequest.custom(
+                    BACKEND_URL .. '/build',
+                    'POST',
+                    true,
+                    decklist,
+                    {
+                        Accept = 'application/x-ndjson',
+                        ['Content-Type'] = 'text/plain'
+                    },
+                    function(retryResp)
+                        handleBuildResponse(retryResp, false)
+                    end
+                )
+                return
+            end
+
+            print('Error building spawn objects from backend: ' .. tostring(details))
+            endSpawning()
+            if onComplete then onComplete(false) end
+            return
+        end
+
+        if not resp.text or resp.text == '' then
+            print('Backend returned an empty /build response.')
+            endSpawning()
+            if onComplete then onComplete(false) end
+            return
+        end
+
+        spawnNDJSONQueue(resp.text, function(spawnedCount)
+            if spawnedCount <= 0 then
+                print('No valid cards to spawn')
+            end
+            Wait.time(function()
+                endSpawning()
+                if onComplete then onComplete(spawnedCount > 0) end
+            end, 0.25)
+        end, 2)
+    end
+
+    WebRequest.custom(
+        BACKEND_URL .. '/build',
+        'POST',
+        true,
+        JSON.encode(payload),
+        {
+            Accept = 'application/x-ndjson',
+            ['Content-Type'] = 'application/json'
+        },
+        function(resp)
+            handleBuildResponse(resp, true)
+        end
+    )
+end
+
+local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onFallback)
+    local rot = self.getRotation()
+    local payload = {
+        q = query,
+        count = count,
+        back = backURL,
+        hand = {
+            position = { x = spawnPos.x, y = spawnPos.y, z = spawnPos.z },
+            rotation = { x = rot.x, y = rot.y, z = rot.z }
+        }
+    }
+
+    WebRequest.custom(
+        BACKEND_URL .. '/random/build',
+        'POST',
+        true,
+        JSON.encode(payload),
+        {
+            Accept = 'application/x-ndjson',
+            ['Content-Type'] = 'application/json'
+        },
+        function(resp)
+            if not resp.is_done then
+                return
+            end
+
+            if resp.is_error or (resp.response_code and resp.response_code >= 400) or not resp.text or resp.text == '' then
+                local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
+                if resp.text and resp.text ~= '' then
+                    details = details .. ' | ' .. tostring(resp.text)
+                end
+                print('Fast random/build path failed: ' .. tostring(details))
+                if onFallback then
+                    onFallback()
+                    return
+                end
+                endSpawning()
+                if onComplete then onComplete(false) end
+                return
+            end
+
+            spawnNDJSONQueue(resp.text, function(spawnedCount)
+                if spawnedCount <= 0 then
+                    print('No valid cards to spawn')
+                end
+                Wait.time(function()
+                    endSpawning()
+                    if onComplete then onComplete(spawnedCount > 0) end
+                end, 0.25)
+            end, 2)
+        end
+    )
+end
+
+local function fetchRandomCardsViaBackend(query, count, onComplete, onFallback)
+    local requestUrl = BACKEND_URL .. '/random?count=' .. tostring(count) .. '&q=' .. URLencode(query)
+
+    WebRequest.get(requestUrl, function(resp)
+        if not resp.is_done then
+            return
+        end
+
+        if resp.is_error or (resp.response_code and resp.response_code >= 400) or not resp.text or resp.text == '' then
+            local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
+            if resp.text and resp.text ~= '' then
+                details = details .. ' | ' .. tostring(resp.text)
+            end
+            print('Random fetch failed via /random: ' .. tostring(details))
+            if onFallback then onFallback() end
+            return
+        end
+
+        local parsed = JSONdecode(resp.text)
+        if not parsed then
+            print('Random fetch failed: invalid JSON response from /random')
+            if onFallback then onFallback() end
+            return
+        end
+
+        if parsed.object == 'error' then
+            print('Random fetch failed: ' .. tostring(parsed.details or 'unknown error'))
+            if onFallback then onFallback() end
+            return
+        end
+
+        local cards = {}
+        if parsed.object == 'list' and parsed.data then
+            cards = parsed.data
+        else
+            cards = { parsed }
+        end
+
+        if onComplete then onComplete(cards) end
+    end)
+end
+
+local function spawnSingleDeckFromCards(cardList, spawnPos)
+    if not cardList or #cardList == 0 then
+        print('No valid cards to spawn')
+        endSpawning()
+        return
+    end
+
+    buildDeckFromListAsync(cardList, 'Deck', '', 1, function(deckDat)
+        spawnObjectData({
+            data = deckDat,
+            position = spawnPos,
+            rotation = self.getRotation()
+        })
+        Wait.time(function()
+            endSpawning()
+        end, 0.25)
+    end, 8)
 end
 
 local function makeSpawnRandomCardsHandler(count)
@@ -237,65 +487,17 @@ function spawnRandomCommandersWO(shouldCreateButton)
     createSpawningIndicator(spawnPos)
 
     local query = "is:commander game:paper"
-    local url = BACKEND_URL .. "/random?q=" .. URLencode(query) .. "&count=" .. tostring(commanderCount)
 
-    WebRequest.get(url, function(response)
-        if response.is_error or not response.text then
-            print("Error fetching commanders from backend.")
-            endSpawning()
-            if shouldCreateButton then
-                createSpawnButton()
-            end
-            return
+    spawnRandomDeckViaBackend(query, commanderCount, spawnPos, function()
+        if shouldCreateButton then
+            createSpawnButton()
         end
-
-        local decoded = JSONdecode(response.text)
-        if not decoded then
-            print("Error: Invalid JSON from backend")
-            endSpawning()
-            if shouldCreateButton then
-                createSpawnButton()
-            end
-            return
+    end, function()
+        print('Random commander spawn failed via /random/build')
+        endSpawning()
+        if shouldCreateButton then
+            createSpawnButton()
         end
-
-        local list = nil
-        if decoded.object == "list" and decoded.data and type(decoded.data) == "table" then
-            list = decoded.data
-        elseif decoded.object == "card" or decoded.name then
-            list = { decoded }
-        elseif type(decoded) == "table" and decoded[1] then
-            list = decoded
-        else
-            print("Error: Invalid response format from backend")
-            endSpawning()
-            if shouldCreateButton then
-                createSpawnButton()
-            end
-            return
-        end
-
-        buildDeckFromListAsync(list, "Random Commanders", "Random commanders", 2000, function(deckDat)
-            if #deckDat.ContainedObjects > 0 then
-                spawnObjectData({
-                    data = deckDat,
-                    position = spawnPos,
-                    rotation = self.getRotation()
-                })
-                Wait.time(function()
-                    endSpawning()
-                    if shouldCreateButton then
-                        createSpawnButton()
-                    end
-                end, 1.0)
-            else
-                print("No valid commanders to spawn")
-                endSpawning()
-                if shouldCreateButton then
-                    createSpawnButton()
-                end
-            end
-        end)
     end)
 end
 function createSpawnButton()
@@ -590,18 +792,16 @@ function tR()
     printToAll("Red is now " .. tostring(Red))
 end
 
----------------------------------------------------------------------------
--- spawnRandomCards spawns 22 random cards (default) using the strict card identity query.
+-- spawnRandomCards spawns 22 random cards (default) using the active color identity filters.
 ---------------------------------------------------------------------------
 function spawnRandomCards()
     spawnRandomCardsByNumber(22)
 end
 
 ---------------------------------------------------------------------------
--- spawnRandomCardsByNumber spawns n random cards from any set that match the active card identity.
--- It builds an OR query using the "id=" operator (for strictly mono-colored cards)
--- and adds a clause "colorless type:artifact" so that only colorless artifacts are included.
--- All cards are spawned as a single deck object for optimal performance (no lag).
+-- spawnRandomCardsByNumber spawns n random cards matching active color identity toggles.
+-- When 2+ colors are selected, it guarantees at least one multicolored card,
+-- then fills the remainder with the base identity query, and spawns as one deck.
 -- Includes spawning indicator and prevents concurrent spawns.
 ---------------------------------------------------------------------------
 function spawnRandomCardsByNumber(n)
@@ -622,72 +822,64 @@ function spawnRandomCardsByNumber(n)
     createSpawningIndicator(spawnPos)
     
     local id = ""
+    local selectedColorCount = 0
     if White then id = id .. "W" end
+    if White then selectedColorCount = selectedColorCount + 1 end
     if Blue  then id = id .. "U" end
+    if Blue then selectedColorCount = selectedColorCount + 1 end
     if Black then id = id .. "B" end
+    if Black then selectedColorCount = selectedColorCount + 1 end
     if Red   then id = id .. "R" end
+    if Red then selectedColorCount = selectedColorCount + 1 end
     if Green then id = id .. "G" end
+    if Green then selectedColorCount = selectedColorCount + 1 end
     if id == "" then id = "C" end
-printToAll(id)
-    local query = "id:" .. id
-    local url = BACKEND_URL .. "/random?q=" .. URLencode(query) .. "&count=" .. tostring(n)
+    local baseQuery = "id:" .. id
 
-    WebRequest.get(url, function(response)
-        if response.is_error or not response.text then
-            print("Error fetching card from backend.")
+    local function spawnRandomWithQuery(query, countToSpawn)
+        spawnRandomDeckViaBackend(query, countToSpawn, spawnPos, nil, function()
+            print('Random spawn failed via /random/build')
             endSpawning()
-            return
-        end
+        end)
+    end
 
-        local decoded = JSONdecode(response.text)
-        if not decoded then
-            print("Error: Invalid JSON from backend")
-            endSpawning()
-            return
-        end
+    if selectedColorCount > 1 and n > 0 then
+        local multicolorQuery = baseQuery .. " c:m"
 
-        local list = nil
-        if decoded.object == "list" and decoded.data and type(decoded.data) == "table" then
-            list = decoded.data
-        elseif decoded.object == "card" or decoded.name then
-            list = { decoded }
-        elseif type(decoded) == "table" and decoded[1] then
-            list = decoded
-        else
-            print("Error: Invalid response format from backend")
-            endSpawning()
-            return
-        end
-
-        if #list == 1 then
-            spawnSingleCardFromData(list[1], spawnPos, 1000)
-            return
-        end
-
-        buildDeckFromListAsync(
-            list,
-            "Random Cards (" .. tostring(#list) .. ")",
-            "Random cards matching color identity: " .. id,
-            1000,
-            function(deckDat)
-                -- Spawn entire deck at once for optimal performance
-                if #deckDat.ContainedObjects > 0 then
-                    spawnObjectData({
-                        data = deckDat,
-                        position = spawnPos,
-                        rotation = self.getRotation()
-                    })
-                    -- Wait a moment before clearing the indicator so user sees completion
-                    Wait.time(function()
-                        endSpawning()
-                    end, 1.0)
-                else
-                    print("No valid cards to spawn")
-                    endSpawning()
-                end
+        fetchRandomCardsViaBackend(multicolorQuery, 1, function(multicolorCards)
+            if not multicolorCards or #multicolorCards == 0 then
+                spawnRandomWithQuery(baseQuery, n)
+                return
             end
-        )
-    end)
+
+            local combinedCards = { multicolorCards[1] }
+            local remainingCount = n - 1
+
+            if remainingCount <= 0 then
+                spawnSingleDeckFromCards(combinedCards, spawnPos)
+                return
+            end
+
+            fetchRandomCardsViaBackend(baseQuery, remainingCount, function(baseCards)
+                for _, card in ipairs(baseCards or {}) do
+                    table.insert(combinedCards, card)
+                end
+
+                if #combinedCards < n then
+                    print('Random fetch returned fewer cards than requested; expected ' .. tostring(n) .. ', got ' .. tostring(#combinedCards))
+                end
+
+                spawnSingleDeckFromCards(combinedCards, spawnPos)
+            end, function()
+                spawnRandomWithQuery(baseQuery, n)
+            end)
+        end, function()
+            spawnRandomWithQuery(baseQuery, n)
+        end)
+        return
+    end
+
+    spawnRandomWithQuery(baseQuery, n)
 end
 function destroySelf()
     self.destroy()

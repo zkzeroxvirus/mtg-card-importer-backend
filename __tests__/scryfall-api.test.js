@@ -3,11 +3,22 @@
  * Tests error handling, rate limiting, and API compliance
  */
 
-const scryfall = require('../lib/scryfall');
-
 // Mock axios to avoid real API calls during tests
 jest.mock('axios');
 const axios = require('axios');
+
+axios.create.mockReturnValue({
+  get: jest.fn().mockResolvedValue({ data: { data: [] } })
+});
+
+const scryfall = require('../lib/scryfall');
+
+function loadScryfallWithGet(getImpl) {
+  jest.resetModules();
+  const mockedAxios = require('axios');
+  mockedAxios.create.mockReturnValue({ get: getImpl });
+  return require('../lib/scryfall');
+}
 
 describe('Scryfall API - Rate Limiting', () => {
   beforeEach(() => {
@@ -52,25 +63,21 @@ describe('Scryfall API - Error Handling', () => {
   });
 
   test('getCard should throw on 404 with descriptive message', async () => {
-    axios.create = jest.fn(() => ({
-      get: jest.fn().mockRejectedValue({
-        response: { status: 404 },
-        message: 'Not found'
-      })
+    const localScryfall = loadScryfallWithGet(jest.fn().mockRejectedValue({
+      response: { status: 404 },
+      message: 'Not found'
     }));
 
-    await expect(scryfall.getCard('NonExistentCard123456')).rejects.toThrow('Card not found');
+    await expect(localScryfall.getCard('NonExistentCard123456')).rejects.toThrow('Card not found');
   });
 
   test('getCardById should throw on 404 with ID in message', async () => {
-    axios.create = jest.fn(() => ({
-      get: jest.fn().mockRejectedValue({
-        response: { status: 404 },
-        message: 'Not found'
-      })
+    const localScryfall = loadScryfallWithGet(jest.fn().mockRejectedValue({
+      response: { status: 404 },
+      message: 'Not found'
     }));
 
-    await expect(scryfall.getCardById('invalid-id')).rejects.toThrow('Card not found with ID: invalid-id');
+    await expect(localScryfall.getCardById('invalid-id')).rejects.toThrow('Card not found with ID: invalid-id');
   });
 
   test('autocompleteCardName should return empty array on error', async () => {
@@ -83,14 +90,12 @@ describe('Scryfall API - Error Handling', () => {
   });
 
   test('searchCards should return empty array on 404', async () => {
-    axios.create = jest.fn(() => ({
-      get: jest.fn().mockRejectedValue({
-        response: { status: 404 },
-        message: 'Not found'
-      })
+    const localScryfall = loadScryfallWithGet(jest.fn().mockRejectedValue({
+      response: { status: 404 },
+      message: 'Not found'
     }));
 
-    const result = await scryfall.searchCards('impossible_query_xyz_123');
+    const result = await localScryfall.searchCards('impossible_query_xyz_123');
     expect(result).toEqual([]);
   });
 
@@ -219,7 +224,9 @@ describe('Scryfall API - TTS Card Conversion', () => {
     const ttsCard = scryfall.convertToTTSCard(scryfallCard, 'https://example.com/back.jpg');
     
     expect(ttsCard.Name).toBe('Card');
-    expect(ttsCard.Nickname).toBe('Lightning Bolt');
+    expect(ttsCard.Nickname).toContain('Lightning Bolt');
+    expect(ttsCard.Nickname).toContain('Instant');
+    expect(ttsCard.Nickname).toContain('CMC');
     expect(ttsCard.Description).toContain('Lightning Bolt deals 3 damage');
     expect(ttsCard.Memo).toBe('abc123');
     expect(ttsCard.CustomDeck['1'].FaceURL).toBe('https://example.com/bolt.jpg');
@@ -252,6 +259,38 @@ describe('Scryfall API - TTS Card Conversion', () => {
     
     expect(() => scryfall.convertToTTSCard(scryfallCard, 'back.jpg'))
       .toThrow('No image available for Bad Card');
+  });
+
+  test('convertToTTSCard should include state data for DFC cards', () => {
+    const scryfallCard = {
+      name: 'Invasion of Zendikar',
+      oracle_id: 'dfc-oracle-1',
+      image_uris: {
+        normal: 'https://example.com/front.jpg'
+      },
+      card_faces: [
+        {
+          name: 'Invasion of Zendikar',
+          image_uris: { normal: 'https://example.com/front.jpg' },
+          oracle_text: 'When this enters, search your library.'
+        },
+        {
+          name: 'Awakened Skyclave',
+          image_uris: { normal: 'https://example.com/back.jpg' },
+          oracle_text: 'Flying, vigilance, haste'
+        }
+      ]
+    };
+
+    const ttsCard = scryfall.convertToTTSCard(scryfallCard, 'https://example.com/default-back.jpg');
+
+    expect(ttsCard.States).toBeDefined();
+    expect(ttsCard.States[2]).toBeDefined();
+    expect(ttsCard.States[2].Nickname).toContain('Awakened Skyclave');
+    expect(ttsCard.CustomDeck['1'].FaceURL).toBe('https://example.com/front.jpg');
+    expect(ttsCard.CustomDeck['1'].BackURL).toBe('https://example.com/default-back.jpg');
+    expect(ttsCard.States[2].CustomDeck['2'].FaceURL).toBe('https://example.com/back.jpg');
+    expect(ttsCard.States[2].CustomDeck['2'].BackURL).toBe('https://example.com/default-back.jpg');
   });
 });
 

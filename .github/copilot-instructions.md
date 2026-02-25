@@ -6,7 +6,7 @@ This is a **Node.js backend service** that acts as a middleware between Tabletop
 - Proxies and rate-limits Scryfall API requests
 - Converts card data to Tabletop Simulator's CardCustom format
 - Supports both API mode (direct Scryfall calls) and bulk data mode (in-memory cache)
-- Handles deck imports in multiple formats (Arena, Moxfield, Archidekt, etc.)
+- Focuses on random card/deck generation and direct card lookup workflows
 - Optimized for high concurrency (500+ users) using Node.js clustering
 
 **Primary Tech Stack:**
@@ -163,11 +163,13 @@ npm run start:cluster
 - Supports filtering via `?q=` parameter
 - Supports count via `?count=` parameter
 
-### Deck Building
-- Supports multiple decklist formats (Arena, Moxfield, Archidekt, plain text, etc.)
-- Max deck size: 500 cards (configurable via `MAX_DECK_SIZE`)
-- Returns NDJSON (one TTS card object per line)
-- POST `/deck/parse` validates decklist without building TTS objects
+### Removed Features
+- `POST /deck`, `POST /build`, and `POST /deck/parse` are removed (HTTP 410)
+- Deck URL import workflows (Moxfield, Archidekt, TappedOut, etc.) are removed
+
+### Random Build
+- Use `POST /random/build` for multi-card TTS deck spawning in one request
+- Supports query filtering via `q` and count via `count`
 
 ## Common Pitfalls to Avoid
 

@@ -111,8 +111,15 @@ function spawnDeckList(decktext, color)
     local cardCount = 0
     for _, line in ipairs(split_lines(resp.text or '')) do
       if line ~= '' then
-        spawnObjectJSON({ json = line })
-        cardCount = cardCount + 1
+        local ok, entry = pcall(function() return JSON.decode(line) end)
+        if ok and entry then
+          if entry.object == 'warning' and entry.warning then
+            broadcastToColor('[MTG] ' .. tostring(entry.warning), color, 'Orange')
+          elseif entry.Name == 'Card' and entry.CustomDeck then
+            spawnObjectJSON({ json = line })
+            cardCount = cardCount + 1
+          end
+        end
       end
     end
 

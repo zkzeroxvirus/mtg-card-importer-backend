@@ -3,7 +3,7 @@ function onLoad()
   backURL='https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
   -- Backend URL - change this to your deployed backend URL
-  backendURL='https://api.mtginfo.org'
+  backendURL='http://api.mtginfo.org'
 
   setCode='Mystery'
   -- setCode='KLM'
@@ -242,6 +242,106 @@ end
 -- takes in a table of scryfall query url's
 -- queries scryfall for the data
 -- generates TTS deckData object with the cards (saved to boosterDats[boosterN])
+local function decodeQueryValue(value)
+  if not value then return '' end
+  local decoded = value:gsub('%+', ' ')
+  decoded = decoded:gsub('%%(%x%x)', function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  return decoded
+end
+
+local function extractQueryFromRandomUrl(url)
+  local rawQuery = url and url:match('/random%?q=(.*)')
+  if not rawQuery or rawQuery == '' then
+    return nil
+  end
+  return decodeQueryValue(rawQuery)
+end
+
+local function firstDeckFromNDJSON(respText)
+  if not respText or respText == '' then
+    return nil
+  end
+
+  for line in respText:gmatch('[^\r\n]+') do
+    if line and line:match('%S') then
+      local parsed = JSONdecode(line)
+      if type(parsed) == 'table' and parsed.Name == 'DeckCustom' then
+        return parsed
+      end
+    end
+  end
+
+  return nil
+end
+
+local function getDeckEntryForCardId(deckObject, cardId)
+  if not deckObject or not deckObject.CustomDeck or not cardId then
+    return nil
+  end
+
+  local deckNum = math.floor(tonumber(cardId) / 100)
+  if not deckNum or deckNum <= 0 then
+    return nil
+  end
+
+  return deckObject.CustomDeck[tostring(deckNum)] or deckObject.CustomDeck[deckNum]
+end
+
+local function remapDeckCardIds(cardDat, deckObject, n)
+  if not cardDat then return nil end
+
+  local primaryDeckEntry = getDeckEntryForCardId(deckObject, cardDat.CardID)
+  if not primaryDeckEntry and cardDat.CustomDeck then
+    for _, deckEntry in pairs(cardDat.CustomDeck) do
+      primaryDeckEntry = deckEntry
+      break
+    end
+  end
+
+  if not primaryDeckEntry then
+    return nil
+  end
+
+  cardDat.CardID = n * 100
+  cardDat.CustomDeck = {
+    [n] = primaryDeckEntry
+  }
+
+  if cardDat.States and cardDat.States[2] then
+    local backState = cardDat.States[2]
+    local stateDeckEntry = getDeckEntryForCardId(deckObject, backState.CardID)
+    if not stateDeckEntry and backState.CustomDeck then
+      for _, deckEntry in pairs(backState.CustomDeck) do
+        stateDeckEntry = deckEntry
+        break
+      end
+    end
+
+    local stateDeckId = n + 100
+    backState.CardID = stateDeckId * 100
+    if stateDeckEntry then
+      backState.CustomDeck = {
+        [stateDeckId] = stateDeckEntry
+      }
+    else
+      backState.CustomDeck = nil
+    end
+  end
+
+  return cardDat
+end
+
+local function cardDatFromBuildResponse(respText, n)
+  local deckObject = firstDeckFromNDJSON(respText)
+  if not deckObject or not deckObject.ContainedObjects or not deckObject.ContainedObjects[1] then
+    return nil
+  end
+
+  return remapDeckCardIds(deckObject.ContainedObjects[1], deckObject, n)
+end
+
 function getDeckDat(urlTable,boosterN)
 
   local deckDat={
@@ -260,13 +360,52 @@ function getDeckDat(urlTable,boosterN)
   for n,url in ipairs(urlTable) do
     nLoading=nLoading+1
 
-    WebRequest.get(url,function(wr)
-      local cardDat=getCardDatFromJSON(wr.text,n)
-      deckDat.ContainedObjects[n]=cardDat
-      deckDat.DeckIDs[n]=cardDat.CardID      -- add card info into deckDat
-      deckDat.CustomDeck[n]=cardDat.CustomDeck[n]
+    local function assignCardDat(cardDat)
+      if cardDat then
+        deckDat.ContainedObjects[n]=cardDat
+        deckDat.DeckIDs[n]=cardDat.CardID      -- add card info into deckDat
+        deckDat.CustomDeck[n]=cardDat.CustomDeck[n]
+      else
+        printToAll('Mystery Pack: failed to fetch slot '..tostring(n), {1, 0.5, 0.2})
+      end
       nLoaded=nLoaded+1
-    end)
+    end
+
+    local randomQuery = extractQueryFromRandomUrl(url)
+    if randomQuery then
+      local payload = JSON.encode({
+        q = randomQuery,
+        count = 1,
+        enforceCommander = false,
+        back = backURL
+      })
+
+      WebRequest.custom(
+        backendURL..'/random/build',
+        'POST',
+        true,
+        payload,
+        {
+          Accept = 'application/x-ndjson',
+          ['Content-Type'] = 'application/json'
+        },
+        function(wr)
+        if wr.is_error or (wr.response_code and wr.response_code >= 400) then
+          assignCardDat(nil)
+          return
+        end
+
+        local cardDat = cardDatFromBuildResponse(wr.text, n)
+        if cardDat then
+          assignCardDat(cardDat)
+        else
+          assignCardDat(nil)
+        end
+        end
+      )
+    else
+      assignCardDat(nil)
+    end
 
   end
 

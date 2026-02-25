@@ -1,4 +1,3 @@
-LOG_ENABLED = false
 MAX_VALUE = 999999
 WEB_URL = "https://script.google.com/macros/s/AKfycbwIVox39JBPeMswdPtZHfELAH7XJFo4Ih-ib-BPqR7NDACaxapoO5kqcC1xGwwrS3EX/exec"
 DEBOUNCE_SECONDS = 3.0
@@ -110,6 +109,8 @@ local lastSyncSignature = ""
 local recentlyHandledGuids = {}
 local watcherActive = false
 local watcherHandle = nil
+local saveBlobCache = nil
+local saveBlobDirty = true
 
 local state = { value = 0, achievements = {}, crypt = {}, tickets = {}, captures = {} }
 local plusSteps = { 5, 10, 50 }
@@ -285,11 +286,8 @@ end
 local function spawnRewardToken(reward_name)
     local imageUrl = SPAWN_IMAGES[reward_name]
     if not imageUrl then
-        log("No image URL found for reward: " .. tostring(reward_name))
         return nil
     end
-
-    log("Spawn start for " .. tostring(reward_name) .. " | image=" .. tostring(imageUrl))
 
     -- deep copy to avoid mutating the base template
     local spawnData = JSON.decode(JSON.encode(BASE_SPAWN_TEMPLATE))
@@ -304,10 +302,6 @@ local function spawnRewardToken(reward_name)
     spawnData.Transform.rotY = counterRot.y + 180
     spawnData.Transform.rotZ = counterRot.z
 
-    log(string.format("Spawn pos=(%.2f, %.2f, %.2f) rot=(%.1f, %.1f, %.1f)",
-        spawnData.Transform.posX, spawnData.Transform.posY, spawnData.Transform.posZ,
-        spawnData.Transform.rotX, spawnData.Transform.rotY, spawnData.Transform.rotZ))
-
     -- apply texture in the data before spawn
     spawnData.CustomMesh.DiffuseURL = imageUrl
 
@@ -319,9 +313,6 @@ local function spawnRewardToken(reward_name)
             spawned.setDescription(desc)
         end
         spawned.setLock(false)
-        log("Spawned object: " .. tostring(spawned.getGUID()) .. " type=" .. tostring(spawned.getType()))
-    else
-        log("Spawn failed for reward: " .. tostring(reward_name))
     end
     return spawned
 end
@@ -354,10 +345,6 @@ local function spawnCaptureToken(captureItem)
                 spawned.setLock(false)
                 return spawned
             end
-
-            log("Spawn failed for bag capture: " .. tostring(captureItem.name))
-        else
-            log("No usable bag payload for capture: " .. tostring(captureItem.name))
         end
     end
 
@@ -366,7 +353,6 @@ local function spawnCaptureToken(captureItem)
         imageUrl = extractCaptureFaceUrlFromPayload(captureItem.bagData)
     end
     if imageUrl == "" then
-        log("No capture image URL for: " .. tostring(captureItem.name))
         return nil
     end
 
@@ -386,8 +372,6 @@ local function spawnCaptureToken(captureItem)
         spawned.setName(buildCaptureTicketName(captureItem.name))
         spawned.setGMNotes(buildCaptureNotes(captureItem.name, imageUrl))
         spawned.setLock(false)
-    else
-        log("Spawn failed for capture: " .. tostring(captureItem.name))
     end
     return spawned
 end
@@ -410,10 +394,6 @@ end
 
 -- forward declaration (needed because onLoad calls it)
 local uiRefresh
-
-local function log(msg)
-    if LOG_ENABLED then print("[XCounter] " .. msg) end
-end
 
 local function trim(s)
     return (s:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -789,6 +769,11 @@ local function serializeCaptures(captures)
     return JSON.encode(captures or {})
 end
 
+local function invalidateSaveBlobCache()
+    saveBlobCache = nil
+    saveBlobDirty = true
+end
+
 local function getCaptureIds(catTable)
     local ids = {}
     for id, _ in pairs(catTable or {}) do
@@ -999,6 +984,7 @@ end
 
 local function requestSync(delaySeconds)
     syncDirty = true
+    invalidateSaveBlobCache()
     if not localPlayerKey or not isSyncEnabled then return end
     queueSyncSend(delaySeconds or DEBOUNCE_SECONDS)
 end
@@ -1120,7 +1106,6 @@ uiRefresh = function()
     local ids = getOrderedIds(catTable)
 
     local totalCount = #ids
-    log("uiRefresh tab=" .. uiTab .. " count=" .. tostring(totalCount))
 
     -- Page navigation (Host Helper-style)
     uiSetActive("Crypt Buffs", uiTab == "crypt")
@@ -1244,6 +1229,7 @@ end
 -- Description no longer alters steps
 
 function onLoad(saved)
+    invalidateSaveBlobCache()
     self.interactable = true
     self.setVar("whatIAm", "Counter")
     self.setVar("Supports_getTotalValue", false)
@@ -1298,7 +1284,11 @@ function onLoad(saved)
 end
 
 function onSave()
-    return JSON.encode({
+    if not saveBlobDirty and saveBlobCache then
+        return saveBlobCache
+    end
+
+    saveBlobCache = JSON.encode({
         value = state.value,
         achievements = state.achievements,
         crypt = state.crypt,
@@ -1306,6 +1296,8 @@ function onSave()
         captures = state.captures,
         playerKey = localPlayerKey
     })
+    saveBlobDirty = false
+    return saveBlobCache
 end
 
 function onPickUp(player_color)
@@ -1332,6 +1324,7 @@ function onPickUp(player_color)
     -- (prevents generating a key for unnamed/placeholder objects).
     if not localPlayerKey and keyBase and currentName ~= "" then
         localPlayerKey = keyBase .. "_Essence"
+        invalidateSaveBlobCache()
     end
 
     -- Fetch saved value before marking as changed (handles fresh pulls and named objects)
@@ -1362,7 +1355,6 @@ end
 
 function fetchSavedValue()
     if not localPlayerKey then
-        log("BlockSquare has no playerKey yet (not picked up)")
         isSyncEnabled = true
         return
     end
@@ -1370,25 +1362,20 @@ function fetchSavedValue()
 
     WebRequest.get(url, function(req)
         if req.is_error then
-            log("BlockSquare [" .. localPlayerKey .. "] Web GET failed")
             isSyncEnabled = true
             return
         end
 
         if req.text == nil or req.text == "" then
-            log("BlockSquare [" .. localPlayerKey .. "] No stored value found; creating entry")
             isSyncEnabled = true
             if localPlayerKey then
                 sendData(true)
-            else
-                log("BlockSquare cannot create entry without playerKey")
             end
             return
         end
 
         local ok, data = pcall(JSON.decode, req.text)
         if not ok then
-            log("BlockSquare [" .. localPlayerKey .. "] Invalid JSON response: " .. string.sub(tostring(req.text), 1, 200))
             isSyncEnabled = true
             return
         end
@@ -1429,6 +1416,8 @@ function fetchSavedValue()
             lastCaptures = serializeCaptures(state.captures)
         end
 
+        invalidateSaveBlobCache()
+
         syncDirty = false
 
         ensurePlaceholderDescriptions(state.achievements)
@@ -1443,7 +1432,6 @@ end
 
 function sendData(force)
     if not localPlayerKey then
-        log("BlockSquare has no playerKey yet (not picked up)")
         return
     end
 
@@ -1502,13 +1490,9 @@ function sendData(force)
     lastSyncSentAt = now
     syncInFlight = true
 
-    local json = JSON.encode(payload)
-    log("BlockSquare [" .. payload.playerKey .. "] sending payload " .. json)
-
-    WebRequest.post(WEB_URL, json, function(req)
+    WebRequest.post(WEB_URL, JSON.encode(payload), function(req)
         syncInFlight = false
         if req.is_error then
-            log("BlockSquare [" .. payload.playerKey .. "] POST failed")
             lastSyncSignature = ""
             syncDirty = true
             if syncQueued then
@@ -1517,7 +1501,6 @@ function sendData(force)
             end
             return
         end
-        log("BlockSquare [" .. payload.playerKey .. "] Synced to Google; response: " .. tostring(req.text))
         syncDirty = false
         if syncQueued then
             syncQueued = false
@@ -1623,7 +1606,6 @@ function onObjectDropped(player_color, dropped_object)
         return tryRegisterCaptureFromObject(dropped_object)
     end)
     if not okCapture then
-        log("capture drop registration failed")
         return
     end
     if captureId then
@@ -1754,14 +1736,12 @@ function ui_tab_tickets(_, _)
     uiTab = "tickets"
     uiSelectedTab = uiTab
     uiSelectedId = nil
-    log("Tab set to tickets")
     uiRefreshWhenReady()
 end
 function ui_tab_captures(_, _)
     uiTab = "captures"
     uiSelectedTab = uiTab
     uiSelectedId = nil
-    log("Tab set to captures")
     uiRefreshWhenReady()
 end
 
@@ -1825,7 +1805,6 @@ function ui_select_reward(_, _, id)
             slotNum = fallbackSlot
             slotNumStr = tostring(fallbackSlot)
         else
-            log("ui_select_reward parse failed id=" .. tostring(rawId) .. " tid=" .. tostring(tid) .. " slotStr=" .. tostring(slotNumStr))
             return
         end
     end
@@ -1844,10 +1823,7 @@ function ui_select_reward(_, _, id)
         if tabKey == "captures" then
             local captureIds = getCaptureIds(state.captures or {})
             rewardId = captureIds[slotNum]
-            if rewardId then
-                log("ui_select_reward capture fallback id=" .. tostring(rewardId) .. " slot=" .. tostring(slotNum))
-            else
-                log("UI click but no rewardId: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " (capture fallback failed)")
+            if not rewardId then
                 return
             end
         else
@@ -1857,7 +1833,6 @@ function ui_select_reward(_, _, id)
             local entry = sourceList and sourceList[slotNum] or nil
             if entry and entry.name then
                 rewardId = toId(entry.name)
-                log("ui_select_reward fallback id=" .. tostring(rewardId) .. " from list name=" .. tostring(entry.name))
                 -- Ensure the table exists and has the item so downstream logic works
                 local targetTable = (tabKey == "crypt" and state.crypt)
                     or (tabKey == "achievements" and state.achievements)
@@ -1866,13 +1841,11 @@ function ui_select_reward(_, _, id)
                     targetTable[rewardId] = { id = rewardId, name = entry.name, unlocked = false, desc = entry.desc or PLACEHOLDER_DESC }
                 end
             else
-                log("UI click but no rewardId: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " (list fallback failed)")
                 return
             end
         end
     end
     if not rewardId then
-        log("UI click but no rewardId: tab=" .. tabKey .. " slot=" .. tostring(slotNum))
         return
     end
 
@@ -1883,29 +1856,23 @@ function ui_select_reward(_, _, id)
     local item = catTable and catTable[rewardId] or nil
 
     if not item then
-        log("UI click but no item: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " rewardId=" .. tostring(rewardId))
         return
     end
 
-    log("ui_select_reward item unlocked=" .. tostring(item.unlocked) .. " name=" .. tostring(item.name))
     -- Spawn only if unlocked
     if item.unlocked then
-        log("UI click spawn: tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " rewardId=" .. tostring(rewardId) .. " name=" .. tostring(item.name))
         if tabKey == "captures" then
             local okSpawn, spawned = pcall(function()
                 return spawnCaptureToken(item)
             end)
             if not okSpawn then
                 print("[" .. self.getName() .. "] Capture spawn error: " .. tostring(item.name))
-                log("capture spawn exception")
             elseif not spawned then
                 print("[" .. self.getName() .. "] Capture spawn failed: " .. tostring(item.name))
             end
         else
             spawnRewardToken(item.name)
         end
-    else
-        log("UI click ignored (locked): tab=" .. tabKey .. " slot=" .. tostring(slotNum) .. " rewardId=" .. tostring(rewardId))
     end
 
     uiSelectedTab = tabKey

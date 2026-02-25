@@ -24,6 +24,7 @@ describe('Non-Playable Card Filtering', () => {
       expect(filter).toContain('-is:oversized');
       expect(filter).toContain('-stamp:acorn');
       expect(filter).toContain('-t:basic');
+      expect(filter).toContain('-o:"ante"');
       expect(filter).toContain('-layout:token');
       expect(filter).toContain('-layout:emblem');
       expect(filter).toContain('-set_type:funny');
@@ -159,6 +160,32 @@ describe('Non-Playable Card Filtering', () => {
       };
       
       expect(scryfall.isNonPlayableCard(funnyCard)).toBe(true);
+    });
+
+    test('should identify ante cards as non-playable', () => {
+      const anteCard = {
+        name: 'Contract from Below',
+        set: 'leb',
+        games: ['paper'],
+        layout: 'normal',
+        type_line: 'Sorcery',
+        oracle_text: 'Discard your hand, then draw seven cards. Remove Contract from Below from your deck before playing if you\'re not playing for ante.'
+      };
+
+      expect(scryfall.isNonPlayableCard(anteCard)).toBe(true);
+    });
+
+    test('should not flag words containing ante (e.g., enchanted) as ante cards', () => {
+      const enchantedCard = {
+        name: 'Pacifism',
+        set: 'lea',
+        games: ['paper'],
+        layout: 'normal',
+        type_line: 'Enchantment — Aura',
+        oracle_text: 'Enchant creature\nEnchanted creature can\'t attack or block.'
+      };
+
+      expect(scryfall.isNonPlayableCard(enchantedCard)).toBe(false);
     });
 
     test('should identify meld result cards (ending in b) as non-playable', () => {

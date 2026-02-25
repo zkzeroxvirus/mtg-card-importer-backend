@@ -219,11 +219,12 @@ scryfall mountain https://art1.com/mountain.jpg
 scryfall forest https://art1.com/forest.jpg
 ```
 
-### Deck with Proxies
-Use custom images in deck imports by adding `#URL` to card names in decklist:
+### Deck Import Note
+Deck import endpoints have been removed from the backend, so decklist-based proxy import is no longer supported.
+Use single-card proxy commands instead:
 ```
-1 Island #https://example.com/island.jpg
-1 Mountain #https://example.com/mountain.jpg
+scryfall island https://example.com/island.jpg
+scryfall mountain https://example.com/mountain.jpg
 ```
 
 ## Best Practices

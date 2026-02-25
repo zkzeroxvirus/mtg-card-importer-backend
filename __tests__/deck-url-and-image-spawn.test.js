@@ -36,7 +36,7 @@ const axios = require('axios');
 const scryfallLib = require('../lib/scryfall');
 const app = require('../server');
 
-describe('Deck URL imports and image spawning', () => {
+describe('Deck URL imports removal and image spawning', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
@@ -68,77 +68,35 @@ describe('Deck URL imports and image spawning', () => {
     expect(scryfallLib.getCard).not.toHaveBeenCalled();
   });
 
-  test('POST /deck imports Moxfield URL decklists', async () => {
-    axios.get.mockResolvedValueOnce({
-      data: {
-        mainboard: {
-          a: { quantity: 1, card: { name: 'Sol Ring' } },
-          b: { quantity: 2, card: { name: 'Island' } }
-        }
-      }
-    });
-
+  test('POST /deck rejects removed deck import endpoint', async () => {
     const response = await request(app)
       .post('/deck')
       .set('Content-Type', 'application/octet-stream')
       .send(Buffer.from('https://moxfield.com/decks/mouJgxThWEeaMJnWDczbWw'));
 
-    expect(response.status).toBe(200);
-    expect(axios.get).toHaveBeenCalledWith(
-      'https://api2.moxfield.com/v3/decks/all/mouJgxThWEeaMJnWDczbWw',
-      expect.objectContaining({ responseType: 'json' })
-    );
-    expect(scryfallLib.parseDecklist).toHaveBeenCalledWith('1 Sol Ring\n2 Island');
+    expect(response.status).toBe(410);
+    expect(response.body.details).toContain('removed');
+    expect(axios.get).not.toHaveBeenCalled();
   });
 
-  test('POST /deck imports TappedOut URL decklists', async () => {
-    axios.get.mockResolvedValueOnce({
-      data: '1 Command Tower\n1 Sol Ring\n'
-    });
-
-    const response = await request(app)
-      .post('/deck')
-      .set('Content-Type', 'application/octet-stream')
-      .send(Buffer.from('https://tappedout.net/mtg-decks/mf-doomhive/'));
-
-    expect(response.status).toBe(200);
-    expect(axios.get).toHaveBeenCalledWith(
-      'https://tappedout.net/mtg-decks/mf-doomhive/?fmt=txt',
-      expect.objectContaining({ responseType: 'text' })
-    );
-    expect(scryfallLib.parseDecklist).toHaveBeenCalledWith('1 Command Tower\n1 Sol Ring');
-  });
-
-  test('POST /build imports Archidekt URL decklists', async () => {
-    axios.get.mockResolvedValueOnce({
-      data: {
-        cards: [
-          { quantity: 1, card: { oracleCard: { name: 'Arcane Signet' } } },
-          { quantity: 1, card: { oracleCard: { name: 'Island' } } }
-        ]
-      }
-    });
-
+  test('POST /build rejects removed deck build endpoint', async () => {
     const response = await request(app)
       .post('/build')
       .set('Content-Type', 'application/octet-stream')
-      .send(Buffer.from('https://archidekt.com/decks/14420275/counter_intelligence'));
+      .send(Buffer.from('https://tappedout.net/mtg-decks/mf-doomhive/'));
 
-    expect(response.status).toBe(200);
-    expect(axios.get).toHaveBeenCalledWith(
-      'https://archidekt.com/api/decks/14420275/',
-      expect.objectContaining({ responseType: 'json' })
-    );
-    expect(scryfallLib.parseDecklist).toHaveBeenCalledWith('1 Arcane Signet\n1 Island');
+    expect(response.status).toBe(410);
+    expect(response.body.details).toContain('removed');
+    expect(axios.get).not.toHaveBeenCalled();
   });
 
-  test('POST /deck rejects unsupported deck URL hosts', async () => {
+  test('POST /deck rejects unsupported deck URL hosts via removed endpoint', async () => {
     const response = await request(app)
       .post('/deck')
       .set('Content-Type', 'application/octet-stream')
       .send(Buffer.from('https://example.com/my-deck'));
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('Unsupported deck URL');
+    expect(response.status).toBe(410);
+    expect(response.body.details).toContain('removed');
   });
 });

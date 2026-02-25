@@ -1,5 +1,6 @@
 jest.mock('axios');
 const axios = require('axios');
+const { URLSearchParams } = require('url');
 
 describe('Scryfall API - Token Search Query', () => {
   test('searchCards should append -is:dfc for is:token queries', async () => {
@@ -16,8 +17,11 @@ describe('Scryfall API - Token Search Query', () => {
 
     await scryfall.searchCards('fish is:token', 5);
 
-    expect(getMock).toHaveBeenCalledWith(
-      `/cards/search?q=${encodeURIComponent('fish is:token -is:dfc')}&unique=cards`
-    );
+    const expectedParams = new URLSearchParams({
+      q: 'fish is:token -is:dfc',
+      unique: 'cards'
+    });
+
+    expect(getMock).toHaveBeenCalledWith(`/cards/search?${expectedParams.toString()}`);
   });
 });

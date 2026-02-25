@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.912'
+mod_name, version = 'Card Importer', '1.914'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -21,7 +21,7 @@ lang = 'en'
 --   - For local testing: 'http://localhost:3000'
 --   - For production: Your deployed backend URL
 -- Example: BACKEND_URL = 'https://your-backend.onrender.com'
-BACKEND_URL = 'https://api.mtginfo.org'
+BACKEND_URL = 'http://api.mtginfo.org'
 
 -- Auto-update configuration (checks GitHub for newer version on load)
 AUTO_UPDATE_ENABLED = true
@@ -162,6 +162,14 @@ function urlEncode(str)
   end))
 end
 
+function urlDecode(str)
+  local decoded = tostring(str or ''):gsub('+', ' ')
+  decoded = decoded:gsub('%%(%x%x)', function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  return decoded
+end
+
 --Image Handler
 function trunkateURI(uri,q,s)
   if q=='png' then uri=uri:gsub('.jpg','.png')end
@@ -205,144 +213,131 @@ local function spawnImageOnlyCard(qTbl)
   Player[qTbl.color].broadcast('Spawned custom image card.',{0.7,0.9,1})
   endLoop()
 end
---[[Card Spawning Class]]
--- pieHere:
--- replaced spawnObjectJSON with spawnObjectData, cuz TTS's JSON stuff sucks anyways
--- spawning deck old-school style, not one card at a time
--- added a pcall "restart on error" just in case
+
 local Card=setmetatable({n=1,image=false},
   {__call=function(t,c,qTbl)
-    success,errorMSG=pcall(function()
-      --NeededFeilds in c:name,type_line,cmc,card_faces,oracle_text,power,toughness,loyalty
+    local success,errorMSG=pcall(function()
       c.face,c.oracle,c.back='','',Back[qTbl.player] or Back.___
       local n,state,qual,imgSuffix=t.n,false,Quality[qTbl.player],''
       t.n=n+1
-      --Check for card's spoiler image quality
+
       if c.image_status~='highres_scan' then
         imgSuffix='?'..tostring(os.date('%x')):gsub('/', '')
       end
 
-			local orientation={false}--Tabletop Card Sideways
-			--Oracle text Handling for Split then DFC then Normal
-      if c.card_faces and c.image_uris then--Adventure/Split face.type_line:find('Room')
-				local instantSorcery=0
+      local orientation={false}
+      if c.card_faces and c.image_uris then
+        local instantSorcery=0
         for i,f in ipairs(c.card_faces)do
-					f.name=f.name:gsub('"','')..'\n'..f.type_line..'\n'..c.cmc..'CMC'
+          f.name=f.name:gsub('"','')..'\n'..f.type_line..'\n'..(c.cmc or 0)..'CMC'
           if i==1 then c.name=f.name end
           c.oracle=c.oracle..f.name..'\n'..setOracle(f)..(i==#c.card_faces and''or'\n')
-					
-					--Count nonPermanent text boxes, exclude Aftermath
-					if ('split'):find(c.layout)and not c.oracle:find('Aftermath')then
-						instantSorcery=1+instantSorcery end
-				end
-				if instantSorcery==2 then--Split/Fuse
-					orientation[1]=true end
-
-			elseif c.card_faces then--DFC
-				local f=c.card_faces[1]
-				local cmc=c.cmc or f.cmc or 0
+          if ('split'):find(c.layout or '') and not c.oracle:find('Aftermath') then
+            instantSorcery=1+instantSorcery
+          end
+        end
+        if instantSorcery==2 then orientation[1]=true end
+      elseif c.card_faces then
+        local f=c.card_faces[1]
+        local cmc=c.cmc or f.cmc or 0
         c.name=f.name:gsub('"','')..'\n'..f.type_line..'\n'..cmc..'CMC DFC'
         c.oracle = setOracle(f)
         for i, face in ipairs(c.card_faces) do
-          if face.type_line:find('Battle') or face.type_line:find('Room') then
+          if face.type_line and (face.type_line:find('Battle') or face.type_line:find('Room')) then
             orientation[i] = true
           else
             orientation[i] = false
           end
         end
-			else -- NORMAL
-        c.name = c.name:gsub('"', '') .. '\n' .. c.type_line .. '\n' .. c.cmc .. 'CMC'
+      else
+        c.name = (c.name or 'Unknown Card'):gsub('"', '') .. '\n' .. (c.type_line or '') .. '\n' .. tostring(c.cmc or 0) .. 'CMC'
         c.oracle = setOracle(c)
-        if ('planar'):find(c.layout) then
+        if ('planar'):find(c.layout or '') then
           orientation[1] = true
         end
       end
 
       local backDat=nil
-      --Image Handling
       if qTbl.deck and qTbl.image and qTbl.image[n] then
         c.face=qTbl.image[n]
-      elseif c.card_faces and not c.image_uris then --DFC REWORKED for STATES!
-        local faceAddress=trunkateURI( c.card_faces[1].image_uris.normal , qual , imgSuffix )
-        local backAddress=trunkateURI( c.card_faces[2].image_uris.normal , qual , imgSuffix )
+      elseif c.card_faces and not c.image_uris then
+        local faceAddress=trunkateURI(c.card_faces[1].image_uris.normal, qual, imgSuffix)
+        local backAddress=trunkateURI(c.card_faces[2].image_uris.normal, qual, imgSuffix)
         if faceAddress:find('/back/') and backAddress:find('/front/') then
-          local temp=faceAddress;faceAddress=backAddress;backAddress=temp end
+          local temp=faceAddress
+          faceAddress=backAddress
+          backAddress=temp
+        end
         if t.image then faceAddress,backAddress=t.image,t.image end
         c.face=faceAddress
         local f=c.card_faces[2]
-				local cmc=c.cmc or f.cmc or 0
+        local cmc=c.cmc or f.cmc or 0
         local name=f.name:gsub('"','')..'\n'..f.type_line..'\n'..cmc..'CMC DFC'
         local oracle=setOracle(f)
         local b=n
-				
         if qTbl.deck then b=qTbl.deck+n end
         backDat={
           Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,scaleX=1,scaleY=1,scaleZ=1},
-          Name="Card",
+          Name='Card',
           Nickname=name,
           Description=oracle,
           Memo=c.oracle_id,
           CardID=b*100,
           CustomDeck={[b]={
-							FaceURL=backAddress,
-							BackURL=c.back,
-							NumWidth=1,NumHeight=1,Type=0,
-							BackIsHidden=true,UniqueBack=false}},
+            FaceURL=backAddress,
+            BackURL=c.back,
+            NumWidth=1,NumHeight=1,Type=0,
+            BackIsHidden=true,UniqueBack=false}},
         }
-      elseif t.image then --Custom Image
+      elseif t.image then
         c.face=t.image
         t.image=false
       elseif c.image_uris then
-        c.face=trunkateURI( c.image_uris.normal , qual , imgSuffix )
+        c.face=trunkateURI(c.image_uris.normal, qual, imgSuffix)
       end
 
-      -- prepare cardDat
       local cardDat={
         Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,scaleX=1,scaleY=1,scaleZ=1},
-        Name="Card",
+        Name='Card',
         Nickname=c.name,
         Description=c.oracle,
         Memo=c.oracle_id,
         CardID=n*100,
         CustomDeck={[n]={
-						FaceURL=c.face,
-						BackURL=c.back,
-						NumWidth=1,NumHeight=1,Type=0,
-						BackIsHidden=true,UniqueBack=false}},
+          FaceURL=c.face,
+          BackURL=c.back,
+          NumWidth=1,NumHeight=1,Type=0,
+          BackIsHidden=true,UniqueBack=false}},
       }
-			
-      if backDat then --backface is state#2
-        cardDat.States={[2]=backDat}end
-			
-			local landscapeView={0,180,270}
-			--AltView
-			if orientation[1]then cardDat.AltLookAngle=landscapeView end
-			if orientation[2]then cardDat.States[2].AltLookAngle=landscapeView end
 
-      -- Spawn
-      if not(qTbl.deck) or qTbl.deck==1 then        --Spawn solo card
+      if backDat then cardDat.States={[2]=backDat} end
+
+      local landscapeView={0,180,270}
+      if orientation[1] then cardDat.AltLookAngle=landscapeView end
+      if orientation[2] and cardDat.States and cardDat.States[2] then cardDat.States[2].AltLookAngle=landscapeView end
+
+      if not(qTbl.deck) or qTbl.deck==1 then
         local spawnDat={
           data=cardDat,
           position=qTbl.position or {0,2,0},
           rotation=Vector(0,Player[qTbl.color].getPointerRotation(),0)
         }
         spawnObjectData(spawnDat)
-        uLog(qTbl.color..' spawned '..c.name:gsub('\n.*',''))
+        uLog(qTbl.color..' spawned '..(c.name or 'Card'):gsub('\n.*',''))
         endLoop()
-      else                          --Spawn deck
-        if Deck==1 then             --initialize deckDat
-          deckDat={}
+      else
+        if Deck==1 then
           deckDat={
             Transform={posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,scaleX=1,scaleY=1,scaleZ=1},
-            Name="Deck",
-            Nickname=Player[qTbl.color].steam_name or "Deck",
-            Description=qTbl.full or "Deck",
+            Name='Deck',
+            Nickname=Player[qTbl.color].steam_name or 'Deck',
+            Description=qTbl.full or 'Deck',
             DeckIDs={},
             CustomDeck={},
             ContainedObjects={},
           }
         end
-        deckDat.DeckIDs[Deck]=cardDat.CardID      -- add card info into deckDat
+        deckDat.DeckIDs[Deck]=cardDat.CardID
         deckDat.CustomDeck[n]=cardDat.CustomDeck[n]
         deckDat.ContainedObjects[Deck]=cardDat
         if Deck<qTbl.deck then
@@ -363,165 +358,90 @@ local Card=setmetatable({n=1,image=false},
     end)
     if not success then
       printToAll('[b][FF0000]❌ Importer Error Detected[/b]',{1,0,0})
-      printToAll('[FF6666]' .. errorMSG,{0.8,0,0})
-      printToAll('[00FFFF]If this error persists, please report it on Discord or the Workshop page.\n' ..
-                 'Include: what you typed + this error message.',{0,1,1})
+      printToAll(tostring(errorMSG),{0.8,0,0})
       printToAll('[b][0099FF]♻️ Restarting Importer...[/b]',{0,0.5,1})
       for i,o in ipairs(textItems) do
-        if o~=nil then
-          o.destruct()
-        end
+        if o~=nil then o.destruct() end
       end
       self.reload()
     end
   end})
 
 function setOracle(c)local n='\n[b]'
-  if c.power then n=n..c.power..'/'..c.toughness
+  local oracleText = (c.oracle_text or ''):gsub('"',"'")
+  if c.power then n=n..c.power..'/'..(c.toughness or '')
   elseif c.loyalty then n=n..tostring(c.loyalty)
-  else n=false end return c.oracle_text:gsub('\"',"'")..(n and n..'[/b]'or'') end
+  else n=false end return oracleText..(n and n..'[/b]'or'') end
 
 function setCard(wr,qTbl,originalData)
-  if wr and (wr.is_error or (wr.response_code and wr.response_code >= 400)) then
-    -- If this was a locale/secondary lookup, fall back to the original card
-    if originalData and originalData.name then
-      WebRequest.get(BACKEND_URL..'/card/'..originalData.name:gsub('%W',''),function(a)
-        local success, result = pcall(function()
-          setCard(a,qTbl)
-        end)
-        if not success then
-          log('[Card Importer] Error in fallback request: ' .. tostring(result))
-          endLoop()
-        end
-      end)
-      return
-    end
-    if handleWebError(wr, qTbl, 'Card request failed') then
-      return
-    end
+  if handleWebError(wr, qTbl, 'Card request failed') then
+    return
   end
 
-  if wr.text and wr.text ~= '' then
-    -- Check if response is HTML before attempting to decode
-    if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
-      Player[qTbl.color].broadcast('Backend returned HTML error. Check connection.',{1,0,0})
-      endLoop()
-      return
-    end
-    
-    local json=JSON.decode(wr.text)
-    
-    if json and json.object=='card' then
-      if json._corrected_name and json._original_name then
-        if not qTbl or not qTbl.deck or qTbl.deck <= 1 then
-          Player[qTbl.color].broadcast('Using closest match: '..json._corrected_name..' (from "'..json._original_name..'")',{0.9,0.9,0.9})
-        end
-      end
-			
-			--Fancy Art Series
-			if originalData and originalData.layout=='art_series'then
-				for k in ('mana_cost type_line oracle_text colors power toughness loyalty'):gmatch('%S+')do
-					--if json.card_faces and json.card_faces then
-						for i=1,2 do
-							if json.card_faces and json.card_faces[i][k]then
-								originalData.card_faces[i][k]=json.card_faces[i][k]
-							elseif json[k]then
-								originalData.card_faces[i][k]=json[k]
-				end end end
-				for k in ('cmc type_line color_identity layout'):gmatch('%S+')do
-					if json[k]then
-						originalData[k]=json[k]
-				end end
-				if json.image_uris then
-					originalData.card_faces[2].image_uris = json.image_uris
-				else
-					originalData.card_faces[2].image_uris = json.card_faces[2].image_uris
-				end
-				Card(originalData, qTbl)
-
-			elseif json.layout=='art_series'then
-WebRequest.get(BACKEND_URL..'/card/'..json.card_faces[1].name,function(request)
-          local success, result = pcall(function()
-            if request.text:match('^%s*<') or request.text:match('<!DOCTYPE') then
-              Card(json,qTbl)
-              return
-            end
-            local locale_json = JSON.decode(request.text)
-            if locale_json.object=='error' then
-              Card(json,qTbl)
-            else
-              setCard(request, qTbl, json)
-            end
-          end)
-          if not success then
-            -- If any error occurs in the nested request, spawn the original card and clean up
-            log('[Card Importer] Error in art_series nested request: ' .. tostring(result))
-            Card(json,qTbl)
-          end
-        end)
-
-      elseif json.lang==lang then
-        Card(json, qTbl)
-      elseif json.lang=='en' then
-        WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/'..lang,function(request)
-          local success, result = pcall(function()
-            if request.text:match('^%s*<') or request.text:match('<!DOCTYPE') then
-              Card(json,qTbl)
-              return
-            end
-            local locale_json = JSON.decode(request.text)
-            if locale_json.object=='error' then
-              Card(json,qTbl)
-            else
-              setCard(request, qTbl, json)
-            end
-          end)
-          if not success then
-            -- If any error occurs in the nested request, spawn the English card and clean up
-            log('[Card Importer] Error in language fallback nested request: ' .. tostring(result))
-            Card(json,qTbl)
-          end
-        end)
-      else
-        WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/en',function(a)
-          local success, result = pcall(function()
-            setCard(a,qTbl,json)
-          end)
-          if not success then
-            -- If any error occurs, spawn the original card and clean up
-            log('[Card Importer] Error in English fallback nested request: ' .. tostring(result))
-            Card(json,qTbl)
-          end
-        end)
-      end
-      return
-    -- elseif originalData then
-      -- Card(json,qTbl)
--- pieHere: ^^^
--- the above bit is probably supposed to be Card(originalData,qTbl) to spawn the original foreign card instead of the error json?
--- replaced with a fuzzy search on the card name instead --> seems to find/get the english version after all
-    elseif originalData and originalData.name then
-      WebRequest.get(BACKEND_URL..'/card/'..originalData.name:gsub('%W',''),function(a)
-        local success, result = pcall(function()
-          setCard(a,qTbl)
-        end)
-        if not success then
-          -- If any error occurs, broadcast error and clean up
-          log('[Card Importer] Error in originalData name search: ' .. tostring(result))
-          Player[qTbl.color].broadcast('Error processing card data.',{1,0,0})
-          endLoop()
-        end
-      end)
-      return
-    elseif json and json.object=='error' then
-      Player[qTbl.color].broadcast(json.details,{1,0,0})
-      endLoop()
-      return
-    end
-  else
-    -- Handle 204 No Content (suppressed duplicate errors) and other empty responses silently
+  if not wr or not wr.text or wr.text == '' then
     endLoop()
+    return
   end
+
+  if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
+    Player[qTbl.color].broadcast('Backend returned HTML error. Check connection.',{1,0,0})
+    endLoop()
+    return
+  end
+
+  local ok, json = pcall(function() return JSON.decode(wr.text) end)
+  if not ok or not json then
+    Player[qTbl.color].broadcast('Invalid card payload from backend.',{1,0,0})
+    endLoop()
+    return
+  end
+
+  if json.object=='card' then
+    if json.lang==lang or not json.set or not json.collector_number then
+      Card(json, qTbl)
+      return
+    elseif json.lang=='en' then
+      WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/'..lang,function(request)
+        local success, result = pcall(function()
+          setCard(request, qTbl, json)
+        end)
+        if not success then
+          log('[Card Importer] Error in language fallback nested request: ' .. tostring(result))
+          Card(json,qTbl)
+        end
+      end)
+      return
+    else
+      WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/en',function(a)
+        local success, result = pcall(function()
+          setCard(a,qTbl,json)
+        end)
+        if not success then
+          log('[Card Importer] Error in English fallback nested request: ' .. tostring(result))
+          Card(json,qTbl)
+        end
+      end)
+      return
+    end
+  elseif originalData and originalData.name then
+    WebRequest.get(BACKEND_URL..'/card/'..originalData.name:gsub('%W',''),function(a)
+      local success, result = pcall(function()
+        setCard(a,qTbl)
+      end)
+      if not success then
+        log('[Card Importer] Error in originalData name search: ' .. tostring(result))
+        Player[qTbl.color].broadcast('Error processing card data.',{1,0,0})
+        endLoop()
+      end
+    end)
+    return
+  elseif json.object=='error' then
+    Player[qTbl.color].broadcast(json.details,{1,0,0})
+    endLoop()
+    return
+  end
+
+  endLoop()
 end
 
 function parseForToken(oracle,qTbl)endLoop()end
@@ -601,544 +521,135 @@ function spawnList(wr,qTbl)
   endLoop()
 end
 
---[[DeckFormatHandle]]
-local sOver={['10ED']='10E',DAR='DOM',MPS_AKH='MP2',MPS_KLD='MPS',FRF_UGIN='UGIN'}
-local dFile={
-  uidCheck=',%w+-%w+-%w+-%w+-%w+',uid=function(line)
-    local num,uid=string.match('__'..line..'__','__%a+,(%d+).+,([%w%-]+)__')
-    return num,BACKEND_URL..'/cards/'..uid end,
+local function createFastProgressTicker(qTbl, count)
+  local active = true
+  local progress = 0
+  local target = math.max((tonumber(count) or 1) - 1, 1)
 
-  dckCheck='%[[%w_]+:%w+%]',dck=function(line)
-    local num,set,col,name=line:match('(%d+).%W+([%w_]+):(%w+)%W+(%w.*)')
-    local alter=name:match(' #(http%S+)')or false
-    name=name:gsub(' #.+','')
-    if set:find('DD3_')then set=set:gsub('DD3_','')
-    elseif sOver[set]then set=sOver[set]end
-    set=set:gsub('_.*',''):lower()
-    return num,BACKEND_URL..'/cards/'..set..'/'..col,alter end,
-
-  decCheck='%[[%w_]+%]',dec=function(line)
-    local num,set,name=line:match('(%d+).%W+([%w_]+)%W+(%w.*)')
-    if num==nil or name==nil then    --pieHere, avoids that one edge-case error with deckstats decks
-      return 0,'',''
-    end
-    local num,set,name=line:match('(%d+).%W+([%w_]+)%W+(%w.*)')
-    local alter=name:match(' #(http%S+)')or false
-    name=name:gsub(' #.+','')
-    if set:find('DD3_')then set=set:gsub('DD3_','')
-    elseif sOver[set]then set=sOver[set]end
-    set=set:gsub('_.*',''):lower()
-    return num,BACKEND_URL..'/card/'..name..'?set='..set,alter end,
-
-  defCheck='%d+.%w+',def=function(line)
-    local num,name=line:match('(%d+).(.*)')
-    local alter=name:match(' #(http%S+)')or false
-    name=name:gsub(' #.+','')
-    return num,BACKEND_URL..'/card/'..name,alter end}
-
---[[Deck spawning]]
-function spawnDeck(wr,qTbl)
-  if handleWebError(wr, qTbl, 'Deck fetch failed') then
-    return
-  end
-  if wr.text:find('!DOCTYPE')then
-    uLog(wr.url,'Mal Formated Deck '..qTbl.color)
-    uNotebook('D'..qTbl.color,wr.url)
-    Player[qTbl.color].broadcast('Your Deck list could not be found\nMake sure the Deck is set to PUBLIC',{1,0.5,0})
-    textItems[#textItems].destruct()
-	  table.remove(textItems,#textItems)
-  else
-    uLog(wr.url,'Deck Spawned by '..qTbl.color)
-    local sideboard=''
-    qTbl.image={}
-    local deck,list={},wr.text:gsub('\n%S*Sideboard(.*)',function(a)sideboard=a return ''end)
-    if sideboard~=''then
-      Player[qTbl.color].broadcast('Extraboards Found and pasted into Notebook\n"Scryfall deck" to spawn most recent Notebook Tab')
-      uNotebook(qTbl.url,sideboard)end
-
-    for b in list:gmatch('([^\r\n]+)')do
-      for k,v in pairs(dFile)do
-        if type(v)=='string'and b:find(v)then
-          local n,a,r=dFile[k:sub(1,3)](b)
-          for i=1,n do table.insert(deck,a)
-            --table.insert(qTbl.image,r)
-          end
-          break
-        end
-      end
-    end
-    qTbl.deck=#deck
-
-    for i,url in ipairs(deck) do
-      Wait.time(function()WebRequest.get(url,function(c) setCard(c,qTbl) end)end,i*Tick)
-    end
-  end
-end
-
-function convertQuotedValues(str)
-	local a,b= str:gsub('%b""',function(g)return g:gsub(',',''):gsub('"','')end)
-	return a
-end
-
-function spawnDeckFromScryfall(wr,qTbl)
-  if handleWebError(wr, qTbl, 'Scryfall deck fetch failed') then
-    return
-  end
-	local side,deck,list='',{},wr.text
-	
-	for line in list:gmatch('[^\r\n]+')do
-		if ('SideboardMaybeboard'):find(line:match('%w+'))then
-			side=side..convertQuotedValues(line):match('%d+,[^,]+'):gsub(',',' ')..'\n'
-		elseif line:find(',(%d+),')then
-			for i=1,line:match(',(%d+),')do
-				table.insert(deck, line:match('https://scryfall.com/card/([^/]+/[^/]+)') )
-			end
-		end
-	end
-	
-  if side~=''then
-    Player[qTbl.color].broadcast('Sideboard Found and pasted into Notebook\n"Scryfall deck" to spawn most recent Notebook Tab')
-    uNotebook(qTbl.url,side)
-  end
-	
-  qTbl.deck=#deck
-  for i,u in ipairs(deck)do
-    Wait.time(function()WebRequest.get(BACKEND_URL..'/cards/'..u,function(c)
-					if c.text:match('^%s*<') or c.text:match('<!DOCTYPE') then
-						WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
-						return
-					end
-					local t=JSON.decode(c.text)
-					if t.object~='card'then
-						WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
-					else setCard(c,qTbl) end end)end,i*Tick)
-  end
-	
-end
-
-setCSV=4
-function spawnCSV(wr,qTbl)
-  if handleWebError(wr, qTbl, 'CSV deck fetch failed') then
-    return
-  end
-  local side,deck,list='',{},wr.text
-  for line in list:gmatch('([^\r\n]+)')do
-    local tbl,l={},','..line:gsub(',("[^"]+"),',function(g)return','..g:gsub(',','')..','end)
-    l=l:gsub(',',', ')
-    for csv in l:gmatch(',([^,]+)')do
-      if csv:len()==1 then break
-      else
-        table.insert(tbl,csv:sub(2))
-      end
-    end
-    if #tbl<setCSV-1 then uLog(tbl)printToAll('Tell Amuzet that an Error occored in spawnCSV:\n'..qTbl.full)
-      endLoop()
+  local function tick()
+    if not active then
       return
-    elseif not tbl[2]:find('%d+')then--FirstCSVLine
-    elseif(setCSV==3)or(
-      setCSV==4 and tbl[1]:find('main'))or(
-      setCSV==7 and not tbl[1]:find('board'))then
-      local b=BACKEND_URL..'/card/'..tbl[3]
-      if tbl[setCSV]and tbl[setCSV]~='000'then b=b..'?set='..tbl[setCSV]end
-      for i=1,tbl[2]do table.insert(deck,b)end
-    else--Side/Maybe
-      side=side..tbl[2]..' '..tbl[3]..'\n'
-      uLog(side)
     end
+
+    if progress < target then
+      progress = progress + 1
+    end
+
+    if qTbl and qTbl.text then
+      qTbl.text('Spawning here\n'..tostring(progress)..' cards loaded')
+    end
+
+    Wait.time(tick, 0.06)
   end
-  if side~=''then
-    Player[qTbl.color].broadcast('Sideboard Found and pasted into Notebook\n"Scryfall deck" to spawn most recent Notebook Tab')
-    uNotebook(qTbl.url,side)
-  end
-  qTbl.deck=#deck
-  for i,u in ipairs(deck)do
-    Wait.time(function()
-                WebRequest.get(u,function(c)
-                                   if c.text:match('^%s*<') or c.text:match('<!DOCTYPE') then
-                                     WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
-                                     return
-                                   end
-                                   local t=JSON.decode(c.text)
-                                   if t.object~='card'then
-                                     if u:find('%?') then
-                                       WebRequest.get(u:gsub('%?.*',''),function(c)setCard(c,qTbl)end)
-                                     else
-                                       WebRequest.get(BACKEND_URL..'/card/blankcard',function(c)setCard(c,qTbl)end)
-                                     end
-                                   else
-                                     setCard(c,qTbl)
-                                   end
-                end)
-    end,i*Tick)
+
+  tick()
+
+  return function(finalCount)
+    active = false
+    local finalValue = tonumber(finalCount) or progress
+    if qTbl and qTbl.text and finalValue > 0 then
+      qTbl.text('Spawning here\n'..tostring(finalValue)..' cards loaded')
+    end
   end
 end
 
-local DeckSites={
-  moxfield=function(a)      -- PieHere: added moxfield support
-    local urlSuffix = a:match("moxfield%.com/decks/(.*)")
-    local deckID = urlSuffix:match("([^%s%?/$]*)")
-    local url = "https://api.moxfield.com/v2/decks/all/" .. deckID .. "/"
-    return url,function(wr,qTbl)
-      if handleWebError(wr, qTbl, 'Moxfield deck fetch failed') then
-        return
-      end
-      local deckName = wr.text:match('"name":"(.-)","description"'):gsub('(\\u....)',''):gsub('%W','')
-      local startInd=1
-      local endInd
-      local keepGoing=true
-      local cards={}
-      n=0
-      while keepGoing do
-        n=n+1
-        startInd=wr.text:find('{"quantity":',startInd)
-        if startInd==nil then keepGoing=false break end
-        endInd=findClosingBracket(wr.text,startInd)
-        if endInd==nil then keepGoing=false break end
-        local cardSnip = wr.text:sub(startInd,endInd)
-        card={
-          quantity=cardSnip:match('"quantity":(%d+)'),
-          boardType=cardSnip:match('"boardType":"(%a+)"'),
-          scryfall_id=cardSnip:match('"scryfall_id":"(.-)"'),
-          name=cardSnip:match('"name":"(.-)"'):gsub('(\\u....)',''),
-        }
-        table.insert(cards,card)
-        startInd=endInd+1
-      end
-      local sideboard=''
-      qTbl.deck=0
-      for i,card in ipairs(cards) do
-        if card.boardType=='sideboard' or card.boardType=='maybeboard' then
-          sideboard=sideboard..card.quantity..' '..card.name..'\n'
-        elseif card.boardType=='mainboard' or card.boardType=='commanders' or card.boardType=='companions' then
-          for i=1,card.quantity do
-            qTbl.deck=qTbl.deck+1
-            Wait.time(function()
-              WebRequest.get(BACKEND_URL..'/cards/'..card.scryfall_id,
-                function(c)setCard(c,qTbl)end)end,qTbl.deck*Tick*2)
-          end
-        end
-      end
-      if sideboard~='' then
-        Player[qTbl.color].broadcast(deckName..' Sideboard and Maybeboard in notebook.\nType "Scryfall deck" to spawn it now.')
-        uNotebook(deckName,sideboard)
-      end
-    end
-  end,
-  archidekt=function(a)
-    local deckID = a:match('archidekt%.com/decks/(%d+)')
-    if not deckID then
-      return a,function(_wr,qTbl)
-        Player[qTbl.color].broadcast('Invalid Archidekt deck URL format',{1,0.2,0.2})
-      end
-    end
+local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
+  if not qTbl or not queryRaw or queryRaw == '' or not count or count <= 1 then
+    return false
+  end
 
-    return 'https://archidekt.com/api/decks/' .. deckID .. '/', function(wr,qTbl)
-      if handleWebError(wr, qTbl, 'Archidekt deck fetch failed') then
+  local payload = {
+    q = queryRaw,
+    count = count,
+    back = Back[qTbl.player] or Back.___
+  }
+
+  if qTbl.text then
+    qTbl.text('Building random deck\nfast path')
+  end
+
+  local stopProgressTicker = function() end
+  if qTbl and qTbl.text then
+    stopProgressTicker = createFastProgressTicker(qTbl, count)
+  end
+
+  WebRequest.custom(
+    BACKEND_URL .. '/random/build',
+    'POST',
+    true,
+    JSON.encode(payload),
+    {
+      Accept = 'application/x-ndjson',
+      ['Content-Type'] = 'application/json'
+    },
+    function(wr)
+      if not wr.is_done then
         return
       end
 
-      local ok, deckData = pcall(function() return JSON.decode(wr.text) end)
-      if not ok or type(deckData) ~= 'table' or type(deckData.cards) ~= 'table' then
-        Player[qTbl.color].broadcast('Failed to parse Archidekt deck data',{1,0.2,0.2})
-        return
-      end
-
-      local sideboard=''
-      qTbl.deck=0
-
-      for _,entry in ipairs(deckData.cards) do
-        local quantity = tonumber(entry.quantity or entry.qty or entry.count) or 1
-        local cardObj = entry.card or {}
-        local oracleObj = cardObj.oracleCard or {}
-        local cardName = oracleObj.name or cardObj.name or entry.name or 'Unknown Card'
-        local scryfallId = cardObj.uid or cardObj.scryfallid or cardObj.scryfall_id or oracleObj.scryfall_id
-
-        local isSideboard = false
-        if type(entry.categories) == 'table' then
-          for _,category in ipairs(entry.categories) do
-            local c = tostring(category):lower()
-            if c == 'sideboard' or c == 'maybeboard' then
-              isSideboard = true
-              break
-            end
-          end
-        end
-
-        if isSideboard then
-          sideboard = sideboard .. quantity .. ' ' .. cardName .. '\n'
+      if wr.is_error or (wr.response_code and wr.response_code >= 400) or not wr.text or wr.text == '' then
+        stopProgressTicker(0)
+        if onFallback then
+          onFallback()
         else
-          for _i=1,quantity do
-            qTbl.deck=qTbl.deck+1
-            local cardUrl
-            if scryfallId and scryfallId ~= '' then
-              cardUrl = BACKEND_URL..'/cards/'..scryfallId
-            else
-              cardUrl = BACKEND_URL..'/card/'..cardName:gsub(' ','%%20')
-            end
-            Wait.time(function()
-              WebRequest.get(cardUrl,function(c)setCard(c,qTbl)end)
-            end,qTbl.deck*Tick*2)
+          handleWebError(wr, qTbl, 'Random deck fast path failed')
+        end
+        return
+      end
+
+      local deckLine = nil
+      for s in wr.text:gmatch('[^\r\n]+') do
+        if s and s ~= '' then
+          local ok, parsed = pcall(function()
+            return JSON.decode(s)
+          end)
+          if ok and parsed and parsed.object ~= 'warning' then
+            deckLine = s
+            break
           end
         end
       end
 
-      if sideboard~='' then
-        Player[qTbl.color].broadcast('Archidekt sideboard and maybeboard added to Notebook\n"Scryfall deck" to spawn most recent Notebook Tab')
-        uNotebook(qTbl.url,sideboard)
+      if not deckLine then
+        stopProgressTicker(0)
+        if onFallback then
+          onFallback()
+        else
+          Player[qTbl.color].broadcast('Backend returned no cards for random deck.',{1,0,0})
+          endLoop()
+        end
+        return
       end
-    end
-  end,
-  deckstats=function(a)return a:gsub('%?cb=%d.+','')..'?include_comments=1&export_txt=1',spawnDeck end,
-  pastebin=function(a)return a:gsub('com/','com/raw/'),spawnDeck end,
-  mtgdecks=function(a)return a..'/dec',spawnDeck end,
 
-  deckbox=function(a)return a..'/export',function(r,qTbl)
-    if handleWebError(r, qTbl, 'Deckbox export failed') then
-      return
-    end
-    local wr={url=r.url}
-    wr.text=r.text:match('%Wbody%W(.+)%W%Wbody%W'):gsub('<br.?>','\n')
-    spawnDeck(wr,qTbl)end end,
---scryfall=function(a)return'https://api.scryfall.com'..a:match('(/decks/.*)')..'/export/text',spawnDeck end,
-  scryfall=function(a)setCSV=7 return'https://api.scryfall.com'..a:match('(/decks/.*)')..'/export/csv',spawnDeckFromScryfall end,
-  --https://tappedout.net/users/i_am_moonman/lists/15-11-20-temp-cube/?cat=type&sort=&fmt=csv
-  tappedout=function(a)if a:find('/lists/')then setCSV=3 else setCSV=4 end
-    return a:gsub('.cb=%d+','')..'?fmt=csv',spawnCSV end,
-  -- Scryfall decks now use direct CSV export (not through backend)
-  scryfall=function(a)setCSV=7 return'https://api.scryfall.com'..a:match('(/decks/.*)')..'/export/csv',spawnDeckFromScryfall end,
---A function which returns a url and function which handels that url's output
-  mtggoldfish=function(a)
-    if a:find('/archetype/')then return a,function(wr,qTbl)Player[qTbl.color].broadcast('This is an Archtype!\nPlease spawn a User made Deck.',{0.9,0.1,0.1})endLoop()end
-    elseif a:find('/deck/')then return a:gsub('/deck/','/deck/download/'):gsub('#.+',''),spawnDeck
-    else return a,function(wr,qTbl)Player[qTbl.color].broadcast('This MTGgoldfish url is malformated.\nOr unsupported contact Amuzet.')end end end,
-  cubecobra=function(a)return a:gsub('cube/deck','cube/deck/download/mtgo'):gsub('?seat=', '/'),spawnDeck end
-}
-local apiRnd=BACKEND_URL..'/random?q='
-local apiSet=apiRnd..'is:booster+s:'
-function rarity(m,r,u)
-  if math.random(1,m or 36)==1 then return'r:mythic'
-  elseif math.random(1,r or 8)==1 then return'r:rare'
-  elseif math.random(1,u or 4)==1 then return'r:uncommon'
-  else return'r:common'end end
-function typeCo(p,t)local n=math.random(#p-1,#p)for i=13,#p do if n==i then p[i]=p[i]..'+'..t else p[i]=p[i]..'+-('..t..')'end end return p end
-local Booster=setmetatable({
-    dom=function(p)return typeCo(p,'t:legendary')end,
-    war=function(p)return typeCo(p,'t:planeswalker')end,
-    znr=function(p)return typeCo(p,'t:land+is:mdfc')end,
-    tsp='tsb',mb1='fmb1',mh2='h1r',stx='sta',--Garenteed
-    bfz='exp',ogw='exp',kld='mps',aer='mps',akh='mp2',hou='mp2',bro='brr'--Masterpiece
-  },{__call=function(t,set,n)
-    local pack,u={},apiSet..set..'+'
-    u=u:gsub('%+s:%(','+(')
-    if not n and t[set]and type(t[set])=='function'then
-      return t[set](t(set,true))
-    else
-      for c in('wubrg'):gmatch('.')do table.insert(pack,u..'r:common+c>='..c)end
-      for i=1,6 do table.insert(pack,u..'r:common+-t:basic')end
-      --masterpiece math replaces 11th Common
-      if not n and((t[set]and math.random(1,144)==1)or('tsp mb1 mh2 sta'):find(set))then
-        pack[#pack]=apiSet..t[set]end
-      for i=1,3 do table.insert(pack,u..'r:uncommon')end
-      table.insert(pack,u..rarity(8,1))
-      return pack end end})
---ReplacementSlot
-function rSlot(p,s,a,b)for i,v in pairs(p)do if i~=6 then p[i]=v..a else p[i]=apiSet..s..'+'..rarity()..b end end return p end
---Weird Boosters
-Booster['tsr']=function(p)p[11]=p[9]:gsub('is:booster+r:common','r:special')return p end
-Booster['unf']=function(p)local j=rSlot(p,'unf','+-t:Attraction','+t:Attraction')
-  table.insert(j,j[6])return j end
-Booster['ust']=function(p)local j=rSlot(p,'ust','+-t:Contraption','+t:Contraption')
-  table.insert(j,j[6])return j end
-for s in('clb cmr'):gmatch('%S+')do
-  Booster[s]=function(p)--wubrg CCCCC CCUUU URLLF
-    local u=apiSet..s..'+t:legendary+'--L
-    p[#p]=p[#p]..'+-t:legendary'
-    table.insert(p,12,p[12])
-    table.insert(p,6,p[6])
-    table.insert(p,u..rarity(8,1))
-    table.insert(p,u..rarity(8,1))
-    table.insert(p,apiSet..s..'+is:etched')
-    printToAll('20 Card Booster, draft two each pick')
-    return p end end
-for s in('2xm 2x2'):gmatch('%S+')do
-  Booster[s]=function(p)p[11]=p[12];table.insert(p,apiSet..s..'+'..rarity(8,1))return p end end
---Booster['2xm']=function(p)p[11]=p[#p]for i=9,10 do p[i]=apiSet..'2xm'..'+'..rarity()end return p end
-for s in('isd dka soi emn'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-is:transform','+is:transform')end end
-for s in('mid vow'):gmatch('%S+')do--Crimson Moon
-  Booster[s]=function(p)local n=math.random(#p-1,#p)for i,v in pairs(p)do if i==6 or i==n then p[i]=p[i]..'+is:transform'else p[i]=p[i]..'+-is:transform'end end return p end end
-for s in('cns cn2'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-wm:conspiracy','+wm:conspiracy')end end
-for s in('rav gpt dis rtr gtc dgm grn rna'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-t:land','+t:land+-t:basic')end end
-for s in('ice all csp mh1 khm'):gmatch('%S+')do
-  Booster[s]=function(p)p[6]=apiSet..s..'+t:basic+t:snow'return p end end
---wubrg CCCCC CUUUR LLYUF
-Booster['cmm']=function(p)
-	for i=12,15 do p[i]=p[i]..'+-t:legendary'end
-	local sL=apiSet..'cmm+t:legendary'
-	--2 Legendaries
-	table.insert(p,sL)
-	table.insert(p,sL)
-	--1 Rare+ Legendary
-	table.insert(p,sL..'+'..rarity(8,1))
-	--1 more Uncommon
-	table.insert(p,apiSet..'cmm+r:uncommon+-t:legendary')
-	--1 any Foil
-	table.insert(p,apiSet..'cmm+'..rarity())
-	--20 Total
-	return p end
+      local okDeck, deckDat = pcall(function()
+        return JSON.decode(deckLine)
+      end)
+      if not okDeck or not deckDat or not deckDat.ContainedObjects then
+        stopProgressTicker(0)
+        if onFallback then
+          onFallback()
+        else
+          Player[qTbl.color].broadcast('Invalid random deck payload from backend.',{1,0,0})
+          endLoop()
+        end
+        return
+      end
 
---Custom Booster Packs
-Booster.CMMDRAFT=function(qTbl)return Booster('cmm',true)end
-Booster.ADAMS=function(qTbl)
-  local pack,u={},BACKEND_URL..'/random?q=f:standard+'
-  for c in ('wubrg'):gmatch('.')do
-    table.insert(pack,u..'r:common+c:'..c)end
-  for i=1,5 do table.insert(pack,u..'r:common+-t:basic')end
-  for i=1,3 do table.insert(pack,u..'r:uncommon')end
-  table.insert(pack,u..rarity(8,1))
-  table.insert(pack,u..'t:basic')
-  table.insert(pack,u:sub(1,39)..'(border:borderless+or+frame:showcase+or+set:plist)')
-  if math.random(1,2)==1 then pack[#pack-1]=pack[#pack]end
-  return pack end
-Booster.STANDARD=function(qTbl)
-  local pack,u={},BACKEND_URL..'/random?q=f:standard+'
-  for c in ('wubrg'):gmatch('.')do
-    table.insert(pack,u..'r:common+c:'..c)end
-  for i=1,5 do table.insert(pack,u..'r:common+-t:basic')end
-  for i=1,3 do table.insert(pack,u..'r:uncommon')end
-  table.insert(pack,u..rarity(8,1))
-  table.insert(pack,u..'t:basic')
-  table.insert(pack,u:sub(1,39)..'(border:borderless+or+frame:showcase+or+set:plist)')
-  if math.random(1,2)==1 then pack[#pack-1]=pack[#pack]end
-  return pack end
-Booster.MANAMARKET=function(qTbl)
-  local pack,u={},BACKEND_URL..'/random?q=f:standard+'
-  for c in ('wubrg'):gmatch('.')do
-    table.insert(pack,u..'r:common+c:'..c)end
-  for i=1,5 do table.insert(pack,u..'r:common+-t:basic')end
-  for i=1,3 do table.insert(pack,u..'r:uncommon')end
-  table.insert(pack,u..rarity(8,1))
-  table.insert(pack,u..'t:basic')
-  table.insert(pack,u:sub(1,39)..'(set:tafr+or+set:tstx+or+set:tkhm+or+set:tznr+or+set:sznr+or+set:tm21+or+set:tiko+or+set:tthb+or+set:teld)')
-  for i=#pack-1,#pack do
-    if math.random(1,2)==1 then
-      pack[i]=u..'(border:borderless+or+frame:showcase+or+frame:extendedart+or+set:plist+or+set:sta)'
-    end end
-  return pack end
-Booster.PLANAR=function(qTbl)
-	--((t:plane or t:phenomenon) o:planeswalk) or 
-	local u=BACKEND_URL..'/random?q='
-	local additional="+or+o:'planar+di'+or+o:'will+of+the+planeswalker'"
-	
-	local pack={
-	u..'frame:2015+c=w',
-	u..'frame:2015+c=u',
-	u..'frame:2015+c=b',
-	u..'frame:2015+c=r',
-	u..'frame:2015+c=g',
-	u..'frame:2015+c=c',
-	u..'frame:2015+c>1',
-	u..'frame:2015+c<2+id>1',
-	u..'frame:2015+-is:permanent',
-	u..'frame:2015+-t:creature'..additional,
-	--u..'frame:2015+is:french_vanilla',
-	--u..'is:vanilla',
-	u..'t:planeswalker',
-	u..'(t:plane+or+t:phenomenon)'..additional,
-	u..'((t:plane+or+t:phenomenon)+o:planeswalk)',
-	u..'((t:plane+or+t:phenomenon)+-o:planeswalk)',
-	u..'(t:plane+or+t:phenomenon)',
-	u..'frame:2015'
-	}
-	
-	return pack end
---PLANES
-Booster.CONSPIRACY=function(qTbl)--wubrgCCCCCTUUURT
-  local p=Booster('(s:cns+or+s:cn2)')
-  local z=p[#p]:gsub('r:%S+',rarity(9,6,3))
-  table.insert(p,z)
-  p[6]=p[math.random(10,12)]
-  for i,s in pairs(p)do
-    if i==6 or i==#p then
-      p[i]=p[i]..'+wm:conspiracy'
-    else p[i]=p[i]..'+-wm:conspiracy'end end
-  return p end
-Booster.INNISTRAD=function(qTbl)--wubrgDCCCCDUUURD
-  local p=Booster('(s:isd+or+s:dka+or+s:avr+or+s:soi+or+s:emn+or+s:mid+s:vow)')
-  local z=p[#p]:gsub('r:%S+',rarity(8,1))
-  table.insert(p,z)
-  p[11]=p[12]
-  for i,s in pairs(p)do
-    if i==6 or i==11 or i==#p then
-      p[i]=p[i]..'+is:transform'
-    else p[i]=p[i]..'+-is:transform'end end
-  return p end
-Booster.RAVNICA=function(qTbl)--wubrgmmm???UUURL
-  local l,p='t:land+-t:basic',Booster('(s:rav+or+s:gpt+or+s:dis+or+s:rtr+or+s:gtc+or+s:dgm+or+s:grn+or+s:rna)')
-  table.insert(p,p[#p])
-  for i=6,8 do p[i]=p[8]..'+id>=2'end
-  for i=9,math.random(9,11)do p[i]=p[11]..'+id<=1'end
-  for i,s in pairs(p)do
-    if i==#p then
-      p[i]=p[i]:gsub('r:%S+',rarity(9,6,3))..'+'..l
-    else p[i]=p[i]..'+-'..l end end
-  return p end
-Booster.KAMIGAWA=function(qTbl)--wubrgCCCCCCUUURN
-  local p=Booster('(s:chk+or+s:bok+or+s:sok+or+s:neo)')
-  local z=p[#p]:gsub('r:%S+',rarity(8,4,1)..'+t:legendary')
-  table.insert(p,z)
-  --{'t:creature','t:creature','-t:creature','t:equipment','t:artifact -t:equipment','(t:saga or t:shrine or t:aura)','t:enchantment -(t:saga or t:shrine or t:aura)'}
-  return p end
-Booster.MIRRODIN=function(qTbl)
-  local p=Booster('(s:mrd+or+s:dst+or+s:5dn+or+s:som+or+s:mbs+or+s:nph)')
-  return p end
-Booster.PHYREXIA=function(qTbl)
-  local p=Booster.MIRRODIN(qTbl)
-  table.insert(p,p[#p])
-  p[11]=p[12]
-  local s='(wm:phyrexian+or+ft:phyrex+or+phyrex+or+yawgmoth+or+is:phyrexian+or+ft:yawgmoth+or+art:phyrexian)+(is:spell+or+t:land)'
-  for _,i in pairs({6,11,#p})do
-    p[i]=p[i]:gsub('%b()',s)end
-  return p end
-Booster.ZENDIKAR=function(qTbl)
-  local p=Booster('(s:zen+or+s:wwk+or+s:roe+or+s:bfz+or+s:ogw+or+s:znr)')
-  --Masterpiece
-  local mSlot='(s:exp+or+s:zne)'
-  if math.random(144)~=1 then
-    p[6]=p[6]:gsub('%(.+',mSlot)end
-  return p end
-Booster.HELP=function(qTbl)
-  local s=''
-  for k,_ in pairs(Booster)do
-    if k==k:upper()then
-      s=s..'[i][ff7700]'..k..'[/i] , '
+      local spawnDat={
+        data=deckDat,
+        position=qTbl.position or {0,2,0},
+        rotation=Vector(0,Player[qTbl.color].getPointerRotation(),180)
+      }
+      stopProgressTicker(#deckDat.ContainedObjects)
+      spawnObjectData(spawnDat)
+      Player[qTbl.color].broadcast('All '..tostring(#deckDat.ContainedObjects)..' cards loaded (fast path)!',{0.5,0.8,0.5})
+      endLoop()
     end
-  end
---NotWorking[b][0077ff]Scryfall booster[/b] [i](t:artifact)[/i]  [-][Spawn a Booster with all cards matching that search querry, in this case only Artifacts]
-  Player[qTbl.color].broadcast([[
-[b][0077ff]Scryfall booster[/b] [i]xln[/i]  [-][Spawns Ixalan Booster]
-[b][0077ff]Scryfall booster[/b] [i]SET[/i]  [-][Spawns a Booster with that [i]SET[/i] code as defined by Scryfall.com]
+  )
 
-[b]Custom Masters Packs[/b] [The following list are Double Master like packs made by Amuzet and friends]
- > ]]..s)
-  return Booster('plist')end
-  
-function spawnPack(qTbl,pack)
-  qTbl.deck=#pack
-  qTbl.mode='Deck'
-  log(pack)
-	--TODO: prevent dups, divert to a seperate function before setCard()
-  for i,u in pairs(pack)do
-    Wait.time(function()WebRequest.get(u,function(wr)
-					if wr.text:find('object:"error"')then log(u)end
-					--Divert here
-          setCard(wr,qTbl)end)end,i*Tick)end
-	--Store the returned pack check for dups
-	--Rerun pack if dups 3 of same or more than a pair
-	--Exclude Multiverse ID
+  return true
 end
+
 --[[Importer Data Structure]]
 Importer=setmetatable({
   --Variables
@@ -1400,109 +911,89 @@ Importer=setmetatable({
   end,
 
   Mystery=function(qTbl)
-    -- Determine which Mystery Booster set to use (mb1 or mb2)
-    local setCode = 'mb1'  -- Default to MB1 for backward compatibility
-    if qTbl.name:find('mb2') or qTbl.name:find('2') then
-      setCode = 'mb2'
-    end
-    
-    local t,url={},BACKEND_URL..'/random?q=set:'..setCode..'+'
-    for _,r in pairs({'common','uncommon'})do
-      for _,c in pairs({'w','u','b','r','g'})do
-        table.insert(t,url..('r:%s+c:%s+id:%s'):format(r,c,c))
-      end
-    end
-    table.insert(t,url..'c:c+-r:rare+-r:mythic')
-    table.insert(t,url..'c:m+-r:rare+-r:mythic')
-    table.insert(t,url..'(r:rare+or+r:mythic)+frame:2015')
-    table.insert(t,url..'(r:rare+or+r:mythic)+-frame:2015')
-    
-    -- Set up foil slot based on set and user preference
-    -- MB1: CMB1 (playtest) and FMB1 (foil)
-    -- MB2: Playtest cards integrated in main MB2 set
-    local fSlot
-    if setCode == 'mb2' then
-      -- MB2 has playtest cards integrated in the main set, use mb2 for all slots
-      fSlot = {BACKEND_URL..'/random?q=set:mb2', BACKEND_URL..'/random?q=set:mb2'}
-    else
-      -- MB1 uses separate sets for playtest and foils
-      fSlot = {BACKEND_URL..'/random?q=set:cmb1', BACKEND_URL..'/random?q=set:fmb1'}
-    end
-
-    qTbl.url='Mystery Booster'
-    if qTbl.name:find('playtest')then
-      qTbl.url='Playtest Booster'
-      table.insert(t,fSlot[1])
-    elseif qTbl.name:find('both')then
-      table.insert(t,fSlot[math.random(1,2)])
-    else
-      table.insert(t,fSlot[2])
-    end
-
-    qTbl.deck=#t
-    qTbl.mode='Deck'
-    for i,u in pairs(t)do
-      Wait.time(function()
-        WebRequest.get(u,function(wr)
-          setCard(wr,qTbl)
-        end)
-      end,i*Tick)
-    end
+    Player[qTbl.color].broadcast('Mystery booster mode has been removed from this importer.',{1,0.6,0.2})
+    endLoop()
   end,
 
   Booster=function(qTbl)
-    qTbl.url='Booster '..qTbl.name
-    if Booster[qTbl.name:upper()]then
-      spawnPack(qTbl,Booster[qTbl.name:upper()](qTbl))
-
-		elseif #qTbl.name<5 then
-      if qTbl.name==''then qTbl.name='ori'end
-      WebRequest.get(BACKEND_URL..'/sets/'..qTbl.name,function(w)
-        if handleWebError(w, qTbl, 'Set lookup failed') then
-          return
-        end
-        if w.text:match('^%s*<') or w.text:match('<!DOCTYPE') then
-          Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
-          endLoop()
-          return
-        end
-        local j=JSON.decode(w.text)
-        if j.object=='set'then
-          qTbl.url='Booster '..j.name
-          spawnPack(qTbl,Booster(qTbl.name))
-      else Player[qTbl.color].broadcast(j.details,{1,0,0})endLoop()end end)
-
-		elseif qTbl.name:find('%W')then
-      Player[qTbl.color].broadcast('Attempting custom Booster:\n '..qTbl.name)
-      if qTbl.name:find('^%(')then else
-        qTbl.name='('..qTbl.name..')'end
-      spawnPack(qTbl,Booster(qTbl.name))
-    else Player[qTbl.color].broadcast('No Booster found to make')endLoop()end end,
+    Player[qTbl.color].broadcast('Booster mode has been removed from this importer.',{1,0.6,0.2})
+    endLoop()
+  end,
 
   Random=function(qTbl)
     local url,q1=BACKEND_URL..'/random','?q=is:hires'
-    if qTbl.name:find('q=')then url=url..qTbl.full:match('%s(%S+)')else
-      for _,tbl in ipairs({{w='c%3Aw',u='c%3Au',b='c%3Ab',r='c%3Ar',g='c%3Ag',n='c%3Ac'},
-          {i='t%3Ainstant',s='t%3Asorcery',e='t%3Aenchantment',c='t%3Acreature',a='t%3Aartifact',l='t%3Aland',p='t%Aplaneswalker',o='t%3Acontraption'}})do
-        local t,q2=0,''
-        for k,m in pairs(tbl) do
-          if string.match(qTbl.name:lower(),k)then
-            if t==1 then q2='('..q2 end
-            if t>0 then q2=q2..'or+'end
-            t,q2=t+1,q2..m..'+'end end
-        if t>1 then q2=q2..')+'end
-        q1=q1..q2 end
-      local tst,cmc=qTbl.full:match('([=<>]+)(%d+)')
-      if tst then q1=q1..'cmc'..tst..cmc end
-      if q1~='?q='then url=url..(q1..' '):gsub('%+ ',''):gsub(' ','')end
+
+    local count = tonumber((qTbl.full or ''):match('%s(%d+)%s*$'))
+    if not count then
+      count = tonumber((qTbl.name or ''):match('^(%d+)%s*$'))
     end
+    if count and count > 100 then
+      count = 100
+    end
+
+    if qTbl.name:find('q=') then
+      local queryRaw = (qTbl.full and qTbl.full:match('%?q=(.+)')) or ''
+      if queryRaw ~= '' then
+        queryRaw = queryRaw:gsub('%s+%d+%s*$', '')
+        queryRaw = queryRaw:gsub('%+', ' ')
+        queryRaw = queryRaw:gsub('%%20', ' ')
+      end
+
+      if queryRaw == '' then
+        queryRaw = 'is:hires'
+      end
+
+      local encodedQuery = urlEncode(queryRaw)
+      url = BACKEND_URL..'/random?q='..encodedQuery
+
+      uLog(url,qTbl.color..' Importer '..qTbl.full)
+      if count then
+        qTbl.deck=count
+        local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
+          for i=1,count do
+            Wait.time(function()
+              WebRequest.get(url,function(wr)setCard(wr,qTbl)end)
+            end,i*Tick)
+          end
+        end)
+        if startedFast then
+          return
+        end
+      else
+        WebRequest.get(url,function(wr)setCard(wr,qTbl)end)
+      end
+      return
+    end
+
+    for _,tbl in ipairs({{w='c%3Aw',u='c%3Au',b='c%3Ab',r='c%3Ar',g='c%3Ag',n='c%3Ac'},
+      {i='t%3Ainstant',s='t%3Asorcery',e='t%3Aenchantment',c='t%3Acreature',a='t%3Aartifact',l='t%3Aland',p='t%3Aplaneswalker',o='t%3Acontraption'}})do
+      local t,q2=0,''
+      for k,m in pairs(tbl) do
+        if string.match(qTbl.name:lower(),k)then
+          if t==1 then q2='('..q2 end
+          if t>0 then q2=q2..'or+'end
+          t,q2=t+1,q2..m..'+'end end
+      if t>1 then q2=q2..')+'end
+      q1=q1..q2 end
+    local tst,cmc=qTbl.full:match('([=<>]+)(%d+)')
+    if tst then q1=q1..'cmc'..tst..cmc end
+    if q1~='?q='then url=url..(q1..' '):gsub('%+ ',''):gsub(' ','')end
+
     uLog(url,qTbl.color..' Importer '..qTbl.full)
-    local n=tonumber(qTbl.full:match('%s(%d+)'))
-    if n then
-      qTbl.deck=n
-      for i=1,n do
-        Wait.time(function()
-        WebRequest.get(url,function(wr)setCard(wr,qTbl)end)end,i*Tick)end
+    if count then
+      qTbl.deck=count
+      local encodedQuery = url:match('%?q=(.+)$') or ''
+      local queryRaw = urlDecode(encodedQuery)
+      local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
+        for i=1,count do
+          Wait.time(function()
+            WebRequest.get(url,function(wr)setCard(wr,qTbl)end)
+          end,i*Tick)
+        end
+      end)
+      if startedFast then
+        return
+      end
     else WebRequest.get(url,function(wr)setCard(wr,qTbl)end)end end,
 
   Quality=function(qTbl)
@@ -1522,24 +1013,15 @@ Importer=setmetatable({
   end,
 
   Deck=function(qTbl)
-    if qTbl.url then
-      for k,v in pairs(DeckSites) do
-        if qTbl.url:find(k)then
-          qTbl.mode='Deck'
-          local url,deckFunction=v(qTbl.url)
-          WebRequest.get(url,function(wr) deckFunction(wr,qTbl)end)
-          return true end end
-    elseif qTbl.mode=='Deck'then
-      local d=getNotebookTabs();d=d[#d]
-      spawnDeck({text=d.body,url='Notebook '..d.title..d.color},qTbl)
-    end return false end,
+    Player[qTbl.color].broadcast('Deck import mode has been removed from this importer.',{1,0.6,0.2})
+    endLoop()
+    return false
+  end,
 
   Rawdeck=function(qTbl)
-    if qTbl.target then
-      local dec=qTbl.target.getDescription()
-      
-      spawnDeck({text=dec,url='Description '..qTbl.target.getName()},qTbl)
-    end end,
+    Player[qTbl.color].broadcast('Raw deck import mode has been removed from this importer.',{1,0.6,0.2})
+    endLoop()
+  end,
 
     },{
   __call=function(t,qTbl)
@@ -1562,14 +1044,8 @@ Importer=setmetatable({
       local tbl = t.request[1]
       -- Set start time for timeout detection
       requestStartTime = os.time()
-      -- If URL is not Deck list then
       -- Custom Image Replace
-      if tbl.url and tbl.mode ~= 'Back' then
-        if not t.Deck(tbl) then
-          Card.image = tbl.url
-          t.Spawn(tbl)
-        end
-      elseif tbl.customImage then
+      if tbl.customImage then
         -- NEW: Handle custom image proxy
         if (not tbl.mode) or tbl.name == '' or tbl.name == 'blank card' or tbl.name == 'blank%20card' then
           spawnImageOnlyCard(tbl)
@@ -1597,10 +1073,6 @@ local Usage = [[━━━━━━━━━━━━━━━━━━━━━�
 [b][0077ff]Scryfall[/b] [i]CardName[/i]
    → Spawn a single card by name
    → Example: [b]Scryfall Lightning Bolt[/b]
-
-[b][0077ff]Scryfall[/b] [i]DecklistURL[/i]
-   → Import entire deck from URL
-   → Supports: TappedOut, Moxfield, Archidekt, Scryfall
 
 
 [b][00FF77]🎨 CUSTOM ARTWORK (PROXIES)
@@ -1928,28 +1400,6 @@ end
 local SMG, SMC = '[b]Scryfall: [/b]', {0.5, 1, 0.8}
 local chatToggle = false
 
-local function isLikelyDeckUrl(url)
-  if not url or url == '' then return false end
-  local u = tostring(url):lower()
-
-  -- If it clearly looks like a direct image, never treat it as a deck URL.
-  if isLikelyImageUrl and isLikelyImageUrl(u) then
-    return false
-  end
-
-  -- Scryfall deck imports must be /decks/... not cards/image CDN URLs.
-  if u:find('scryfall', 1, true) and not u:find('/decks/', 1, true) then
-    return false
-  end
-
-  for key, _ in pairs(DeckSites or {}) do
-    if type(key) == 'string' and u:find(key:lower(), 1, true) then
-      return true
-    end
-  end
-  return false
-end
-
 local function isLikelyImageUrl(url)
   if not url or url == '' then return false end
   local u = tostring(url):lower()
@@ -1981,7 +1431,6 @@ function onChat(msg,p)
               '[FFFFFF]Full command list available in [b][FFFF77]Notebook > SHelp tab[/b]\n\n' ..
               '[AAAAAA]Quick reference:\n' ..
               '• [b]Scryfall CardName[/b] - Spawn a card\n' ..
-              '• [b]Scryfall DeckURL[/b] - Import a deck\n' ..
               '• [b]Scryfall random[/b] - Random card\n\n' ..
               '[77FF77]Check the SHelp notebook for complete documentation!',{0.9,0.9,0.9})
       return false
@@ -2003,16 +1452,14 @@ function onChat(msg,p)
       local trimmedInput = a:gsub('^%s+',''):gsub('%s+$','')
       local fullUrlInput = trimmedInput:match('^(https?://[^%s]+)$')
       local customImageUrl = nil
-      local deckUrl = nil
       local nameWithoutUrl = trimmedInput
 
       if fullUrlInput then
         if isLikelyImageUrl(fullUrlInput) then
           customImageUrl = fullUrlInput
-        elseif isLikelyDeckUrl(fullUrlInput) then
-          deckUrl = fullUrlInput
         else
-          deckUrl = fullUrlInput
+          p.print('[FF6666]Deck URL import is no longer supported.[-]\n[AAAAAA]Supported URL use: [b]Scryfall CardName ImageURL[/b]', {0.95,0.55,0.55})
+          return false
         end
         nameWithoutUrl = ''
       else
@@ -2020,21 +1467,19 @@ function onChat(msg,p)
         if trailingUrl then
           if isLikelyImageUrl(trailingUrl) then
             customImageUrl = trailingUrl
-          elseif isLikelyDeckUrl(trailingUrl) then
-            deckUrl = trailingUrl
           else
-            deckUrl = trailingUrl
+            p.print('[FF6666]Deck URL import is no longer supported.[-]\n[AAAAAA]Supported URL use: [b]Scryfall CardName ImageURL[/b]', {0.95,0.55,0.55})
+            return false
           end
           nameWithoutUrl = trimmedInput:gsub('https?://[^%s]+$',''):gsub('%s+$','')
         else
           local inlineUrl = trimmedInput:match('(https?://[^%s]+)')
           if inlineUrl then
-            if isLikelyDeckUrl(inlineUrl) then
-              deckUrl = inlineUrl
-            elseif isLikelyImageUrl(inlineUrl) then
+            if isLikelyImageUrl(inlineUrl) then
               customImageUrl = inlineUrl
             else
-              deckUrl = inlineUrl
+              p.print('[FF6666]Deck URL import is no longer supported.[-]\n[AAAAAA]Supported URL use: [b]Scryfall CardName ImageURL[/b]', {0.95,0.55,0.55})
+              return false
             end
             nameWithoutUrl = trimmedInput:gsub('https?://[^%s]+',''):gsub('%s+$','')
           end
@@ -2045,7 +1490,7 @@ function onChat(msg,p)
         position = p.getPointerPosition(),
         player = p.steam_id,
         color = p.color,
-        url = deckUrl,
+        url = nil,
         customImage = customImageUrl,  -- NEW: Store custom image URL separately
         mode = nameWithoutUrl:match('(%S+)'),
         name = nameWithoutUrl,
