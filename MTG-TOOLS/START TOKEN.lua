@@ -291,67 +291,6 @@ local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onF
     )
 end
 
-local function fetchRandomCardsViaBackend(query, count, onComplete, onFallback)
-    local requestUrl = BACKEND_URL .. '/random?count=' .. tostring(count) .. '&q=' .. URLencode(query)
-
-    WebRequest.get(requestUrl, function(resp)
-        if not resp.is_done then
-            return
-        end
-
-        if resp.is_error or (resp.response_code and resp.response_code >= 400) or not resp.text or resp.text == '' then
-            local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
-            if resp.text and resp.text ~= '' then
-                details = details .. ' | ' .. tostring(resp.text)
-            end
-            print('Random fetch failed via /random: ' .. tostring(details))
-            if onFallback then onFallback() end
-            return
-        end
-
-        local parsed = JSONdecode(resp.text)
-        if not parsed then
-            print('Random fetch failed: invalid JSON response from /random')
-            if onFallback then onFallback() end
-            return
-        end
-
-        if parsed.object == 'error' then
-            print('Random fetch failed: ' .. tostring(parsed.details or 'unknown error'))
-            if onFallback then onFallback() end
-            return
-        end
-
-        local cards = {}
-        if parsed.object == 'list' and parsed.data then
-            cards = parsed.data
-        else
-            cards = { parsed }
-        end
-
-        if onComplete then onComplete(cards) end
-    end)
-end
-
-local function spawnSingleDeckFromCards(cardList, spawnPos)
-    if not cardList or #cardList == 0 then
-        print('No valid cards to spawn')
-        endSpawning()
-        return
-    end
-
-    buildDeckFromListAsync(cardList, 'Deck', '', 1, function(deckDat)
-        spawnObjectData({
-            data = deckDat,
-            position = spawnPos,
-            rotation = self.getRotation()
-        })
-        Wait.time(function()
-            endSpawning()
-        end, 0.25)
-    end, 8)
-end
-
 local function makeSpawnRandomCardsHandler(count)
     return function()
         spawnRandomCardsByNumber(count)
@@ -800,8 +739,6 @@ end
 
 ---------------------------------------------------------------------------
 -- spawnRandomCardsByNumber spawns n random cards matching active color identity toggles.
--- When 2+ colors are selected, it guarantees at least one multicolored card,
--- then fills the remainder with the base identity query, and spawns as one deck.
 -- Includes spawning indicator and prevents concurrent spawns.
 ---------------------------------------------------------------------------
 function spawnRandomCardsByNumber(n)
@@ -841,42 +778,6 @@ function spawnRandomCardsByNumber(n)
             print('Random spawn failed via /random/build')
             endSpawning()
         end)
-    end
-
-    if selectedColorCount > 1 and n > 0 then
-        local multicolorQuery = baseQuery .. " c:m"
-
-        fetchRandomCardsViaBackend(multicolorQuery, 1, function(multicolorCards)
-            if not multicolorCards or #multicolorCards == 0 then
-                spawnRandomWithQuery(baseQuery, n)
-                return
-            end
-
-            local combinedCards = { multicolorCards[1] }
-            local remainingCount = n - 1
-
-            if remainingCount <= 0 then
-                spawnSingleDeckFromCards(combinedCards, spawnPos)
-                return
-            end
-
-            fetchRandomCardsViaBackend(baseQuery, remainingCount, function(baseCards)
-                for _, card in ipairs(baseCards or {}) do
-                    table.insert(combinedCards, card)
-                end
-
-                if #combinedCards < n then
-                    print('Random fetch returned fewer cards than requested; expected ' .. tostring(n) .. ', got ' .. tostring(#combinedCards))
-                end
-
-                spawnSingleDeckFromCards(combinedCards, spawnPos)
-            end, function()
-                spawnRandomWithQuery(baseQuery, n)
-            end)
-        end, function()
-            spawnRandomWithQuery(baseQuery, n)
-        end)
-        return
     end
 
     spawnRandomWithQuery(baseQuery, n)
