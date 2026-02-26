@@ -43,6 +43,12 @@ describe('Price and Token Filter API Routing', () => {
     bulkData.getRandomCard.mockResolvedValue(
       { id: '2', name: 'Test Card 2', prices: { usd: '5.00' } }
     );
+    bulkData.getQueryExplain.mockReturnValue({
+      mode: 'random',
+      totalCards: 100,
+      prefilteredCount: 12,
+      finalCount: 5
+    });
     
     scryfallLib.searchCards.mockResolvedValue([
       { id: '3', name: 'API Card 1', prices: { usd: '15.00' } },
@@ -137,7 +143,7 @@ describe('Price and Token Filter API Routing', () => {
 
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
       expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-        'eur<10 f:commander',
+        'eur<10 lang:en f:commander',
         5,
         'prints',
         'random'
@@ -167,7 +173,7 @@ describe('Price and Token Filter API Routing', () => {
         .get('/random?q=t:token')
         .expect(200);
 
-      expect(bulkData.getRandomCard).toHaveBeenCalledWith('t:token f:commander');
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('t:token lang:en f:commander');
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
@@ -284,7 +290,7 @@ describe('Price and Token Filter API Routing', () => {
         .query({ q: 'power = 3' })
         .expect(200);
 
-      expect(bulkData.getRandomCard).toHaveBeenCalledWith('power=3 f:commander');
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('power=3 lang:en f:commander');
       expect(response.headers['x-query-warning']).toContain('Normalized query operators');
     });
 
@@ -294,8 +300,48 @@ describe('Price and Token Filter API Routing', () => {
         .query({ q: 'tou >= 5' })
         .expect(200);
 
-      expect(bulkData.getRandomCard).toHaveBeenCalledWith('tou>=5 f:commander');
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('tou>=5 lang:en f:commander');
       expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+
+    test('should normalize colorless color filter to color identity on /search', async () => {
+      const response = await request(app)
+        .get('/search')
+        .query({ q: 'c=c' })
+        .expect(200);
+
+      expect(bulkData.searchCards).toHaveBeenCalledWith('id=c', expect.any(Number));
+      expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+
+    test('should normalize colorless color filter to color identity on /random', async () => {
+      const response = await request(app)
+        .get('/random')
+        .query({ q: 'color:colorless' })
+        .expect(200);
+
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('id=c lang:en f:commander');
+      expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    });
+
+    test('should include query plan and explain headers on /random with explain=true', async () => {
+      const response = await request(app)
+        .get('/random')
+        .query({ q: 't:artifact', explain: 'true' })
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(response.headers['x-query-explain']).toContain('mode=random');
+      expect(bulkData.getQueryExplain).toHaveBeenCalledWith('t:artifact lang:en f:commander', 'random');
+    });
+
+    test('should include query plan header on /search', async () => {
+      const response = await request(app)
+        .get('/search')
+        .query({ q: 't:artifact' })
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
     });
   });
 });

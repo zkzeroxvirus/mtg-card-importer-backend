@@ -79,7 +79,7 @@ Booster['mystery']=function()
   -- slot 11: 1 multicolored common/uncommon
   table.insert(urlTable,urlPrefix..'c:m+r<rare')
   -- slot 12: 1 common/uncommon artifact/land
-  table.insert(urlTable,urlPrefix..'c:c+r<rare')
+  table.insert(urlTable,urlPrefix..'id=c+r<rare')
   -- slot 13: 1 rare/mythic rare with the M15 card frame
   table.insert(urlTable,urlPrefix..'r>=rare+frame:2015')
   -- slot 14: one pre-M15 card in its original frame

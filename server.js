@@ -538,6 +538,10 @@ const RARITY_COMPARISON_REPLACE = new RegExp(
   '(^|[\\s+\\(])(-?(?:r|rarity))(<=|>=|!=|=|:|<|>)(mythic_rare|mythicrare|mythic|rare|uncommon|common)\\b',
   'gi'
 );
+const COLORLESS_COLOR_FILTER_REPLACE = new RegExp(
+  '(^|[\\s+\\(])(-?(?:c|color))\\s*([:=])\\s*(c|colorless)\\b',
+  'gi'
+);
 
 function normalizeRarityValue(rawValue) {
   const rarityValue = String(rawValue || '').toLowerCase();
@@ -545,6 +549,20 @@ function normalizeRarityValue(rawValue) {
     return 'mythic';
   }
   return rarityValue;
+}
+
+const DEFAULT_QUERY_LANG = String(process.env.DEFAULT_QUERY_LANG || 'en').toLowerCase();
+const LANG_FILTER_REGEX = /(?:^|[\s+\(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
+
+function enforceDefaultQueryLanguage(query, defaultLang = DEFAULT_QUERY_LANG) {
+  const normalizedQuery = String(query || '').trim();
+  if (!defaultLang || defaultLang === '' || LANG_FILTER_REGEX.test(normalizedQuery)) {
+    return normalizedQuery;
+  }
+  if (!normalizedQuery) {
+    return `lang:${defaultLang}`;
+  }
+  return `${normalizedQuery} lang:${defaultLang}`;
 }
 
 function normalizeQueryOperators(rawQuery) {
@@ -566,6 +584,11 @@ function normalizeQueryOperators(rawQuery) {
     }
     return fullMatch;
   });
+  normalized = normalized.replace(COLORLESS_COLOR_FILTER_REPLACE, (_fullMatch, prefixBoundary, prefix) => {
+    const normalizedPrefix = String(prefix || '').toLowerCase();
+    const isNegated = normalizedPrefix.startsWith('-');
+    return `${prefixBoundary}${isNegated ? '-' : ''}id=c`;
+  });
   if (normalized !== rawQuery) {
     return {
       query: normalized,
@@ -574,6 +597,47 @@ function normalizeQueryOperators(rawQuery) {
   }
 
   return { query: rawQuery, warning: null };
+}
+
+function buildRandomExecutionPlan({
+  useBulkLoaded,
+  hasPriceFilter,
+  hasFunnyFilter,
+  hasTokenFilter
+}) {
+  if (hasPriceFilter) {
+    return { primary: 'api', reason: 'price_filter' };
+  }
+  if (hasFunnyFilter) {
+    return { primary: 'api', reason: 'funny_filter' };
+  }
+  if (useBulkLoaded) {
+    if (hasTokenFilter) {
+      return { primary: 'bulk', reason: 'token_bulk_first' };
+    }
+    return { primary: 'bulk', reason: 'bulk_loaded' };
+  }
+  return { primary: 'api', reason: 'bulk_unavailable' };
+}
+
+function setQueryPlanHeader(res, plan) {
+  if (!res || !plan) {
+    return;
+  }
+  const value = `${plan.primary}:${plan.reason}`;
+  res.setHeader('X-Query-Plan', value);
+}
+
+function setExplainHeader(res, explainData) {
+  if (!res || !explainData || typeof explainData !== 'object') {
+    return;
+  }
+  const total = explainData.totalCards ?? 0;
+  const pre = explainData.prefilteredCount ?? 0;
+  const fin = explainData.finalCount ?? 0;
+  const mode = explainData.mode || 'unknown';
+  const value = `mode=${mode};total=${total};prefiltered=${pre};final=${fin}`;
+  res.setHeader('X-Query-Explain', value);
 }
 
 /**
@@ -1281,10 +1345,12 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     }
 
     const { query: normalizedQuery, warning: queryWarning } = normalizeQueryOperators(rawQuery);
+    const languageEnforcedQuery = enforceDefaultQueryLanguage(normalizedQuery);
     const enforceCommander = payload.enforceCommander !== false;
+    const explainRequested = payload.explain === true || String(payload.explain || '').toLowerCase() === 'true';
     const randomQuery = enforceCommander
-      ? ensureCommanderLegalityQuery(normalizedQuery)
-      : normalizeCommanderFormatAliases(normalizedQuery);
+      ? ensureCommanderLegalityQuery(languageEnforcedQuery)
+      : normalizeCommanderFormatAliases(languageEnforcedQuery);
     if (queryWarning) {
       res.setHeader('X-Query-Warning', queryWarning);
     }
@@ -1312,18 +1378,28 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       }
     }
 
-    const hasPriceFilter = normalizedQuery && /\b(usd|eur|tix)[:=<>]/i.test(normalizedQuery);
-    const hasTokenFilter = normalizedQuery && /\b(?:t|type|is):token\b/i.test(normalizedQuery);
-    const hasFunnyFilter = normalizedQuery && /\b-?is:funny\b/i.test(normalizedQuery);
+    const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
+    const hasTokenFilter = randomQuery && /\b(?:t|type|is):token\b/i.test(randomQuery);
+    const hasFunnyFilter = randomQuery && /\b-?is:funny\b/i.test(randomQuery);
+    const executionPlan = buildRandomExecutionPlan({
+      useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
+      hasPriceFilter,
+      hasFunnyFilter,
+      hasTokenFilter
+    });
+    setQueryPlanHeader(res, executionPlan);
+    if (explainRequested && executionPlan.primary === 'bulk') {
+      setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
+    }
 
     if (hasPriceFilter) {
-      console.log(`[API] Price filter detected in query: "${normalizedQuery}", using live API for real-time pricing`);
+      console.log(`[API] Price filter detected in query: "${randomQuery}", using live API for real-time pricing`);
     }
     if (hasTokenFilter) {
-      console.log(`[BulkData] Token filter detected in query: "${normalizedQuery}", using bulk data first with API fallback`);
+      console.log(`[BulkData] Token filter detected in query: "${randomQuery}", using bulk data first with API fallback`);
     }
     if (hasFunnyFilter) {
-      console.log(`[API] Funny filter detected in query: "${normalizedQuery}", using Scryfall API for accurate classification`);
+      console.log(`[API] Funny filter detected in query: "${randomQuery}", using Scryfall API for accurate classification`);
       if (USE_BULK_DATA) {
         console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
       }
@@ -1335,7 +1411,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     if (count === 1) {
       let scryfallCard = null;
 
-      if (!hasPriceFilter && !hasFunnyFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      if (executionPlan.primary === 'bulk') {
         scryfallCard = await bulkData.getRandomCard(randomQuery);
       }
 
@@ -1370,7 +1446,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
         seenCardKeys.add(singleKey);
       }
       randomCards.push(scryfallCard);
-    } else if (!hasPriceFilter && !hasFunnyFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+    } else if (executionPlan.primary === 'bulk') {
       const maxAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
       let attempts = 0;
 
@@ -1389,6 +1465,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       }
 
       if (randomCards.length < count) {
+        res.setHeader('X-Bulk-Fallback', 'bulk_insufficient_unique_cards');
         const remaining = count - randomCards.length;
         let apiAttempts = 0;
         const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
@@ -1567,17 +1644,19 @@ app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count } = req.query;
     const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
+    const languageEnforcedQuery = enforceDefaultQueryLanguage(q);
+    const explainRequested = req.query.explain === 'true' || req.query.explain === true;
     const requestEnforceCommander = req.query.enforceCommander === undefined
       ? true
       : parseBooleanLike(String(req.query.enforceCommander)) !== false;
-    const randomQuery = requestEnforceCommander ? ensureCommanderLegalityQuery(q) : normalizeCommanderFormatAliases(q);
+    const randomQuery = requestEnforceCommander ? ensureCommanderLegalityQuery(languageEnforcedQuery) : normalizeCommanderFormatAliases(languageEnforcedQuery);
     if (queryWarning) {
       res.setHeader('X-Query-Warning', queryWarning);
     }
     // Security: Enforce maximum count to prevent resource exhaustion
     const numCards = count ? Math.min(Math.max(parseInt(count) || 1, 1), 100) : 1;
     
-    console.log(`GET /random - count: ${numCards}, query: "${q}"`);
+    console.log(`GET /random - count: ${numCards}, query: "${randomQuery}"`);
 
     // Security: Validate query length
     if (q && q.length > MAX_INPUT_LENGTH) {
@@ -1609,21 +1688,31 @@ app.get('/random', randomLimiter, async (req, res) => {
 
     // Check if query contains price filters (usd, eur, tix)
     // Price queries always use API for real-time market data
-    const hasPriceFilter = q && /\b(usd|eur|tix)[:=<>]/i.test(q);
+    const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
     
     // Check if query contains token type filters (t:token, type:token, is:token)
-    const hasTokenFilter = q && /\b(?:t|type|is):token\b/i.test(q);
+    const hasTokenFilter = randomQuery && /\b(?:t|type|is):token\b/i.test(randomQuery);
     // Route funny filters to API for authoritative set_type handling
-    const hasFunnyFilter = q && /\b-?is:funny\b/i.test(q);
+    const hasFunnyFilter = randomQuery && /\b-?is:funny\b/i.test(randomQuery);
+    const executionPlan = buildRandomExecutionPlan({
+      useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
+      hasPriceFilter,
+      hasFunnyFilter,
+      hasTokenFilter
+    });
+    setQueryPlanHeader(res, executionPlan);
+    if (explainRequested && executionPlan.primary === 'bulk') {
+      setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
+    }
     
     if (hasPriceFilter) {
-      console.log(`[API] Price filter detected in query: "${q}", using live API for real-time pricing`);
+      console.log(`[API] Price filter detected in query: "${randomQuery}", using live API for real-time pricing`);
     }
     if (hasTokenFilter) {
-      console.log(`[BulkData] Token filter detected in query: "${q}", using bulk data first with API fallback`);
+      console.log(`[BulkData] Token filter detected in query: "${randomQuery}", using bulk data first with API fallback`);
     }
     if (hasFunnyFilter) {
-      console.log(`[API] Funny filter detected in query: "${q}", using Scryfall API for accurate classification`);
+      console.log(`[API] Funny filter detected in query: "${randomQuery}", using Scryfall API for accurate classification`);
       if (USE_BULK_DATA) {
         console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
       }
@@ -1634,7 +1723,7 @@ app.get('/random', randomLimiter, async (req, res) => {
       let scryfallCard = null;
       
       // Skip bulk mode for price/funny filters to ensure accurate data
-      if (!hasPriceFilter && !hasFunnyFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      if (executionPlan.primary === 'bulk') {
         scryfallCard = await bulkData.getRandomCard(randomQuery);
       }
       
@@ -1673,7 +1762,7 @@ app.get('/random', randomLimiter, async (req, res) => {
       const seenCardKeys = new Set(); // Track oracle/card identity to avoid duplicates
       
       // Skip bulk mode for price/funny filters to ensure accurate data
-      if (!hasPriceFilter && !hasFunnyFilter && USE_BULK_DATA && bulkData.isLoaded()) {
+      if (executionPlan.primary === 'bulk') {
         // Bulk data - instant responses (with logging suppressed)
         // Try up to numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER attempts to account for duplicates
         const maxAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
@@ -1700,6 +1789,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         // Fallback to API if bulk data didn't return enough cards
         if (cards.length < numCards) {
           console.log(`[Fallback] Bulk data returned ${cards.length} cards, switching to API for remaining ${numCards - cards.length}`);
+          res.setHeader('X-Bulk-Fallback', 'bulk_insufficient_unique_cards');
           try {
             // Get remaining cards from API
             const remaining = numCards - cards.length;
@@ -1873,6 +1963,7 @@ app.get('/search', async (req, res) => {
   try {
     const { limit = 100, unique } = req.query;
     const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
+    const explainRequested = req.query.explain === 'true' || req.query.explain === true;
     const requestEnforceCommander = req.query.enforceCommander === undefined
       ? null
       : parseBooleanLike(String(req.query.enforceCommander)) !== false;
@@ -1908,6 +1999,14 @@ app.get('/search', async (req, res) => {
     const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(searchQuery);
     // Route funny filters to API for authoritative set_type handling
     const hasFunnyFilter = /\b-?is:funny\b/i.test(searchQuery);
+    const canUseBulkSearch = USE_BULK_DATA && bulkData.isLoaded();
+    const searchPlan = (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter)
+      ? { primary: 'api', reason: requestedUnique === 'prints' ? 'prints_mode' : (hasPriceFilter ? 'price_filter' : 'funny_filter') }
+      : (canUseBulkSearch ? { primary: 'bulk', reason: hasTokenFilter ? 'token_bulk_first' : 'bulk_loaded' } : { primary: 'api', reason: 'bulk_unavailable' });
+    setQueryPlanHeader(res, searchPlan);
+    if (explainRequested && searchPlan.primary === 'bulk') {
+      setExplainHeader(res, bulkData.getQueryExplain(searchQuery, 'search'));
+    }
     
     // For full printings list, funny filters, or price filters, prefer live API to ensure completeness/freshness
     if (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter) {
@@ -1921,7 +2020,7 @@ app.get('/search', async (req, res) => {
         }
       }
       scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
-    } else if (USE_BULK_DATA && bulkData.isLoaded()) {
+    } else if (searchPlan.primary === 'bulk') {
       if (hasTokenFilter) {
         console.log(`[BulkData] Token filter detected in query: "${searchQuery}", using bulk data first with API fallback`);
       }
@@ -1930,6 +2029,7 @@ app.get('/search', async (req, res) => {
       // Fallback to API if bulk data returned null (no matches)
       if (!scryfallCards) {
         console.log(`[Fallback] Bulk data returned no results for "${searchQuery}", using API`);
+        res.setHeader('X-Bulk-Fallback', 'bulk_no_results');
         scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
       }
     } else {

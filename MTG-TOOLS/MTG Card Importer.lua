@@ -601,7 +601,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
   }
 
   if qTbl.text then
-    qTbl.text('Building random deck\nfast path')
+    qTbl.text('Building random deck')
   end
 
   local stopProgressTicker = function() end
@@ -628,7 +628,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
         if onFallback then
           onFallback()
         else
-          handleWebError(wr, qTbl, 'Random deck fast path failed')
+          handleWebError(wr, qTbl, 'Random deck failed')
         end
         return
       end
@@ -678,7 +678,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
       }
       stopProgressTicker(#deckDat.ContainedObjects)
       spawnObjectData(spawnDat)
-      Player[qTbl.color].broadcast('All '..tostring(#deckDat.ContainedObjects)..' cards loaded (fast path)!',{0.5,0.8,0.5})
+      Player[qTbl.color].broadcast('All '..tostring(#deckDat.ContainedObjects)..' cards loaded!',{0.5,0.8,0.5})
       endLoop()
     end
   )
@@ -1056,7 +1056,7 @@ Importer=setmetatable({
       return
     end
 
-    for _,tbl in ipairs({{w='c%3Aw',u='c%3Au',b='c%3Ab',r='c%3Ar',g='c%3Ag',n='c%3Ac'},
+    for _,tbl in ipairs({{w='c%3Aw',u='c%3Au',b='c%3Ab',r='c%3Ar',g='c%3Ag',n='id%3Dc'},
       {i='t%3Ainstant',s='t%3Asorcery',e='t%3Aenchantment',c='t%3Acreature',a='t%3Aartifact',l='t%3Aland',p='t%3Aplaneswalker',o='t%3Acontraption'}})do
       local t,q2=0,''
       for k,m in pairs(tbl) do

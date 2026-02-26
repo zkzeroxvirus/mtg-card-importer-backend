@@ -202,6 +202,7 @@ Example: `GET /card/black%20lotus?set=lea`
 - Search cards using Scryfall query syntax
 - Query parameters: `?q=QUERY&limit=100`
 - Returns: Scryfall list object with card array
+- Optional diagnostics: `?explain=true` adds `X-Query-Plan` and `X-Query-Explain` headers when bulk mode handles the query
 
 Example: `GET /search?q=type:creature%20power>5`
 
@@ -210,14 +211,19 @@ Example: `GET /search?q=type:creature%20power>5`
 - Query parameters: `?count=5&q=FILTER` (both optional)
 - Returns: Single card or list of cards depending on count
 - Note: Automatically enforces Commander legality (`f:commander`) on random requests
+- Note: Automatically enforces default language `lang:en` for random queries unless `lang:`/`language:` is explicitly provided
 - Note: Automatically excludes non-playable cards (basic lands, tokens, emblems, art cards, test cards, digital-only cards, meld results, etc.) to match paper Magic gameplay
 - Note: Automatically filters to unique cards (by oracle_id) to prevent skewing results with heavily reprinted cards or alternative arts
+- Note: For truly colorless identity filtering (including DFC-safe behavior), prefer `id=c` over `c=c`
+- Optional diagnostics: `?explain=true` adds `X-Query-Plan` and `X-Query-Explain` headers when bulk mode handles the query
 
 **POST `/random/build`**
 - Build and return a fully assembled random `DeckCustom` object in one request
 - Consumes: `{ "q": "FILTER", "count": 22, "back": "URL", "hand": { ... } }`
 - Returns: NDJSON with a single deck object line (optimized for TTS spawning)
 - Recommended for multi-card random spawns to avoid client-side multi-request assembly
+- Note: Applies the same default language enforcement (`lang:en`) as `GET /random` unless `lang:`/`language:` is explicitly provided
+- Optional diagnostics: include `"explain": true` in payload to receive `X-Query-Plan` and `X-Query-Explain` headers
 
 ### Removed Features
 
@@ -319,6 +325,8 @@ Card objects are converted to Tabletop Simulator's `CardCustom` format including
 - `BULK_DATA_PATH` — Filesystem path for the bulk file (default: ./data, Docker/Unraid: /app/data)
 - `BULK_DATA_TYPE` — Scryfall bulk dataset to load (default: `oracle_cards`; `default_cards` includes all printings and price fields like `usd`/`eur`/`tix`, with random results deduped by oracle_id)
 - `BULK_INCLUDE_RULINGS` — `true` downloads and caches rulings bulk data for faster rulings lookups (default: false)
+- `BULK_QUERY_CACHE_SIZE` — Maximum cached filtered query pools retained in memory (default: `200`)
+- `BULK_QUERY_CACHE_TTL_MS` — Query pool cache TTL in milliseconds (default: `60000`)
 
 See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for detailed tuning recommendations.
 

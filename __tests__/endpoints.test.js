@@ -275,7 +275,7 @@ describe('Server Endpoints - Random Card', () => {
       .query({ q: 't:artifact', count: 1, enforceCommander: 'false' });
 
     expect(randomResponse.status).toBe(200);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:artifact');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:artifact lang:en');
   });
 
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
@@ -502,7 +502,7 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.status).toBe(200);
     expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-      'usd>=50 f:commander',
+      'usd>=50 lang:en f:commander',
       2,
       expect.any(String),
       expect.any(String)
@@ -525,7 +525,27 @@ describe('Server Endpoints - Random Card', () => {
       .send({ q: 'set:cmb1', count: 1, enforceCommander: false });
 
     expect(response.status).toBe(200);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:cmb1');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:cmb1 lang:en');
+  });
+
+  test('POST /random/build should normalize c=c query to id=c', async () => {
+    scryfallLib.getRandomCard.mockResolvedValueOnce({
+      id: 'id-colorless-slot',
+      oracle_id: 'oracle-colorless-slot',
+      name: 'Colorless Slot Card',
+      type_line: 'Artifact',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 'c=c', count: 1, enforceCommander: false });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id=c lang:en');
+    expect(response.headers['x-query-warning']).toContain('Normalized query operators');
   });
 
   test('POST /random/build should dedupe duplicates and fallback for unique cards', async () => {
@@ -779,6 +799,9 @@ describe('Server Endpoints - Bulk Data', () => {
     const response = await request(app).get('/bulk/stats');
     expect(response.status).toBe(200);
     expect(response.body).toHaveProperty('loaded');
+    expect(response.body).toHaveProperty('queryPoolCache');
+    expect(response.body).toHaveProperty('queryPerf');
+    expect(response.body).toHaveProperty('quality');
   });
 
   test('POST /bulk/reload should reject when bulk mode disabled', async () => {
