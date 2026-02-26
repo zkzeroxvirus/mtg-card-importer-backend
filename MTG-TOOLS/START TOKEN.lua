@@ -4,6 +4,7 @@ backURL = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6
 -- Backend Configuration
 -- Local default: change port to 3001 if using docker-compose.local.yml
 BACKEND_URL = "http://api.mtginfo.org"
+--BACKEND_URL = "http://localhost:3000"
 
 -- Relative anchor reused from Start Token
 SPAWN_BUTTON_LOCAL = Vector{-4.2, 0, -3.9}
