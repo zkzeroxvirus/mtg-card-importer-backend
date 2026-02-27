@@ -3,7 +3,7 @@ const axios = require('axios');
 const { URLSearchParams } = require('url');
 
 describe('Scryfall API - Token Search Query', () => {
-  test('searchCards should append -is:dfc for is:token queries', async () => {
+  test('searchCards should preserve query as-is', async () => {
     const getMock = jest.fn().mockResolvedValue({ data: { data: [] } });
     axios.create.mockReturnValue({ get: getMock });
 
@@ -18,7 +18,7 @@ describe('Scryfall API - Token Search Query', () => {
     await scryfall.searchCards('fish is:token', 5);
 
     const expectedParams = new URLSearchParams({
-      q: 'fish is:token -is:dfc',
+      q: 'fish is:token',
       unique: 'cards'
     });
 

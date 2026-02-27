@@ -54,7 +54,10 @@ jest.mock('../lib/scryfall', () => {
     autocompleteCardName: jest.fn(async () => []),
     getCardById: jest.fn(async (id) => createCard(`Card ${id}`)),
     getCardBySetNumber: jest.fn(async (set, number) => createCard(`${set}-${number}`)),
-    searchCards: jest.fn(async (_query, limit = 10) => {
+    searchCards: jest.fn(async (query, limit = 10) => {
+      if (/\bt:token\b/i.test(String(query || ''))) {
+        return [];
+      }
       const size = Math.max(1, Math.min(parseInt(limit, 10) || 10, 1000));
       return Array.from({ length: size }, (_, i) => createCard(`Search Card ${i + 1}`));
     }),
@@ -69,7 +72,6 @@ jest.mock('../lib/scryfall', () => {
       return { object: 'set', code: setCode, name: `Set ${setCode}` };
     }),
     getCardRulings: jest.fn(async () => [{ source: 'wotc', comment: 'Mock ruling', published_at: '2024-01-01' }]),
-    getTokens: jest.fn(async (name) => [createCard(`${name} Token`)]),
     getPrintings: jest.fn(async (name) => [createCard(name), createCard(`${name} Reprint`)]),
     parseDecklist,
     convertToTTSCard: jest.fn((scryfallCard, cardBack) => ({
@@ -278,6 +280,28 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:artifact lang:en');
   });
 
+  test('GET /random should bypass commander legality for token queries when enforceCommander=true', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const randomResponse = await request(app)
+      .get('/random')
+      .query({ q: 't:token name:"Soldier"', count: 1, enforceCommander: 'true' });
+
+    expect(randomResponse.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:token name:"Soldier" lang:en');
+  });
+
+  test('GET /random should bypass commander legality for t:emblem when enforceCommander=true', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const randomResponse = await request(app)
+      .get('/random')
+      .query({ q: 't:emblem', count: 1, enforceCommander: 'true' });
+
+    expect(randomResponse.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:emblem lang:en');
+  });
+
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
     scryfallLib.searchCards.mockResolvedValueOnce([
       {
@@ -476,24 +500,26 @@ describe('Server Endpoints - Random Card', () => {
   });
 
   test('POST /random/build should apply commander legality with price filters', async () => {
-    scryfallLib.searchCards.mockResolvedValueOnce([
-      {
+    scryfallLib.searchCards.mockClear();
+    scryfallLib.getRandomCard.mockClear();
+
+    scryfallLib.getRandomCard
+      .mockResolvedValueOnce({
         id: 'id-price-1',
         oracle_id: 'oracle-price-1',
         name: 'Jeweled Lotus',
         type_line: 'Artifact',
         image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
         games: ['paper']
-      },
-      {
+      })
+      .mockResolvedValueOnce({
         id: 'id-price-2',
         oracle_id: 'oracle-price-2',
         name: 'Mana Crypt',
         type_line: 'Artifact',
         image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
         games: ['paper']
-      }
-    ]);
+      });
 
     const response = await request(app)
       .post('/random/build')
@@ -501,12 +527,8 @@ describe('Server Endpoints - Random Card', () => {
       .send({ q: 'usd>=50', count: 2 });
 
     expect(response.status).toBe(200);
-    expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-      'usd>=50 lang:en f:commander',
-      2,
-      expect.any(String),
-      expect.any(String)
-    );
+    expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('usd>=50 lang:en f:commander', true);
   });
 
   test('POST /random/build should skip commander legality when enforceCommander is false', async () => {
@@ -526,6 +548,44 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.status).toBe(200);
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:cmb1 lang:en');
+  });
+
+  test('POST /random/build should bypass commander legality for token queries when enforceCommander is true', async () => {
+    scryfallLib.getRandomCard.mockResolvedValueOnce({
+      id: 'id-soldier-token',
+      oracle_id: 'oracle-soldier-token',
+      name: 'Soldier',
+      type_line: 'Token Creature — Soldier',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 't:token name:"Soldier"', count: 1, enforceCommander: true });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:token name:"Soldier" lang:en');
+  });
+
+  test('POST /random/build should bypass commander legality for t:vanguard when enforceCommander is true', async () => {
+    scryfallLib.getRandomCard.mockResolvedValueOnce({
+      id: 'id-vanguard-slot',
+      oracle_id: 'oracle-vanguard-slot',
+      name: 'Vanguard Slot',
+      type_line: 'Vanguard',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 't:vanguard', count: 1, enforceCommander: true });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:vanguard lang:en');
   });
 
   test('POST /random/build should normalize c=c query to id=c', async () => {
@@ -664,6 +724,17 @@ describe('Server Endpoints - Format Enforcement Opt-In/Out', () => {
     expect(scryfallLib.searchCards).toHaveBeenCalledWith('t:artifact', expect.any(Number), expect.any(String));
   });
 
+  test('GET /search should bypass commander legality for t:conspiracy when enforceCommander=true', async () => {
+    scryfallLib.searchCards.mockClear();
+
+    const response = await request(app)
+      .get('/search')
+      .query({ q: 't:conspiracy', enforceCommander: 'true' });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith('t:conspiracy', expect.any(Number), expect.any(String));
+  });
+
   test('GET /card/:name should reject non-commander card when enforceCommander=true', async () => {
     scryfallLib.getCard.mockResolvedValueOnce({
       id: 'id-black-lotus',
@@ -701,6 +772,27 @@ describe('Server Endpoints - Format Enforcement Opt-In/Out', () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toHaveProperty('name', 'Black Lotus');
+  });
+
+  test('GET /card/:name should bypass commander legality for emblem cards when enforceCommander=true', async () => {
+    scryfallLib.searchCards.mockResolvedValueOnce([]);
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'id-basri-emblem',
+      oracle_id: 'oracle-basri-emblem',
+      name: 'Basri Ket Emblem',
+      type_line: 'Emblem — Basri',
+      layout: 'emblem',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      legalities: { commander: 'not_legal' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .get('/card/Basri%20Ket%20Emblem')
+      .query({ enforceCommander: 'true' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveProperty('name', 'Basri Ket Emblem');
   });
 });
 
@@ -769,9 +861,10 @@ describe('Server Endpoints - Rulings and Tokens', () => {
     expect(response.status).not.toBe(400);
   });
 
-  test('GET /tokens/:name should accept card name', async () => {
+  test('GET /tokens/:name should return removed status', async () => {
     const response = await request(app).get('/tokens/treasure');
-    expect(response.status).not.toBe(400);
+    expect(response.status).toBe(410);
+    expect(response.body.details).toContain('removed');
   });
 
   test('GET /printings/:name should accept card name', async () => {

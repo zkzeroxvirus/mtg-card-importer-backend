@@ -29,7 +29,6 @@ jest.mock('../lib/scryfall', () => ({
   getSet: jest.fn(),
   getPrintings: jest.fn(),
   getCardRulings: jest.fn(),
-  getTokens: jest.fn(),
   deckFromList: jest.fn(),
   parseDecklist: jest.fn()
 }));

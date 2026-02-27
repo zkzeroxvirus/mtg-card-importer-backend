@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.916'
+mod_name, version = 'Card Importer', '1.917'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -94,6 +94,10 @@ newText=setmetatable({
 
 --[[Variables]]
 local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new('https://i.stack.imgur.com/787gj.png',{})
+local NAME_FALLBACK_LIMIT = 16
+local TOKEN_RELATED_CACHE_MAX = 300
+local tokenRelatedPartsCache = {}
+local TOKEN_PATH_DEBUG = false
 
 -- Request timeout tracking
 local requestStartTime = nil
@@ -169,6 +173,16 @@ function urlDecode(str)
     return string.char(tonumber(hex, 16))
   end)
   return decoded
+end
+
+local function tokenPathLog(qTbl, msg)
+  if not TOKEN_PATH_DEBUG then
+    return
+  end
+
+  local playerColor = qTbl and qTbl.color or 'Unknown'
+  local cardName = qTbl and qTbl.name or ''
+  log('[TokenPath][' .. tostring(playerColor) .. '] ' .. tostring(msg) .. ' | card=' .. tostring(cardName))
 end
 
 --Image Handler
@@ -342,7 +356,9 @@ local Card=setmetatable({n=1,image=false},
         deckDat.CustomDeck[n]=cardDat.CustomDeck[n]
         deckDat.ContainedObjects[Deck]=cardDat
         if Deck<qTbl.deck then
-          qTbl.text('Spawning here\n'..Deck..' cards loaded')
+          if shouldUpdateDeckProgress(Deck, qTbl.deck) and qTbl and qTbl.text then
+            qTbl.text('Spawning here\n'..Deck..' cards loaded')
+          end
           Deck=Deck+1
         elseif Deck==qTbl.deck then
           local spawnDat={
@@ -398,32 +414,8 @@ function setCard(wr,qTbl,originalData)
   end
 
   if json.object=='card' then
-    if json.lang==lang or not json.set or not json.collector_number then
-      Card(json, qTbl)
-      return
-    elseif json.lang=='en' then
-      WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/'..lang,function(request)
-        local success, result = pcall(function()
-          setCard(request, qTbl, json)
-        end)
-        if not success then
-          log('[Card Importer] Error in language fallback nested request: ' .. tostring(result))
-          Card(json,qTbl)
-        end
-      end)
-      return
-    else
-      WebRequest.get(BACKEND_URL..'/cards/'..json.set..'/'..json.collector_number..'/en',function(a)
-        local success, result = pcall(function()
-          setCard(a,qTbl,json)
-        end)
-        if not success then
-          log('[Card Importer] Error in English fallback nested request: ' .. tostring(result))
-          Card(json,qTbl)
-        end
-      end)
-      return
-    end
+    Card(json, qTbl)
+    return
   elseif originalData and originalData.name then
     WebRequest.get(BACKEND_URL..'/card/'..originalData.name:gsub('%W',''),function(a)
       local success, result = pcall(function()
@@ -445,29 +437,6 @@ function setCard(wr,qTbl,originalData)
   endLoop()
 end
 
-function parseForToken(oracle,qTbl)endLoop()end
---[[  if oracle:find('token')and oracle:find('[Cc]reate')then
-    --My first attempt to parse oracle text for token info
-    local ptcolorType,abilities=oracle:match('[Cc]reate(.+)(token[^\n]*)')
-    --Check for power and toughness
-    local power,toughness='_','_'
-    if ptColorType:find('%d/%d')then
-      power,toughness=ptColorType:match('(%d+)/(%d+)')end
-    --It wouldn't be able to find treasure or clues
-    local colors=''
-    for k,v in pairs({w='white',u='blue',b='black',r='red',g='green',c='colorless'})do
-     if ptColorType:find(v)then colors=colors..k end end
-    --How the heck am I going to do abilities
-    if abilities:find('tokens? with ')then
-      local abTbl={}
-      abilities=abilities:gsub('"([^"]+)"',function(a)
-        table.insert(abTbl,a)return''end)
-      for _,v in pairs({'haste','first strike','double strike','reach','flying'})do
-        if abilities:find(v)then table.insert(abTbl,v)end end
-    end
-  end
-end]]
-
 function spawnList(wr,qTbl)
   if handleWebError(wr, qTbl, 'Search failed') then
     return
@@ -481,51 +450,71 @@ function spawnList(wr,qTbl)
       endLoop()
       return
     end
-    local jsonType = txt:sub(1,20):match('{"object":"(%w+)"')
+    local ok, decoded = pcall(function() return JSON.decode(txt) end)
+    if not ok or not decoded then
+      Player[qTbl.color].broadcast('Invalid JSON payload from backend.',{1,0,0})
+      endLoop()
+      return
+    end
+
+    local jsonType = decoded.object
     if jsonType=='list' then
-      local nCards=txt:match('"total_cards":(%d+)')
-      if nCards~=nil then nCards=tonumber(nCards) else
-        -- a jsonlist but couldn't find total_cards ? shouldn't happen, but just in case
-        textItems[#textItems].destruct()
-        table.remove(textItems,#textItems)
-        endLoop()   --pieHere, I missed this one too
-        return
-      end
-      if tonumber(nCards)>100 then
+      local nCards=tonumber(decoded.total_cards or (decoded.data and #decoded.data) or 0)
+      if nCards>100 then
         Player[qTbl.color].broadcast('This search query gives too many results (>100)',{1,0,0})
-        textItems[#textItems].destruct()
-        table.remove(textItems,#textItems)
-        endLoop()   --pieHere, I missed this one too
+        if textItems[#textItems] then
+          textItems[#textItems].destruct()
+          table.remove(textItems,#textItems)
+        end
+        endLoop()
         return
       end
       qTbl.deck=nCards
-      local last=0
-      local cards={}
-      for i=1,nCards do
-        start=string.find(txt,'{"object":"card"',last+1)
-        last=findClosingBracket(txt,start)
-        local card = JSON.decode(txt:sub(start,last))
+      local data = decoded.data or {}
+      for i, card in ipairs(data) do
         Wait.time(function() Card(card,qTbl) end, i*Tick)
       end
       return
 
     elseif jsonType=='card' then
-      local n,json=1,JSON.decode(txt)
-      Card(json,qTbl)
+      Card(decoded,qTbl)
       return
 
     elseif jsonType=='error' then
-      local n,json=1,JSON.decode(txt)
-      Player[qTbl.color].broadcast(json.details,{1,0,0})
+      Player[qTbl.color].broadcast(decoded.details,{1,0,0})
     end
   end
   endLoop()
 end
 
+function shouldUpdateDeckProgress(currentDeckCount, totalDeckCount)
+  if currentDeckCount <= 3 then
+    return true
+  end
+
+  if totalDeckCount >= 80 then
+    return currentDeckCount % 8 == 0
+  end
+
+  if totalDeckCount >= 40 then
+    return currentDeckCount % 5 == 0
+  end
+
+  return currentDeckCount % 3 == 0
+end
+
 local function createFastProgressTicker(qTbl, count)
   local active = true
   local progress = 0
-  local target = math.max((tonumber(count) or 1) - 1, 1)
+  local totalCount = tonumber(count) or 1
+  local target = math.max(totalCount - 1, 1)
+  local tickDelay = 0.06
+  if totalCount >= 40 then
+    tickDelay = 0.09
+  end
+  if totalCount >= 80 then
+    tickDelay = 0.12
+  end
 
   local function tick()
     if not active then
@@ -540,7 +529,7 @@ local function createFastProgressTicker(qTbl, count)
       qTbl.text('Spawning here\n'..tostring(progress)..' cards loaded')
     end
 
-    Wait.time(tick, 0.06)
+    Wait.time(tick, tickDelay)
   end
 
   tick()
@@ -588,6 +577,79 @@ local function applyCommanderPreferenceToUrl(url)
   return url .. separator .. 'enforceCommander=' .. value
 end
 
+local function splitNDJSONLines(respText)
+  local lines = {}
+  if not respText or respText == '' then
+    return lines
+  end
+
+  for line in respText:gmatch('[^\r\n]+') do
+    if line and line:match('%S') then
+      table.insert(lines, line)
+    end
+  end
+
+  return lines
+end
+
+local function decodeNDJSONLine(line)
+  if not line or line == '' then
+    return nil
+  end
+
+  local ok, parsed = pcall(function()
+    return JSON.decode(line)
+  end)
+
+  if not ok then
+    return nil
+  end
+
+  return parsed
+end
+
+local function firstSpawnPayloadFromNDJSON(respText)
+  local issues = {}
+  local lines = splitNDJSONLines(respText)
+
+  for _, line in ipairs(lines) do
+    local parsed = decodeNDJSONLine(line)
+    if parsed then
+      if parsed.object == 'warning' then
+        table.insert(issues, parsed.warning or 'warning')
+      elseif parsed.object == 'error' then
+        table.insert(issues, parsed.error or parsed.details or 'error')
+      elseif parsed.Name == 'DeckCustom' or parsed.ContainedObjects then
+        return parsed, issues
+      else
+        table.insert(issues, 'unexpected payload')
+      end
+    end
+  end
+
+  return nil, issues
+end
+
+local function postNDJSON(url, payload, callback)
+  local headers = {
+    Accept = 'application/x-ndjson',
+    ['Content-Type'] = 'application/json'
+  }
+
+  if lang and lang ~= '' then
+    headers['Accept-Language'] = lang
+  end
+
+  WebRequest.custom(
+    url,
+    'POST',
+    true,
+    JSON.encode(payload),
+    headers,
+    callback
+  )
+end
+
 local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
   if not qTbl or not queryRaw or queryRaw == '' or not count or count <= 1 then
     return false
@@ -609,16 +671,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
     stopProgressTicker = createFastProgressTicker(qTbl, count)
   end
 
-  WebRequest.custom(
-    BACKEND_URL .. '/random/build',
-    'POST',
-    true,
-    JSON.encode(payload),
-    {
-      Accept = 'application/x-ndjson',
-      ['Content-Type'] = 'application/json'
-    },
-    function(wr)
+  postNDJSON(BACKEND_URL .. '/random/build', payload, function(wr)
       if not wr.is_done then
         return
       end
@@ -633,34 +686,23 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
         return
       end
 
-      local deckLine = nil
-      for s in wr.text:gmatch('[^\r\n]+') do
-        if s and s ~= '' then
-          local ok, parsed = pcall(function()
-            return JSON.decode(s)
-          end)
-          if ok and parsed and parsed.object ~= 'warning' then
-            deckLine = s
-            break
-          end
-        end
-      end
-
-      if not deckLine then
+      local deckDat, issues = firstSpawnPayloadFromNDJSON(wr.text)
+      if not deckDat then
         stopProgressTicker(0)
         if onFallback then
           onFallback()
         else
-          Player[qTbl.color].broadcast('Backend returned no cards for random deck.',{1,0,0})
+          local details = 'Backend returned no cards for random deck.'
+          if issues and #issues > 0 then
+            details = details .. ' (' .. table.concat(issues, '; ') .. ')'
+          end
+          Player[qTbl.color].broadcast(details,{1,0,0})
           endLoop()
         end
         return
       end
 
-      local okDeck, deckDat = pcall(function()
-        return JSON.decode(deckLine)
-      end)
-      if not okDeck or not deckDat or not deckDat.ContainedObjects then
+      if not deckDat.ContainedObjects then
         stopProgressTicker(0)
         if onFallback then
           onFallback()
@@ -680,10 +722,20 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
       spawnObjectData(spawnDat)
       Player[qTbl.color].broadcast('All '..tostring(#deckDat.ContainedObjects)..' cards loaded!',{0.5,0.8,0.5})
       endLoop()
-    end
-  )
+    end)
 
   return true
+end
+
+local function fallbackRandomListRequest(url, qTbl, count)
+  local singleRequestUrl = url
+  if count and count > 1 then
+    local separator = singleRequestUrl:find('?', 1, true) and '&' or '?'
+    singleRequestUrl = singleRequestUrl .. separator .. 'count=' .. tostring(count)
+  end
+  WebRequest.get(singleRequestUrl, function(wr)
+    spawnList(wr, qTbl)
+  end)
 end
 
 --[[Importer Data Structure]]
@@ -692,7 +744,7 @@ Importer=setmetatable({
   request={},
   --Functions
   Search=function(qTbl)
-    local searchUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/search?q='..qTbl.name)
+    local searchUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/search?compact=spawn&q='..qTbl.name)
     WebRequest.get(searchUrl,function(wr)
         spawnList(wr,qTbl)end)end,
 
@@ -760,7 +812,7 @@ Importer=setmetatable({
     if not encodedName:find('%%') then
       encodedName = urlEncode(encodedName)
     end
-    local cardUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/card/'..encodedName)
+    local cardUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/card/'..encodedName..'?compact=spawn')
     WebRequest.get(cardUrl,function(wr)
         if handleWebError(wr, qTbl, 'Card lookup failed') then
           return
@@ -771,117 +823,315 @@ Importer=setmetatable({
           return
         end
         local obj=JSON.decode(wr.text)
-        -- Force token search if result is a Token, art_series, or other non-playable card type
-        local shouldForceTokenSearch = false
-        if obj.object=='card' then
-          if obj.type_line and obj.type_line:match('Token') then
-            shouldForceTokenSearch = true
-          elseif obj.layout and (obj.layout == 'art_series' or obj.layout == 'token' or obj.layout == 'double_faced_token' or obj.layout == 'emblem') then
-            shouldForceTokenSearch = true
-          end
-        end
-        
-        if shouldForceTokenSearch then
-          WebRequest.get(BACKEND_URL..'/search?unique=card&q=t:token+'..encodedName,function(wr)
-              spawnList(wr,qTbl)end)
-          return false
-        end
-        if obj.object=='error' then
+        if obj.object=='list' then
+          spawnList(wr,qTbl)
+          return
+        elseif obj.object=='error' then
           if obj.details then
             Player[qTbl.color].broadcast(obj.details,{1,0,0})
           end
-          -- Card not found, try finding all tokens matching this name/type (unique=card for unique names)
-          WebRequest.get(BACKEND_URL..'/search?unique=card&q=t:token+'..encodedName,function(wr)
+          -- Card not found, fall back to generic name search
+            WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&q='..encodedName,function(wr)
               spawnList(wr,qTbl)end)
           return false
         else setCard(wr,qTbl)end end)end,
 
   Token=function(qTbl)
-    -- Get the card name - either from target or command
-    local cardName = qTbl.target and qTbl.target.getName():gsub('\n.*','') or qTbl.name
-    local encodedName = urlEncode(cardName)
-    
-    -- Fetch the card via generic endpoint (we filter all_parts to tokens/emblems below)
-    WebRequest.get(BACKEND_URL..'/card/'..encodedName,function(wr)
+    local function getTokenCacheKeys(sourceCard)
+      local keys = {}
+      if sourceCard and sourceCard.id and sourceCard.id ~= '' then
+        table.insert(keys, 'id:' .. tostring(sourceCard.id))
+      end
+      if sourceCard and sourceCard.oracle_id and sourceCard.oracle_id ~= '' then
+        table.insert(keys, 'oracle:' .. tostring(sourceCard.oracle_id))
+      end
+      if sourceCard and sourceCard.name and sourceCard.name ~= '' then
+        table.insert(keys, 'name:' .. tostring(sourceCard.name):lower())
+      end
+      if qTbl and qTbl.oracleid and qTbl.oracleid ~= '' then
+        table.insert(keys, 'oracle:' .. tostring(qTbl.oracleid):gsub('^oracleid:', ''))
+      end
+      if qTbl and qTbl.name and qTbl.name ~= '' then
+        local decodedName = urlDecode(tostring(qTbl.name))
+        table.insert(keys, 'name:' .. tostring(decodedName):lower())
+      end
+      return keys
+    end
+
+    local function getCachedRelatedUris(cacheKeys)
+      for _, key in ipairs(cacheKeys) do
+        local cached = tokenRelatedPartsCache[key]
+        if cached and type(cached.uris) == 'table' and #cached.uris > 0 then
+          return cached.uris
+        end
+      end
+      return nil
+    end
+
+    local function storeCachedRelatedUris(cacheKeys, uris)
+      if type(uris) ~= 'table' or #uris == 0 then
+        return
+      end
+
+      local cacheEntries = 0
+      for _ in pairs(tokenRelatedPartsCache) do
+        cacheEntries = cacheEntries + 1
+      end
+      if cacheEntries > TOKEN_RELATED_CACHE_MAX then
+        tokenRelatedPartsCache = {}
+      end
+
+      for _, key in ipairs(cacheKeys) do
+        if key and key ~= '' then
+          tokenRelatedPartsCache[key] = { uris = uris }
+        end
+      end
+    end
+
+    local function dispatchRelatedUriSpawns(relatedUris)
+      if type(relatedUris) ~= 'table' or #relatedUris == 0 then
+        return false
+      end
+
+      qTbl.deck = #relatedUris
+      tokenPathLog(qTbl, 'dispatching related parts: ' .. tostring(#relatedUris))
+      local requestDelay = math.min(Tick, 0.05)
+      for index, uri in ipairs(relatedUris) do
+        local proxyUrl = BACKEND_URL..'/proxy?uri='..urlEncode(uri)
+        Wait.time(function()
+          WebRequest.get(proxyUrl,function(wr)
+            setCard(wr,qTbl)
+          end)
+        end, (index - 1) * requestDelay)
+      end
+      return true
+    end
+
+    local function dispatchRelatedCardSpawns(cards)
+      if type(cards) ~= 'table' or #cards == 0 then
+        return false
+      end
+
+      qTbl.deck = #cards
+      tokenPathLog(qTbl, 'dispatching related cards directly: ' .. tostring(#cards))
+      local requestDelay = math.min(Tick, 0.03)
+      for index, card in ipairs(cards) do
+        Wait.time(function()
+          Card(card, qTbl)
+        end, (index - 1) * requestDelay)
+      end
+      return true
+    end
+
+    local function normalizeOracleSearchQuery(rawOracleId)
+      local value = tostring(rawOracleId or '')
+      if value == '' then
+        return ''
+      end
+      if value:match('^oracleid:') then
+        return value
+      end
+      if value:match('^[%x%-]+$') then
+        return 'oracleid:' .. value
+      end
+      return value
+    end
+
+    local function tryFastRelatedLookup(onFallback)
+      local encodedName = qTbl.name
+      if not encodedName:find('%%') then
+        encodedName = urlEncode(encodedName)
+      end
+
+      local relatedUrl = BACKEND_URL..'/related?resolve=cards&compact=spawn&name='..encodedName
+      local oracleQuery = normalizeOracleSearchQuery(qTbl.oracleid)
+      if oracleQuery ~= '' then
+        relatedUrl = relatedUrl .. '&oracleId=' .. urlEncode(oracleQuery)
+      end
+
+      WebRequest.get(relatedUrl, function(wr)
+        if wr and wr.is_error then
+          tokenPathLog(qTbl, '/related request error -> fallback')
+          onFallback()
+          return
+        end
+
+        local ok, parsed = pcall(function()
+          return JSON.decode(wr.text)
+        end)
+        if not ok or not parsed then
+          tokenPathLog(qTbl, '/related invalid payload -> fallback')
+          onFallback()
+          return
+        end
+
+        if parsed.object ~= 'list' or type(parsed.data) ~= 'table' then
+          tokenPathLog(qTbl, '/related unexpected shape -> fallback')
+          onFallback()
+          return
+        end
+
+        local firstItem = parsed.data[1]
+        if type(firstItem) == 'table' and firstItem.object == 'card' then
+          if dispatchRelatedCardSpawns(parsed.data) then
+            tokenPathLog(qTbl, '/related fast path returned spawn-ready cards')
+            return
+          end
+          tokenPathLog(qTbl, '/related card list empty -> fallback')
+          onFallback()
+          return
+        end
+
+        local relatedUris = {}
+        local seenUris = {}
+        for _, part in ipairs(parsed.data) do
+          local uri = part and part.uri
+          if uri and uri ~= '' and not seenUris[uri] then
+            seenUris[uri] = true
+            table.insert(relatedUris, uri)
+          end
+        end
+
+        if #relatedUris == 0 then
+          tokenPathLog(qTbl, '/related returned 0 parts -> fallback')
+          onFallback()
+          return
+        end
+
+        tokenPathLog(qTbl, '/related fast path hit with ' .. tostring(#relatedUris) .. ' parts')
+        storeCachedRelatedUris(getTokenCacheKeys(nil), relatedUris)
+        dispatchRelatedUriSpawns(relatedUris)
+      end)
+    end
+
+    local function spawnRelatedTokens(sourceCard)
+      if not sourceCard or sourceCard.object ~= 'card' then
+        return false
+      end
+
+      local cacheKeys = getTokenCacheKeys(sourceCard)
+      local cachedUris = getCachedRelatedUris(cacheKeys)
+      if cachedUris then
+        tokenPathLog(qTbl, 'cache hit for related parts')
+        return dispatchRelatedUriSpawns(cachedUris)
+      end
+
+      local relatedUris = {}
+      local seen = {}
+      if sourceCard.all_parts and type(sourceCard.all_parts) == 'table' then
+        for _, part in ipairs(sourceCard.all_parts) do
+          local component = tostring(part and part.component or ''):lower()
+          local typeLine = tostring(part and part.type_line or ''):lower()
+          local isTokenOrEmblemType = typeLine:find('token', 1, true) ~= nil or typeLine:find('emblem', 1, true) ~= nil
+          if part and part.uri and (component == 'token' or component == 'emblem' or isTokenOrEmblemType) and not seen[part.uri] then
+            seen[part.uri] = true
+            table.insert(relatedUris, part.uri)
+          end
+        end
+      end
+
+      if #relatedUris == 0 then
+        tokenPathLog(qTbl, 'source card returned no token/emblem related parts')
+        return false
+      end
+
+      storeCachedRelatedUris(cacheKeys, relatedUris)
+      return dispatchRelatedUriSpawns(relatedUris)
+    end
+
+    local function handleSourceResponse(wr, tryNext)
       if handleWebError(wr, qTbl, 'Token lookup failed') then
         return
       end
-      if wr.text and wr.text ~= '' then
-        if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
-          Player[qTbl.color].broadcast('Backend returned HTML error.',{1,0,0})
-          endLoop()
+
+      local ok, parsed = pcall(function()
+        return JSON.decode(wr.text)
+      end)
+      if not ok or not parsed then
+        if tryNext then
+          tryNext()
           return
         end
-        local json=JSON.decode(wr.text)
-        
-        -- Check if card has all_parts (tokens/emblems)
-        if json.all_parts and #json.all_parts>0 then
-          -- Filter out the card itself, only spawn tokens/related cards
-          local tokensToSpawn = {}
-          for _,tokenPart in ipairs(json.all_parts)do
-            local partType = (tokenPart.type_line or ''):lower()
-            local partComponent = (tokenPart.component or ''):lower()
-            local isTokenPart = partType:find('token') or partType:find('emblem') or partComponent == 'token' or partComponent == 'emblem'
-            if tokenPart.id ~= json.id and isTokenPart then  -- Only spawn tokens/emblems, not the card itself
-              table.insert(tokensToSpawn, tokenPart)
-            end
-          end
-          
-          if #tokensToSpawn > 0 then
-            qTbl.deck=#tokensToSpawn
-            for i,tokenPart in ipairs(tokensToSpawn)do
-              Wait.time(function()
-                -- Proxy each token via the backend proxy endpoint
-                local proxyUrl = BACKEND_URL..'/proxy?uri='..tokenPart.uri:gsub('([^%w%-%.%_%~%:%/%?%#%[%]%@%!%$%&%\'%(%)*%+%,%;%=])', function(c)
-                  return string.format('%%%02X', string.byte(c))
-                end)
-                WebRequest.get(proxyUrl,function(wr)setCard(wr,qTbl)end)
-              end,i*Tick)
-            end
-          else
-            -- No other tokens found, try parsing oracle text
-            local oracle=json.oracle_text or ''
-            if json.card_faces then
-              for _,f in ipairs(json.card_faces)do 
-                if f.oracle_text then
-                  oracle=oracle..'\n'..setOracle(f)
-                end
-              end
-            end
-            parseForToken(oracle,qTbl)
-          end
-        elseif json.object=='card' then
-          -- Card found but no tokens in all_parts, try parsing oracle text for token info
-          local oracle=json.oracle_text or ''
-          if json.card_faces then
-            for _,f in ipairs(json.card_faces)do 
-              if f.oracle_text then
-                oracle=oracle..'\n'..setOracle(f)
-              end
-            end
-          end
-          parseForToken(oracle,qTbl)
-        elseif qTbl.target then
-          -- Button call with target but no Scryfall data, parse target description
-          local o=qTbl.target.getDescription()
-          if o:find('[Cc]reate')or o:find('emblem')then 
-            parseForToken(o,qTbl)
-          else 
-            Player[qTbl.color].broadcast('Card not found in Scryfall\nAnd did not have oracle text to parse.',{0.9,0.9,0.9})
-            endLoop()
-          end
-        else
-          Player[qTbl.color].broadcast('No Tokens Found',{0.9,0.9,0.9})
-          endLoop()
-        end
-      else
+        Player[qTbl.color].broadcast('Invalid token lookup payload from backend.',{1,0,0})
         endLoop()
+        return
       end
+
+      if parsed.object == 'card' then
+        if spawnRelatedTokens(parsed) then
+          return
+        end
+        if tryNext then
+          tryNext()
+          return
+        end
+        Player[qTbl.color].broadcast('No Tokens Found',{0.9,0.9,0.9})
+        endLoop()
+        return
+      end
+
+      if parsed.object == 'list' then
+        local firstCard = parsed.data and parsed.data[1] or nil
+        if spawnRelatedTokens(firstCard) then
+          return
+        end
+        if tryNext then
+          tryNext()
+          return
+        end
+        Player[qTbl.color].broadcast('No Tokens Found',{0.9,0.9,0.9})
+        endLoop()
+        return
+      end
+
+      if parsed.object == 'error' then
+        if tryNext then
+          tryNext()
+          return
+        end
+        Player[qTbl.color].broadcast(parsed.details or 'No Tokens Found',{1,0,0})
+        endLoop()
+        return
+      end
+
+      if tryNext then
+        tryNext()
+        return
+      end
+      Player[qTbl.color].broadcast('No Tokens Found',{0.9,0.9,0.9})
+      endLoop()
+    end
+
+    tryFastRelatedLookup(function()
+      tokenPathLog(qTbl, 'using fallback source-card resolution path')
+      local encodedName = qTbl.name
+      if not encodedName:find('%%') then
+        encodedName = urlEncode(encodedName)
+      end
+      local sourceByNameUrl = BACKEND_URL..'/card/'..encodedName..'?enforceCommander=false'
+
+      local oracleQuery = normalizeOracleSearchQuery(qTbl.oracleid)
+      if oracleQuery ~= '' then
+        local sourceByOracleUrl = BACKEND_URL..'/search?limit=1&q='..urlEncode(oracleQuery)..'&enforceCommander=false'
+        WebRequest.get(sourceByNameUrl,function(wr)
+          handleSourceResponse(wr,function()
+            tokenPathLog(qTbl, 'fallback name lookup failed -> trying oracle search')
+            WebRequest.get(sourceByOracleUrl,function(wr2)
+              handleSourceResponse(wr2,nil)
+            end)
+          end)
+        end)
+        return
+      end
+
+      WebRequest.get(sourceByNameUrl,function(wr)
+        handleSourceResponse(wr,nil)
+      end)
     end)
   end,
 
   Print=function(qTbl)
-    local url,n=BACKEND_URL..'/search?q=',qTbl.name:lower():gsub('%s',''):gsub('%%20','')    -- pieHere, making search with spaces possible
+    local url,n=BACKEND_URL..'/search?compact=spawn&q=',qTbl.name:lower():gsub('%s',''):gsub('%%20','')    -- pieHere, making search with spaces possible
     if('plains island swamp mountain forest'):find(n)then
       --url=url:gsub('prints','art')end
       broadcastToAll('[b][FFAA00]⚠️ Basic Lands Not Printed[/b]\n' ..
@@ -1011,7 +1261,7 @@ Importer=setmetatable({
   end,
 
   Random=function(qTbl)
-    local url,q1=BACKEND_URL..'/random','?q=is:hires'
+    local url,q1=BACKEND_URL..'/random?compact=spawn','&q=is:hires'
 
     local count = tonumber((qTbl.full or ''):match('%s(%d+)%s*$'))
     if not count then
@@ -1034,18 +1284,14 @@ Importer=setmetatable({
       end
 
       local encodedQuery = urlEncode(queryRaw)
-      url = BACKEND_URL..'/random?q='..encodedQuery
+      url = BACKEND_URL..'/random?compact=spawn&q='..encodedQuery
       url = applyCommanderEnforcementToUrl(url)
 
       uLog(url,qTbl.color..' Importer '..qTbl.full)
       if count then
         qTbl.deck=count
         local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
-          for i=1,count do
-            Wait.time(function()
-              WebRequest.get(url,function(wr)setCard(wr,qTbl)end)
-            end,i*Tick)
-          end
+          fallbackRandomListRequest(url, qTbl, count)
         end)
         if startedFast then
           return
@@ -1077,11 +1323,7 @@ Importer=setmetatable({
       local encodedQuery = url:match('%?q=(.+)$') or ''
       local queryRaw = urlDecode(encodedQuery)
       local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
-        for i=1,count do
-          Wait.time(function()
-            WebRequest.get(url,function(wr)setCard(wr,qTbl)end)
-          end,i*Tick)
-        end
+        fallbackRandomListRequest(url, qTbl, count)
       end)
       if startedFast then
         return

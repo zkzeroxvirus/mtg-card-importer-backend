@@ -1,7 +1,6 @@
 /**
  * Tests to verify routing behavior:
  * - Price filters force API routing for real-time data
- * - Token filters use bulk-data first with API fallback
  */
 
 const request = require('supertest');
@@ -13,7 +12,7 @@ jest.mock('../lib/bulk-data');
 const scryfallLib = require('../lib/scryfall');
 const bulkData = require('../lib/bulk-data');
 
-describe('Price and Token Filter API Routing', () => {
+describe('Price Filter API Routing', () => {
   let app;
   let originalEnv;
 
@@ -142,13 +141,8 @@ describe('Price and Token Filter API Routing', () => {
         .expect(200);
 
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-        'eur<10 lang:en f:commander',
-        5,
-        'prints',
-        'random'
-      );
-      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('eur<10 lang:en f:commander', true);
     });
 
     test('should use bulk data for non-price random queries', async () => {
@@ -168,23 +162,19 @@ describe('Price and Token Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalled();
     });
 
-    test('should use bulk first for single random with token filter', async () => {
-      await request(app)
-        .get('/random?q=t:token')
+  });
+
+  describe('POST /random/build with price filters', () => {
+    test('should use API for random/build with usd filter', async () => {
+      const response = await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 'usd>=50 t:artifact', count: 1, enforceCommander: true })
         .expect(200);
 
-      expect(bulkData.getRandomCard).toHaveBeenCalledWith('t:token lang:en f:commander');
-      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
-    });
-
-    test('should use bulk first with API fallback for multiple random token filter', async () => {
-      await request(app)
-        .get('/random?count=5&q=is:token')
-        .expect(200);
-
-      expect(bulkData.getRandomCard).toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
-      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(response.headers['x-query-plan']).toBe('api:price_filter');
+      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('usd>=50 t:artifact lang:en f:commander');
     });
   });
 
@@ -219,35 +209,8 @@ describe('Price and Token Filter API Routing', () => {
     });
   });
 
-  describe('Token filter detection regex', () => {
-    const testQueries = [
-      { query: 't:token', shouldMatch: true, desc: 't:token' },
-      { query: 'type:token', shouldMatch: true, desc: 'type:token' },
-      { query: 'is:token', shouldMatch: true, desc: 'is:token' },
-      { query: 't:token name:treasure', shouldMatch: true, desc: 't:token with name' },
-      { query: 'is:token c:r', shouldMatch: true, desc: 'is:token with color' },
-      { query: 't:goblin', shouldMatch: false, desc: 't:goblin (not token)' },
-      { query: 'c:r t:creature', shouldMatch: false, desc: 'no token filter' },
-    ];
-
-    testQueries.forEach(({ query, shouldMatch, desc }) => {
-      test(`should ${shouldMatch ? '' : 'not '}match: ${desc}`, async () => {
-        await request(app)
-          .get(`/search?q=${encodeURIComponent(query)}`)
-          .expect(200);
-
-        if (shouldMatch) {
-          expect(bulkData.searchCards).toHaveBeenCalled();
-          expect(scryfallLib.searchCards).not.toHaveBeenCalled();
-        } else {
-          expect(bulkData.searchCards).toHaveBeenCalled();
-        }
-      });
-    });
-  });
-
-  describe('Combined price and token filters', () => {
-    test('should use API for query with both price and token filters', async () => {
+  describe('Combined filters', () => {
+    test('should use API for query with both price and type filters', async () => {
       await request(app)
         .get('/search?q=t:token+usd>=5')
         .expect(200);

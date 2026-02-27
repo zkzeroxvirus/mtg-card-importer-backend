@@ -9,22 +9,33 @@ jest.mock('../lib/scryfall', () => ({
   searchCards: jest.fn()
 }));
 
+jest.mock('../lib/bulk-data', () => ({
+  isLoaded: jest.fn(() => false),
+  getExactTokensByName: jest.fn(() => []),
+  getCardByName: jest.fn(),
+  getCardById: jest.fn(),
+  getCardBySetNumber: jest.fn(),
+  getRandomCard: jest.fn(),
+  searchCards: jest.fn(),
+  getQueryExplain: jest.fn(),
+  getStats: jest.fn(() => ({ loaded: false })),
+  loadBulkData: jest.fn(),
+  scheduleUpdateCheck: jest.fn(),
+  dedupeCardsByOracleId: jest.fn(cards => cards)
+}));
+
 const scryfallLib = require('../lib/scryfall');
+const bulkData = require('../lib/bulk-data');
 const app = require('../server');
 
 describe('Token card lookup', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    bulkData.isLoaded.mockReturnValue(false);
+    bulkData.getExactTokensByName.mockReturnValue([]);
   });
 
-  test('should return exact token match when fuzzy match returns different name', async () => {
-    scryfallLib.getCard.mockResolvedValue({
-      object: 'card',
-      name: 'Dinosaur // Treasure',
-      type_line: 'Token Creature — Dinosaur // Token Artifact — Treasure',
-      layout: 'double_faced_token'
-    });
-
+  test('should prefer exact token lookup for treasure and exclude DFC token result', async () => {
     scryfallLib.searchCards.mockResolvedValue([
       {
         object: 'card',
@@ -39,23 +50,94 @@ describe('Token card lookup', () => {
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Treasure');
     expect(response.body.layout).toBe('token');
-    expect(response.body.type_line).toContain('Token Artifact');
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith('!"treasure" t:token -is:dfc', 25, 'cards');
+    expect(scryfallLib.getCard).not.toHaveBeenCalled();
   });
 
-  test('should fall back to fuzzy token match when exact match not found', async () => {
-    scryfallLib.getCard.mockResolvedValue({
-      object: 'card',
-      name: 'Dinosaur // Treasure',
-      type_line: 'Token Creature — Dinosaur // Token Artifact — Treasure',
-      layout: 'double_faced_token'
-    });
+  test('should prefer exact token lookup for food', async () => {
+    scryfallLib.searchCards.mockResolvedValue([
+      {
+        object: 'card',
+        name: 'Food',
+        type_line: 'Token Artifact — Food',
+        layout: 'token'
+      }
+    ]);
 
-    scryfallLib.searchCards.mockResolvedValue([]);
-
-    const response = await request(app).get('/card/treasure');
+    const response = await request(app).get('/card/food');
 
     expect(response.status).toBe(200);
-    expect(response.body.name).toBe('Dinosaur // Treasure');
-    expect(response.body.layout).toBe('double_faced_token');
+    expect(response.body.name).toBe('Food');
+    expect(response.body.layout).toBe('token');
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith('!"food" t:token -is:dfc', 25, 'cards');
+    expect(scryfallLib.getCard).not.toHaveBeenCalled();
+  });
+
+  test('should return list when exact token lookup has multiple unique variants', async () => {
+    scryfallLib.searchCards.mockResolvedValue([
+      {
+        object: 'card',
+        id: 'fish-1',
+        oracle_id: 'oracle-fish-1',
+        name: 'Fish',
+        type_line: 'Token Creature — Fish',
+        layout: 'token'
+      },
+      {
+        object: 'card',
+        id: 'fish-2',
+        oracle_id: 'oracle-fish-2',
+        name: 'Fish',
+        type_line: 'Token Creature — Fish',
+        layout: 'token'
+      }
+    ]);
+
+    const response = await request(app).get('/card/fish');
+
+    expect(response.status).toBe(200);
+    expect(response.body.object).toBe('list');
+    expect(response.body.total_cards).toBe(2);
+    expect(Array.isArray(response.body.data)).toBe(true);
+    expect(response.body.data[0].name).toBe('Fish');
+    expect(scryfallLib.getCard).not.toHaveBeenCalled();
+  });
+
+  test('should fall back to generic card lookup when no exact token exists', async () => {
+    scryfallLib.searchCards.mockResolvedValue([]);
+    scryfallLib.getCard.mockResolvedValue({
+      object: 'card',
+      name: 'Treasure Nabber',
+      type_line: 'Creature — Goblin Rogue',
+      layout: 'normal'
+    });
+
+    const response = await request(app).get('/card/treasure%20nabber');
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('Treasure Nabber');
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith('!"treasure nabber" t:token -is:dfc', 25, 'cards');
+    expect(scryfallLib.getCard).toHaveBeenCalledWith('treasure nabber', undefined);
+  });
+
+  test('should bypass commander legality checks for token lookup when enforceCommander=true', async () => {
+    scryfallLib.searchCards.mockResolvedValue([
+      {
+        object: 'card',
+        name: 'Treasure',
+        type_line: 'Token Artifact — Treasure',
+        layout: 'token',
+        legalities: {
+          commander: 'not_legal'
+        }
+      }
+    ]);
+
+    const response = await request(app)
+      .get('/card/treasure')
+      .query({ enforceCommander: 'true' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('Treasure');
   });
 });

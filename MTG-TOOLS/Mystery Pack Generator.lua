@@ -276,6 +276,21 @@ local function firstDeckFromNDJSON(respText)
   return nil
 end
 
+local function postBuildNDJSON(payload, callback)
+  WebRequest.custom(
+    backendURL..'/random/build',
+    'POST',
+    true,
+    JSON.encode(payload),
+    {
+      Accept = 'application/x-ndjson',
+      ['Content-Type'] = 'application/json',
+      ['Accept-Language'] = 'en'
+    },
+    callback
+  )
+end
+
 local function getDeckEntryForCardId(deckObject, cardId)
   if not deckObject or not deckObject.CustomDeck or not cardId then
     return nil
@@ -373,24 +388,24 @@ function getDeckDat(urlTable,boosterN)
 
     local randomQuery = extractQueryFromRandomUrl(url)
     if randomQuery then
-      local payload = JSON.encode({
+      local payload = {
         q = randomQuery,
         count = 1,
         enforceCommander = false,
         back = backURL
-      })
+      }
 
-      WebRequest.custom(
-        backendURL..'/random/build',
-        'POST',
-        true,
-        payload,
-        {
-          Accept = 'application/x-ndjson',
-          ['Content-Type'] = 'application/json'
-        },
-        function(wr)
+      postBuildNDJSON(payload, function(wr)
+        if not wr.is_done then
+          return
+        end
+
         if wr.is_error or (wr.response_code and wr.response_code >= 400) then
+          assignCardDat(nil)
+          return
+        end
+
+        if not wr.text or wr.text == '' then
           assignCardDat(nil)
           return
         end
@@ -401,8 +416,7 @@ function getDeckDat(urlTable,boosterN)
         else
           assignCardDat(nil)
         end
-        end
-      )
+        end)
     else
       assignCardDat(nil)
     end

@@ -37,6 +37,8 @@ Per Scryfall's requirements (enforced since August 2024), all API requests must 
 - Default delay: 100ms (configurable via `SCRYFALL_DELAY` environment variable)
 - Queue processes requests one at a time with enforced delays
 - Recommended minimum: 100ms (Scryfall suggests 50-100ms between requests)
+- Queue throttling is enabled by default regardless of bulk mode (`SCRYFALL_RATE_LIMIT_MODE=always`)
+- Optional override: `SCRYFALL_RATE_LIMIT_MODE=never` (not recommended for compliance)
 
 #### Retry Logic with Exponential Backoff
 - **Location**: `lib/scryfall.js` lines 64-97
@@ -64,7 +66,6 @@ async function example() {
 - `getRandomCard()` - Line 201
 - `getSet()` - Line 228
 - `getCardRulings()` - Lines 118 and 399 (two API calls!)
-- `getTokens()` - Lines 453, 473 (in loop), 494, 508
 - `getPrintings()` - Line 520
 
 #### Special Cases
@@ -72,11 +73,6 @@ async function example() {
 **getCardRulings()**: Makes TWO API calls:
 1. First call: `getCard()` (already has queue wait)
 2. Second call: Fetch rulings (requires its own queue wait at line 399)
-
-**getTokens()**: May make multiple API calls:
-1. Initial queue wait at line 453
-2. Loop over token parts: Each iteration needs queue wait (line 473)
-3. Fallback searches: Each needs queue wait (lines 494, 508)
 
 ## Bulk Data Mode
 
@@ -145,6 +141,7 @@ async function test() {
 Environment variables for API compliance:
 
 - `SCRYFALL_DELAY`: Milliseconds between requests (default: 100, recommended minimum: 100)
+- `SCRYFALL_RATE_LIMIT_MODE`: Queue mode (`always` default; `never` disables queue and may violate Scryfall guidance)
 - `USE_BULK_DATA`: Enable bulk data mode to reduce API calls (default: true)
 - `BULK_DATA_PATH`: Where to store bulk data files (default: ./data)
 
@@ -168,5 +165,5 @@ If you see frequent 429 errors, consider:
   - Added global request queue
   - Implemented retry logic with exponential backoff
   - Added User-Agent and Accept headers
-  - Fixed missing queue waits in getCardRulings() and getTokens()
+  - Fixed missing queue waits in getCardRulings()
   - Updated axios to 1.13.4 for security fixes

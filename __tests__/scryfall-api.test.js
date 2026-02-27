@@ -99,16 +99,52 @@ describe('Scryfall API - Error Handling', () => {
     expect(result).toEqual([]);
   });
 
-  test('getTokens should return empty array on search failure', async () => {
-    axios.create = jest.fn(() => ({
-      get: jest.fn().mockRejectedValue({
-        response: { status: 404 },
-        message: 'Not found'
-      })
-    }));
+  test('withRetry should respect HTTP-date Retry-After values', async () => {
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((fn, _ms) => {
+      fn();
+      return 0;
+    });
 
-    const result = await scryfall.getTokens('NonExistentToken');
-    expect(result).toEqual([]);
+    const getMock = jest
+      .fn()
+      .mockRejectedValueOnce({
+        response: {
+          status: 429,
+          headers: {
+            'retry-after': 'Wed, 21 Oct 2015 07:28:00 GMT'
+          }
+        },
+        message: 'Rate limited'
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: 'card-123'
+        }
+      });
+
+    const localScryfall = loadScryfallWithGet(getMock);
+    await localScryfall.getCardById('card-123');
+
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
+    setTimeoutSpy.mockRestore();
+  });
+
+  test('getPrintings should queue every outbound API call', async () => {
+    const getMock = jest
+      .fn()
+      .mockResolvedValueOnce({ data: { oracle_id: 'oracle-123' } })
+      .mockResolvedValueOnce({ data: { data: [{ id: 'print-1' }] } });
+
+    const localScryfall = loadScryfallWithGet(getMock);
+    localScryfall.globalQueue.delay = 0;
+    localScryfall.globalQueue.lastRequest = 0;
+
+    const waitSpy = jest.spyOn(localScryfall.globalQueue, 'wait');
+    const result = await localScryfall.getPrintings('Lightning Bolt');
+
+    expect(waitSpy).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(1);
+    waitSpy.mockRestore();
   });
 });
 

@@ -1,0 +1,1214 @@
+{
+  "generatedAt": "2026-02-27T02:14:28.452Z",
+  "baseUrl": "http://localhost:3000",
+  "totalUniqueTokenNames": 664,
+  "testedTokenNames": 664,
+  "okCount": 454,
+  "failedCount": 210,
+  "fallbackCount": 0,
+  "ambiguousTokenNameCount": 97,
+  "soldier": {
+    "name": "Soldier",
+    "count": 13,
+    "layouts": [
+      "token"
+    ],
+    "sets": [
+      "ptdmu",
+      "tbng",
+      "tcn2",
+      "tfic",
+      "tltc",
+      "tmm3",
+      "tonc",
+      "totc",
+      "trvr",
+      "ttdm",
+      "ttla",
+      "ttle",
+      "tuma"
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  "fish": {
+    "name": "Fish",
+    "count": 3,
+    "layouts": [
+      "token"
+    ],
+    "sets": [
+      "tfdn",
+      "tmh3",
+      "tsnc"
+    ],
+    "languages": [
+      "en"
+    ]
+  },
+  "topAmbiguous": [
+    {
+      "name": "Elemental",
+      "count": 29,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tbng",
+        "tc21",
+        "tcmm",
+        "tddt",
+        "tdmu",
+        "tecc",
+        "teoc",
+        "tfin",
+        "tinr",
+        "tkhc",
+        "tmoc",
+        "tmom",
+        "togw",
+        "tori",
+        "totc",
+        "totj",
+        "trix",
+        "troe",
+        "trtr",
+        "tshm",
+        "tthb",
+        "tuma",
+        "twoe",
+        "tzen"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Spirit",
+      "count": 21,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "t2x2",
+        "tbro",
+        "tc15",
+        "tdsk",
+        "tfic",
+        "tm3c",
+        "tmh3",
+        "tmoc",
+        "tmom",
+        "tneo",
+        "totj",
+        "ttdm",
+        "ttla",
+        "tvoc",
+        "tvow"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Bird",
+      "count": 13,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tbng",
+        "tc19",
+        "tdmu",
+        "tdsc",
+        "teoc",
+        "tfic",
+        "tfin",
+        "tgk2",
+        "tltc",
+        "tmid",
+        "totj",
+        "trvr"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Soldier",
+      "count": 13,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "ptdmu",
+        "tbng",
+        "tcn2",
+        "tfic",
+        "tltc",
+        "tmm3",
+        "tonc",
+        "totc",
+        "trvr",
+        "ttdm",
+        "ttla",
+        "ttle",
+        "tuma"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Insect",
+      "count": 12,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "t40k",
+        "takh",
+        "tdsc",
+        "tdsk",
+        "teoc",
+        "tfdn",
+        "tinr",
+        "tmid",
+        "tmoc",
+        "tsom",
+        "ttsr"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Golem",
+      "count": 11,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tbro",
+        "tc21",
+        "teoc",
+        "tlci",
+        "tmh2",
+        "tonc",
+        "trix"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Beast",
+      "count": 9,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "takh",
+        "tala",
+        "tc18",
+        "tdsk",
+        "teoc",
+        "tkld",
+        "tm3c",
+        "trvr"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Cat",
+      "count": 8,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "plst",
+        "tdmr",
+        "tfdn",
+        "tmkc",
+        "tsnc",
+        "tunf"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Construct",
+      "count": 8,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tbig",
+        "tbro",
+        "tc18",
+        "tcmm",
+        "tkld",
+        "tm3c",
+        "tmed",
+        "tneo"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Dragon",
+      "count": 8,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tarb",
+        "tfdn",
+        "tltc",
+        "totc",
+        "trvr",
+        "ttla",
+        "tund"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Horror",
+      "count": 8,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tc14",
+        "tc18",
+        "tc21",
+        "tclb",
+        "tdsk",
+        "te01",
+        "tfin",
+        "tgtc"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Vampire",
+      "count": 8,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tdka",
+        "tinr",
+        "tmid",
+        "tmom",
+        "tvow",
+        "tzen"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Zombie",
+      "count": 8,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tbng",
+        "tbro",
+        "tcmm",
+        "tdrc",
+        "tecc",
+        "tinr",
+        "tmid"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Knight",
+      "count": 7,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tcm2",
+        "tcmm",
+        "tdmu",
+        "tfdn",
+        "tfin",
+        "tmom",
+        "ttsr"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Ooze",
+      "count": 7,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tdsc",
+        "tmid",
+        "tmkm",
+        "tpca",
+        "tsoi"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Spider",
+      "count": 7,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tafr",
+        "tdsk",
+        "tinr",
+        "tjou",
+        "tmkm",
+        "tspm",
+        "ttsr"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Wurm",
+      "count": 7,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "t2xm",
+        "tdmu",
+        "tdsc",
+        "trvr",
+        "tuma"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Dinosaur",
+      "count": 6,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tiko",
+        "tlci",
+        "tmom",
+        "totj",
+        "trex",
+        "twho"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Goblin",
+      "count": 6,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tclb",
+        "tcn2",
+        "tecl",
+        "tfdn",
+        "tgk2",
+        "trvr"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Illusion",
+      "count": 6,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tafc",
+        "tcmr",
+        "tm3c",
+        "trna",
+        "txln",
+        "tzen"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Snake",
+      "count": 6,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tc15",
+        "tecc",
+        "thou",
+        "tjou",
+        "tmh3",
+        "tmkc"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Wall",
+      "count": 6,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tblb",
+        "tcmm",
+        "tddt",
+        "ttdc",
+        "tthb",
+        "twar"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Demon",
+      "count": 5,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tc21",
+        "tclb",
+        "tdsk",
+        "tinr",
+        "tmoc"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Rat",
+      "count": 5,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tblb",
+        "tc17",
+        "tfdn",
+        "tmh3"
+      ],
+      "languages": [
+        "en"
+      ]
+    },
+    {
+      "name": "Shapeshifter",
+      "count": 5,
+      "layouts": [
+        "token"
+      ],
+      "sets": [
+        "tacr",
+        "tclb",
+        "tecl",
+        "teoc",
+        "tm3c"
+      ],
+      "languages": [
+        "en"
+      ]
+    }
+  ],
+  "sampleFailures": [
+    {
+      "tokenName": "1997 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "1998 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "1999 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "2000 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "2001 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "2002 World Championships Ad",
+      "query": "t:token name:\"2002 World Championships Ad\"",
+      "status": 400,
+      "elapsedMs": 39,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"2002 World Championships Ad\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "2003 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "2004 World Championships Ad",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "A Mysterious Creature",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Aeo Paquette Bio",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Aeo Paquette Decklist",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Alex Borteh Bio",
+      "query": "t:token name:\"Alex Borteh Bio\"",
+      "status": 400,
+      "elapsedMs": 1,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Alex Borteh Bio\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Alex Borteh Decklist",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Angels",
+      "query": "t:token name:\"Angels\"",
+      "status": 400,
+      "elapsedMs": 2,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Angels\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Antoine Ruel Bio",
+      "query": "t:token name:\"Antoine Ruel Bio\"",
+      "status": 400,
+      "elapsedMs": 2,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Antoine Ruel Bio\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Antoine Ruel Decklist",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Armed",
+      "query": "t:token name:\"Armed\"",
+      "status": 502,
+      "elapsedMs": 19802,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Armed\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Base Race // Base Race (cont'd)",
+      "query": "t:token name:\"Base Race // Base Race (cont'd)\"",
+      "status": 400,
+      "elapsedMs": 13,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Base Race // Base Race (cont'd)\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Baxter, Exzzperimental Zzientist",
+      "query": "t:token name:\"Baxter, Exzzperimental Zzientist\"",
+      "status": 400,
+      "elapsedMs": 1,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Baxter, Exzzperimental Zzientist\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Beasts",
+      "query": "t:token name:\"Beasts\"",
+      "status": 400,
+      "elapsedMs": 41,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Beasts\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Ben Rubin Bio",
+      "query": "t:token name:\"Ben Rubin Bio\"",
+      "status": 502,
+      "elapsedMs": 19665,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Ben Rubin Bio\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Ben Rubin Decklist",
+      "query": "t:token name:\"Ben Rubin Decklist\"",
+      "status": 502,
+      "elapsedMs": 19659,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Ben Rubin Decklist\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Beyond Booster Blitz",
+      "query": "t:token name:\"Beyond Booster Blitz\"",
+      "status": 400,
+      "elapsedMs": 24,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Beyond Booster Blitz\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Blank Card",
+      "query": "t:token name:\"Blank Card\"",
+      "status": 502,
+      "elapsedMs": 19877,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Blank Card\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bloody",
+      "query": "t:token name:\"Bloody\"",
+      "status": 502,
+      "elapsedMs": 18268,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bloody\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bookworms",
+      "query": "t:token name:\"Bookworms\"",
+      "status": 502,
+      "elapsedMs": 19096,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bookworms\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Booster Blitz",
+      "query": "t:token name:\"Booster Blitz\"",
+      "status": 502,
+      "elapsedMs": 1399,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Booster Blitz\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Booster Sleuth // Booster Sleuth (cont'd)",
+      "query": "t:token name:\"Booster Sleuth // Booster Sleuth (cont'd)\"",
+      "status": 502,
+      "elapsedMs": 950,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Booster Sleuth // Booster Sleuth (cont'd)\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Eriana, Wrecking Ball // Wanted!",
+      "query": "t:token name:\"Bounty: Eriana, Wrecking Ball // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 548,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Eriana, Wrecking Ball // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Frankie The Fang // Wanted!",
+      "query": "t:token name:\"Bounty: Frankie The Fang // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 827,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Frankie The Fang // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Gorra Tash and Silas // Wanted!",
+      "query": "t:token name:\"Bounty: Gorra Tash and Silas // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 954,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Gorra Tash and Silas // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Lord Fajjal // Wanted!",
+      "query": "t:token name:\"Bounty: Lord Fajjal // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 788,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Lord Fajjal // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Lyssa, Sterling Collector // Wanted!",
+      "query": "t:token name:\"Bounty: Lyssa, Sterling Collector // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 821,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Lyssa, Sterling Collector // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Miron Tillas Jr. // Wanted!",
+      "query": "t:token name:\"Bounty: Miron Tillas Jr. // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 924,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Miron Tillas Jr. // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Paq, Fleeting Filcher // Wanted!",
+      "query": "t:token name:\"Bounty: Paq, Fleeting Filcher // Wanted!\"",
+      "status": 502,
+      "elapsedMs": 864,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": "bulk:token_bulk_first",
+        "explain": "mode=random;total=36708;prefiltered=36700;final=0",
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Paq, Fleeting Filcher // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Rissa \"Blades\" Lee // Wanted!",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Bounty: Sleepy Sovka // Wanted!",
+      "query": "t:token name:\"Bounty: Sleepy Sovka // Wanted!\"",
+      "status": 400,
+      "elapsedMs": 44,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Sleepy Sovka // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Squeakers the Sly // Wanted!",
+      "query": "t:token name:\"Bounty: Squeakers the Sly // Wanted!\"",
+      "status": 400,
+      "elapsedMs": 41,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Squeakers the Sly // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: The Outsider // Wanted!",
+      "query": "t:token name:\"Bounty: The Outsider // Wanted!\"",
+      "status": 400,
+      "elapsedMs": 2,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: The Outsider // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Bounty: Vara Beth Hannifer // Wanted!",
+      "query": "t:token name:\"Bounty: Vara Beth Hannifer // Wanted!\"",
+      "status": 400,
+      "elapsedMs": 1,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Bounty: Vara Beth Hannifer // Wanted!\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Brian Hacker Bio",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Brian Hacker Decklist",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Brian Kibler Bio",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Brian Kibler Decklist",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Brian Selden Bio",
+      "query": "t:token name:\"Brian Selden Bio\"",
+      "status": 400,
+      "elapsedMs": 2,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Brian Selden Bio\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Brian Selden Decklist",
+      "query": "t:token name:\"Brian Selden Decklist\"",
+      "status": 400,
+      "elapsedMs": 1,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Brian Selden Decklist\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Burning",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Careful Study (minigame) // Careful Study (cont'd)",
+      "query": "t:token name:\"Careful Study (minigame) // Careful Study (cont'd)\"",
+      "status": 400,
+      "elapsedMs": 2,
+      "hasDeckPayload": false,
+      "lineCount": 1,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "{\"object\":\"error\",\"details\":\"Invalid search query: \\\"t:token name:\\\"Careful Study (minigame) // Careful Study (cont'd)\\\"\\\". No cards match this query.\"}"
+    },
+    {
+      "tokenName": "Carlos Romão Bio",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    },
+    {
+      "tokenName": "Carlos Romão Decklist",
+      "status": 0,
+      "elapsedMs": null,
+      "hasDeckPayload": false,
+      "headers": {
+        "plan": null,
+        "explain": null,
+        "fallback": null
+      },
+      "errorDetails": "timeout of 20000ms exceeded"
+    }
+  ]
+}

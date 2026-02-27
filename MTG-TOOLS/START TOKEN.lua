@@ -112,24 +112,186 @@ local function splitLines(resp)
     return lines
 end
 
-local function spawnNDJSONQueue(respText, onDone, batchSize)
+local function decodeNDJSONLine(line)
+    if not line or line == '' then
+        return nil
+    end
+
+    local ok, parsed = pcall(function()
+        return JSON.decode(line)
+    end)
+
+    if not ok then
+        return nil
+    end
+
+    return parsed
+end
+
+local function postNDJSON(url, payload, callback)
+    WebRequest.custom(
+        url,
+        'POST',
+        true,
+        JSON.encode(payload),
+        {
+            Accept = 'application/x-ndjson',
+            ['Content-Type'] = 'application/json',
+            ['Accept-Language'] = 'en'
+        },
+        callback
+    )
+end
+
+local spawnNDJSONQueue
+
+local function buildDeckFromTTSObjects(spawnLines, spawnPos)
+    local cards = {}
+
+    for _, line in ipairs(spawnLines) do
+        local parsed = decodeNDJSONLine(line)
+        if not parsed or parsed.Name ~= 'Card' or not parsed.CardID or not parsed.CustomDeck then
+            return nil
+        end
+        cards[#cards + 1] = parsed
+    end
+
+    if #cards <= 1 then
+        return nil
+    end
+
+    local customDeck = {}
+    local deckIDs = {}
+    local containedObjects = {}
+
+    for i, card in ipairs(cards) do
+        deckIDs[i] = card.CardID
+        containedObjects[i] = card
+
+        for key, value in pairs(card.CustomDeck or {}) do
+            customDeck[tostring(key)] = value
+        end
+
+        if card.States then
+            for _, state in pairs(card.States) do
+                if state and state.CustomDeck then
+                    for stateKey, stateValue in pairs(state.CustomDeck) do
+                        customDeck[tostring(stateKey)] = stateValue
+                    end
+                end
+            end
+        end
+    end
+
+    local selfRot = self.getRotation()
+    local deckTransform = {
+        posX = spawnPos and spawnPos.x or 0,
+        posY = spawnPos and spawnPos.y or 2,
+        posZ = spawnPos and spawnPos.z or 0,
+        rotX = selfRot.x,
+        rotY = selfRot.y,
+        rotZ = 180,
+        scaleX = 1,
+        scaleY = 1,
+        scaleZ = 1
+    }
+
+    return {
+        Name = 'DeckCustom',
+        Nickname = 'Deck',
+        Description = '',
+        Transform = deckTransform,
+        HideWhenFaceDown = false,
+        DeckIDs = deckIDs,
+        CustomDeck = customDeck,
+        ContainedObjects = containedObjects
+    }
+end
+
+local function finishSpawnFromNDJSON(respText, spawnPos, onComplete)
+    spawnNDJSONQueue(respText, spawnPos, function(spawnedCount)
+        if spawnedCount <= 0 then
+            print('No valid cards to spawn')
+        end
+        Wait.time(function()
+            endSpawning()
+            if onComplete then onComplete(spawnedCount > 0) end
+        end, 0.25)
+    end, 2)
+end
+
+local function handleNDJSONBuildResponse(resp, spawnPos, onComplete, onFallback, context)
+    if not resp.is_done then
+        return
+    end
+
+    if resp.is_error or (resp.response_code and resp.response_code >= 400) or not resp.text or resp.text == '' then
+        local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
+        if resp.text and resp.text ~= '' then
+            details = details .. ' | ' .. tostring(resp.text)
+        end
+        print((context or 'NDJSON build request failed') .. ': ' .. tostring(details))
+        if onFallback then
+            onFallback(resp)
+            return
+        end
+        endSpawning()
+        if onComplete then onComplete(false) end
+        return
+    end
+
+    finishSpawnFromNDJSON(resp.text, spawnPos, onComplete)
+end
+
+spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
     local lines = splitLines(respText)
     local spawnLines = {}
+    local issues = {}
 
     for _, line in ipairs(lines) do
-        local parsed = JSONdecode(line)
+        local parsed = decodeNDJSONLine(line)
         if parsed and parsed.object == 'warning' then
-            local warningText = parsed.warning or ((parsed.card_name or 'Card') .. ' was skipped')
-            printToAll(tostring(warningText), Color.Orange)
+            issues[#issues + 1] = parsed.warning or ((parsed.card_name or 'Card') .. ' was skipped')
+        elseif parsed and parsed.object == 'error' then
+            issues[#issues + 1] = parsed.error or parsed.details or 'Spawn error'
         else
             table.insert(spawnLines, line)
         end
     end
 
+    if #issues == 1 then
+        printToAll(tostring(issues[1]), Color.Orange)
+    elseif #issues > 1 then
+        printToAll('Spawn warnings: ' .. tostring(#issues) .. ' cards were skipped.', Color.Orange)
+    end
+
+    local compactDeck = buildDeckFromTTSObjects(spawnLines, spawnPos)
+    if compactDeck then
+        spawnObjectData({
+            data = compactDeck,
+            position = { compactDeck.Transform.posX, compactDeck.Transform.posY, compactDeck.Transform.posZ },
+            rotation = { compactDeck.Transform.rotX, compactDeck.Transform.rotY, compactDeck.Transform.rotZ }
+        })
+        cardsSpawned = #spawnLines
+        updateSpawningIndicator()
+        if onDone then
+            onDone(#spawnLines)
+        end
+        return
+    end
+
     local index = 1
     local total = #spawnLines
-    local batch = batchSize or 2
-    local indicatorUpdateStep = 2
+    local totalSpawnLines = #spawnLines
+    local adaptiveBatch = 2
+    if totalSpawnLines >= 40 then
+        adaptiveBatch = 4
+    end
+    if totalSpawnLines >= 80 then
+        adaptiveBatch = 6
+    end
+    local batch = batchSize or adaptiveBatch
+    local indicatorUpdateStep = math.max(4, math.floor(totalSpawnLines / 12))
 
     local function processBatch()
         if not scriptActive then
@@ -157,87 +319,7 @@ local function spawnNDJSONQueue(respText, onDone, batchSize)
     processBatch()
 end
 
-local function spawnDecklistViaBuild(decklist, spawnPos, onComplete)
-    local rot = self.getRotation()
-    local payload = {
-        -- Keep both keys for backward compatibility across backend versions.
-        data = decklist,
-        decklist = decklist,
-        spawnMode = 'deck',
-        back = backURL,
-        hand = {
-            position = { x = spawnPos.x, y = spawnPos.y, z = spawnPos.z },
-            rotation = { x = rot.x, y = rot.y, z = rot.z }
-        }
-    }
-
-    local function handleBuildResponse(resp, allowRetry)
-        if not resp.is_done then
-            return
-        end
-
-        if resp.is_error or (resp.response_code and resp.response_code >= 400) then
-            local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
-            if resp.text and resp.text ~= '' then
-                details = details .. ' | ' .. tostring(resp.text)
-            end
-
-            if allowRetry and resp.text and resp.text:find('No valid cards in decklist', 1, true) then
-                WebRequest.custom(
-                    BACKEND_URL .. '/build',
-                    'POST',
-                    true,
-                    decklist,
-                    {
-                        Accept = 'application/x-ndjson',
-                        ['Content-Type'] = 'text/plain'
-                    },
-                    function(retryResp)
-                        handleBuildResponse(retryResp, false)
-                    end
-                )
-                return
-            end
-
-            print('Error building spawn objects from backend: ' .. tostring(details))
-            endSpawning()
-            if onComplete then onComplete(false) end
-            return
-        end
-
-        if not resp.text or resp.text == '' then
-            print('Backend returned an empty /build response.')
-            endSpawning()
-            if onComplete then onComplete(false) end
-            return
-        end
-
-        spawnNDJSONQueue(resp.text, function(spawnedCount)
-            if spawnedCount <= 0 then
-                print('No valid cards to spawn')
-            end
-            Wait.time(function()
-                endSpawning()
-                if onComplete then onComplete(spawnedCount > 0) end
-            end, 0.25)
-        end, 2)
-    end
-
-    WebRequest.custom(
-        BACKEND_URL .. '/build',
-        'POST',
-        true,
-        JSON.encode(payload),
-        {
-            Accept = 'application/x-ndjson',
-            ['Content-Type'] = 'application/json'
-        },
-        function(resp)
-            handleBuildResponse(resp, true)
-        end
-    )
-end
-
+-- START TOKEN random spawning is intentionally routed only through /random/build.
 local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onFallback)
     local enforceCommander = true
     if Global and Global.getVar then
@@ -259,46 +341,16 @@ local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onF
         }
     }
 
-    WebRequest.custom(
-        BACKEND_URL .. '/random/build',
-        'POST',
-        true,
-        JSON.encode(payload),
-        {
-            Accept = 'application/x-ndjson',
-            ['Content-Type'] = 'application/json'
-        },
-        function(resp)
-            if not resp.is_done then
+    postNDJSON(BACKEND_URL .. '/random/build', payload, function(resp)
+        handleNDJSONBuildResponse(resp, spawnPos, onComplete, function()
+            if onFallback then
+                onFallback()
                 return
             end
-
-            if resp.is_error or (resp.response_code and resp.response_code >= 400) or not resp.text or resp.text == '' then
-                local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
-                if resp.text and resp.text ~= '' then
-                    details = details .. ' | ' .. tostring(resp.text)
-                end
-                print('Fast random/build path failed: ' .. tostring(details))
-                if onFallback then
-                    onFallback()
-                    return
-                end
-                endSpawning()
-                if onComplete then onComplete(false) end
-                return
-            end
-
-            spawnNDJSONQueue(resp.text, function(spawnedCount)
-                if spawnedCount <= 0 then
-                    print('No valid cards to spawn')
-                end
-                Wait.time(function()
-                    endSpawning()
-                    if onComplete then onComplete(spawnedCount > 0) end
-                end, 0.25)
-            end, 2)
-        end
-    )
+            endSpawning()
+            if onComplete then onComplete(false) end
+        end, 'Fast random/build path failed')
+    end)
 end
 
 local function makeSpawnRandomCardsHandler(count)

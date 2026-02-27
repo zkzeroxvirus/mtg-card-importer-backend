@@ -13,13 +13,18 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
+const VERBOSE_REQUEST_LOGS = process.env.VERBOSE_REQUEST_LOGS === 'true';
+
+function debugLog(...args) {
+  if (VERBOSE_REQUEST_LOGS) {
+    console.log(...args);
+  }
+}
 
 // Security and limits
 const MAX_INPUT_LENGTH = 10000; // 10KB max for card names, queries, etc.
 const MAX_SEARCH_LIMIT = 1000; // Maximum cards to return in search
 const MAX_CACHE_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '5000', 10); // Maximum size for failed query and error caches
-const MAX_TOKEN_RESULTS = 16; // Cap token/emblem lookups to prevent oversized responses
-
 // Bulk data URI guardrails
 const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
   'named',
@@ -104,6 +109,24 @@ function ensureCommanderLegalityQuery(rawQuery) {
   return `${query} f:commander`;
 }
 
+function hasExplicitFormatLegalityFilter(rawQuery) {
+  const query = String(rawQuery || '');
+  return /\b(?:f|format|legal):/i.test(query);
+}
+
+function shouldBypassCommanderForTypeQuery(rawQuery) {
+  const query = String(rawQuery || '');
+  if (!query) {
+    return false;
+  }
+
+  if (hasExplicitFormatLegalityFilter(query)) {
+    return false;
+  }
+
+  return /\b(?:t|type):\s*"?(?:token|emblem|vanguard|conspiracy)\b/i.test(query);
+}
+
 function normalizeCommanderFormatAliases(rawQuery) {
   const query = String(rawQuery || '').trim();
   if (!query) {
@@ -113,6 +136,61 @@ function normalizeCommanderFormatAliases(rawQuery) {
   return query
     .replace(/\b(f|format|legal):c\b/ig, '$1:commander')
     .replace(/\b(f|format|legal):edh\b/ig, '$1:commander');
+}
+
+function escapeScryfallQuotedValue(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+}
+
+function buildExactTokenLookupQuery(name, set) {
+  const escapedName = escapeScryfallQuotedValue(name);
+  const baseQuery = `!"${escapedName}" t:token -is:dfc`;
+  if (!set) {
+    return baseQuery;
+  }
+
+  return `${baseQuery} set:${String(set).toLowerCase()}`;
+}
+
+function isTokenCard(card) {
+  if (!card || typeof card !== 'object') {
+    return false;
+  }
+
+  const layout = typeof card.layout === 'string' ? card.layout.toLowerCase() : '';
+  if (layout === 'token') {
+    return true;
+  }
+
+  if (typeof card.type_line === 'string' && /\btoken\b/i.test(card.type_line)) {
+    return true;
+  }
+
+  if (Array.isArray(card.card_faces)) {
+    return card.card_faces.some((face) => typeof face?.type_line === 'string' && /\btoken\b/i.test(face.type_line));
+  }
+
+  return false;
+}
+
+function shouldBypassCommanderForCard(card) {
+  if (!card || typeof card !== 'object') {
+    return false;
+  }
+
+  if (isTokenCard(card)) {
+    return true;
+  }
+
+  const layout = String(card.layout || '').toLowerCase();
+  if (layout === 'emblem' || layout === 'vanguard' || layout === 'conspiracy') {
+    return true;
+  }
+
+  const typeLine = String(card.type_line || '').toLowerCase();
+  return typeLine.includes('emblem') || typeLine.includes('vanguard') || typeLine.includes('conspiracy');
 }
 
 function buildDeckCustomObject(ttsCards, hand) {
@@ -287,7 +365,14 @@ app.use(compression({
   level: 6 // Balance between compression speed and ratio
 }));
 
-app.use(express.raw({ type: '*/*', limit: '10mb' }));  // Accept raw body for JSON/text/octet-stream payloads
+const rawBodyParser = express.raw({ type: '*/*', limit: '10mb' });
+app.use((req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+  return rawBodyParser(req, res, next);
+});  // Parse raw body only for methods that can carry payloads
 
 // Performance metrics tracking
 const metrics = {
@@ -338,38 +423,6 @@ function normalizeError(error, defaultStatus = 502) {
     'Request failed';
 
   return { status, details };
-}
-
-function filterTokenParts(allParts) {
-  if (!Array.isArray(allParts)) {
-    return [];
-  }
-  return allParts.filter(part => {
-    const typeLine = (part.type_line || '').toLowerCase();
-    const component = (part.component || '').toLowerCase();
-    return typeLine.includes('token') ||
-      typeLine.includes('emblem') ||
-      component === 'token' ||
-      component === 'emblem';
-  });
-}
-
-function isTokenOrEmblemCard(card) {
-  const typeLine = (card?.type_line || '').toLowerCase();
-  return typeLine.includes('token') || typeLine.includes('emblem');
-}
-
-/**
- * Normalize a token name for bulk-data search queries.
- * Strips characters that can break query parsing and collapses whitespace.
- */
-function sanitizeTokenQueryName(name) {
-  const cleaned = String(name || '')
-    .replace(/["\\]/g, '')
-    .replace(/[^\w\s'-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned;
 }
 
 function sanitizeCardForResponse(card) {
@@ -423,6 +476,66 @@ function sanitizeCardsForResponse(cards) {
     return cards;
   }
   return cards.map(sanitizeCardForResponse);
+}
+
+function sanitizeCardForSpawn(card) {
+  const normalized = sanitizeCardForResponse(card);
+  if (!normalized || typeof normalized !== 'object') {
+    return normalized;
+  }
+
+  const spawnCard = {
+    object: normalized.object,
+    id: normalized.id,
+    oracle_id: normalized.oracle_id,
+    name: normalized.name,
+    lang: normalized.lang,
+    set: normalized.set,
+    collector_number: normalized.collector_number,
+    layout: normalized.layout,
+    image_status: normalized.image_status,
+    image_uris: normalized.image_uris,
+    card_faces: normalized.card_faces,
+    type_line: normalized.type_line,
+    cmc: normalized.cmc,
+    oracle_text: normalized.oracle_text,
+    power: normalized.power,
+    toughness: normalized.toughness,
+    loyalty: normalized.loyalty
+  };
+
+  return spawnCard;
+}
+
+function sanitizeCardsForSpawn(cards) {
+  if (!Array.isArray(cards)) {
+    return cards;
+  }
+  return cards.map(sanitizeCardForSpawn);
+}
+
+function isTokenOrEmblemRelatedPart(part) {
+  if (!part || typeof part !== 'object') {
+    return false;
+  }
+
+  const component = String(part.component || '').toLowerCase();
+  if (component === 'token' || component === 'emblem') {
+    return true;
+  }
+
+  const partTypeLine = String(part.type_line || part.card?.type_line || '').toLowerCase();
+  return partTypeLine.includes('token') || partTypeLine.includes('emblem');
+}
+
+function buildRelatedPartPayload(part) {
+  return {
+    id: part.id,
+    component: part.component,
+    name: part.name,
+    type_line: part.type_line || part.card?.type_line,
+    uri: part.uri
+  };
 }
 
 function isDirectImageUrl(urlString) {
@@ -552,7 +665,7 @@ function normalizeRarityValue(rawValue) {
 }
 
 const DEFAULT_QUERY_LANG = String(process.env.DEFAULT_QUERY_LANG || 'en').toLowerCase();
-const LANG_FILTER_REGEX = /(?:^|[\s+\(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
+const LANG_FILTER_REGEX = /(?:^|[\s+(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
 
 function enforceDefaultQueryLanguage(query, defaultLang = DEFAULT_QUERY_LANG) {
   const normalizedQuery = String(query || '').trim();
@@ -601,20 +714,12 @@ function normalizeQueryOperators(rawQuery) {
 
 function buildRandomExecutionPlan({
   useBulkLoaded,
-  hasPriceFilter,
-  hasFunnyFilter,
-  hasTokenFilter
+  hasPriceFilter
 }) {
   if (hasPriceFilter) {
     return { primary: 'api', reason: 'price_filter' };
   }
-  if (hasFunnyFilter) {
-    return { primary: 'api', reason: 'funny_filter' };
-  }
   if (useBulkLoaded) {
-    if (hasTokenFilter) {
-      return { primary: 'bulk', reason: 'token_bulk_first' };
-    }
     return { primary: 'bulk', reason: 'bulk_loaded' };
   }
   return { primary: 'api', reason: 'bulk_unavailable' };
@@ -675,103 +780,6 @@ function getBulkCardFromUri(uri) {
   return null;
 }
 
-/**
- * Attempt to find tokens/emblems using bulk data.
- * Tries all_parts first, then name-based token search, then oracle text search.
- * Returns [] when bulk data finds no tokens for a known card, and null to allow API fallback.
- */
-async function tryGetTokensFromBulkData(cardName) {
-  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
-    return null;
-  }
-
-  const queryName = sanitizeTokenQueryName(cardName);
-  if (!queryName) {
-    return [];
-  }
-  const quotedName = JSON.stringify(queryName);
-
-  let baseCard = null;
-  let hasBaseCard = false;
-
-  try {
-    baseCard = bulkData.getCardByName(queryName);
-    hasBaseCard = Boolean(baseCard);
-  } catch (error) {
-    console.debug('[BulkData] Token base card lookup failed:', error.message);
-    baseCard = null;
-  }
-
-  if (baseCard?.all_parts?.length) {
-    const tokenParts = filterTokenParts(baseCard.all_parts).slice(0, MAX_TOKEN_RESULTS);
-    const tokensFromParts = tokenParts
-      .map(part => bulkData.getCardById(part.id))
-      .filter(Boolean);
-    if (tokensFromParts.length > 0) {
-      return tokensFromParts;
-    }
-  }
-
-  const typeQuery = `t:token name:${quotedName}`;
-  const typeResults = await bulkData.searchCards(typeQuery, MAX_TOKEN_RESULTS);
-  if (Array.isArray(typeResults) && typeResults.length > 0) {
-    return typeResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
-  }
-
-  const createPhrase = `create ${queryName}`;
-  const quotedCreatePhrase = JSON.stringify(createPhrase);
-  const createQuery = `o:${quotedCreatePhrase}`;
-  const createResults = await bulkData.searchCards(createQuery, MAX_TOKEN_RESULTS);
-  if (Array.isArray(createResults) && createResults.length > 0) {
-    return createResults.filter(isTokenOrEmblemCard).slice(0, MAX_TOKEN_RESULTS);
-  }
-
-  return hasBaseCard ? [] : null;
-}
-
-/**
- * When a fuzzy token lookup returns a different token name (e.g., "Treasure" -> "Dinosaur // Treasure"),
- * try to find an exact-name token match instead.
- * @param {string} tokenName Original token name from the request.
- * @param {string|null} sanitizedName Optional pre-sanitized token name; when provided, no extra sanitization is applied.
- * @returns {Promise<object|null>} Matching token card, or null if none found.
- */
-async function findExactTokenMatch(tokenName, sanitizedName = null) {
-  const queryName = sanitizedName || sanitizeTokenQueryName(tokenName);
-  if (!queryName) {
-    return null;
-  }
-
-  const expectedName = queryName.toLowerCase();
-  const tokenQuery = `t:token name:"${queryName}"`;
-  let tokenResults = null;
-
-  if (USE_BULK_DATA && bulkData.isLoaded()) {
-    try {
-      const suppressBulkLogs = true;
-      tokenResults = await bulkData.searchCards(tokenQuery, MAX_TOKEN_RESULTS, suppressBulkLogs);
-    } catch (error) {
-      console.debug('[TokenLookup] Bulk data exact-match search failed:', error.message);
-      tokenResults = null;
-    }
-  }
-
-  if (!Array.isArray(tokenResults)) {
-    try {
-      tokenResults = await scryfallLib.searchCards(tokenQuery, MAX_TOKEN_RESULTS);
-    } catch (error) {
-      console.debug('[TokenLookup] API exact-match search failed:', error.message);
-      return null;
-    }
-  }
-
-  const exactMatch = tokenResults.find(card => {
-    const cardName = sanitizeTokenQueryName(card?.name || '').toLowerCase();
-    return cardName === expectedName && isTokenOrEmblemCard(card);
-  });
-
-  return exactMatch || null;
-}
 
 /**
  * Analyzes a Scryfall query and provides helpful hints for common syntax errors
@@ -1051,6 +1059,8 @@ app.get('/ready', (req, res) => {
 app.get('/card/:name', async (req, res) => {
   const { name } = req.params;
   const { set } = req.query;
+  const compactMode = String(req.query.compact || '').toLowerCase();
+  const useSpawnCompact = compactMode === 'spawn';
   const requestEnforceCommander = req.query.enforceCommander === undefined
     ? null
     : parseBooleanLike(String(req.query.enforceCommander)) !== false;
@@ -1100,23 +1110,37 @@ app.get('/card/:name', async (req, res) => {
     }
 
     let scryfallCard;
-    
-    // Try token lookup FIRST for common token names to avoid art_series cards
-    const sanitizedRequestName = sanitizeTokenQueryName(name);
-    const normalizedRequestName = sanitizedRequestName.toLowerCase();
-    
-    if (!set) {
-      // Check if this might be a token name first
-      const commonTokens = ['treasure', 'clue', 'food', 'blood', 'shard', 'powerstone', 'map', 'incubator'];
-      if (commonTokens.includes(normalizedRequestName)) {
-        try {
-          const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
-          if (exactToken) {
-            scryfallCard = exactToken;
-          }
-        } catch (err) {
-          console.debug('Token-first lookup failed, continuing to normal lookup:', err.message);
-        }
+    const tokenLookupQuery = buildExactTokenLookupQuery(name, set || null);
+    let bulkSingleTokenCandidate = false;
+
+    if (!scryfallCard && USE_BULK_DATA && bulkData.isLoaded()) {
+      const tokenMatches = bulkData.getExactTokensByName(name, set || null);
+      if (tokenMatches.length > 1) {
+        return res.json({
+          object: 'list',
+          total_cards: tokenMatches.length,
+          has_more: false,
+          data: useSpawnCompact ? sanitizeCardsForSpawn(tokenMatches) : sanitizeCardsForResponse(tokenMatches)
+        });
+      }
+      if (tokenMatches.length === 1) {
+        scryfallCard = tokenMatches[0];
+        bulkSingleTokenCandidate = true;
+      }
+    }
+
+    if (!scryfallCard || bulkSingleTokenCandidate) {
+      const tokenMatches = await scryfallLib.searchCards(tokenLookupQuery, 25, 'cards');
+      if (tokenMatches.length > 1) {
+        return res.json({
+          object: 'list',
+          total_cards: tokenMatches.length,
+          has_more: false,
+          data: useSpawnCompact ? sanitizeCardsForSpawn(tokenMatches) : sanitizeCardsForResponse(tokenMatches)
+        });
+      }
+      if (!scryfallCard && tokenMatches.length === 1) {
+        scryfallCard = tokenMatches[0];
       }
     }
     
@@ -1130,27 +1154,9 @@ app.get('/card/:name', async (req, res) => {
       scryfallCard = await scryfallLib.getCard(name, set);
     }
 
-    const normalizedCardName = sanitizeTokenQueryName(scryfallCard?.name || '').toLowerCase();
-    if (scryfallCard && normalizedRequestName && normalizedCardName && normalizedCardName !== normalizedRequestName) {
-      const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
-      if (exactToken) {
-        scryfallCard = exactToken;
-      }
-    }
-
-    if (scryfallCard && isTokenOrEmblemCard(scryfallCard)) {
-      const normalizedTokenCardName = sanitizeTokenQueryName(scryfallCard.name || '').toLowerCase();
-      if (normalizedRequestName && normalizedTokenCardName && normalizedTokenCardName !== normalizedRequestName) {
-        const exactToken = await findExactTokenMatch(name, sanitizedRequestName);
-        if (exactToken) {
-          scryfallCard = exactToken;
-        }
-      }
-    }
-    
     // Preserve full all_parts to match Scryfall API behavior
     
-    if (requestEnforceCommander && scryfallCard && !isTokenOrEmblemCard(scryfallCard)) {
+    if (requestEnforceCommander && scryfallCard && !shouldBypassCommanderForCard(scryfallCard)) {
       const commanderLegality = scryfallCard.legalities && scryfallCard.legalities.commander;
       if (commanderLegality && commanderLegality !== 'legal') {
         return res.status(400).json({
@@ -1161,7 +1167,7 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Return raw Scryfall format - Lua code will convert to TTS
-    res.json(sanitizeCardForResponse(scryfallCard));
+    res.json(useSpawnCompact ? sanitizeCardForSpawn(scryfallCard) : sanitizeCardForResponse(scryfallCard));
   } catch (error) {
     console.error('Error fetching card:', error.message);
     const { status, details } = normalizeError(error, 502);
@@ -1176,7 +1182,7 @@ app.get('/card/:name', async (req, res) => {
             const corrected = await scryfallLib.getCard(suggestion, set || null);
             corrected._corrected_name = suggestion;
             corrected._original_name = name;
-            return res.json(sanitizeCardForResponse(corrected));
+            return res.json(useSpawnCompact ? sanitizeCardForSpawn(corrected) : sanitizeCardForResponse(corrected));
           } catch (fallbackError) {
             // If set-specific lookup failed, try without set
             console.debug('Set-specific fallback failed:', fallbackError.message);
@@ -1185,7 +1191,7 @@ app.get('/card/:name', async (req, res) => {
                 const corrected = await scryfallLib.getCard(suggestion, null);
                 corrected._corrected_name = suggestion;
                 corrected._original_name = name;
-                return res.json(sanitizeCardForResponse(corrected));
+                return res.json(useSpawnCompact ? sanitizeCardForSpawn(corrected) : sanitizeCardForResponse(corrected));
               } catch (e) {
                 // fall through to error response
                 console.debug('Fallback without set also failed:', e.message);
@@ -1347,8 +1353,10 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     const { query: normalizedQuery, warning: queryWarning } = normalizeQueryOperators(rawQuery);
     const languageEnforcedQuery = enforceDefaultQueryLanguage(normalizedQuery);
     const enforceCommander = payload.enforceCommander !== false;
+    const bypassCommanderForTypeQuery = enforceCommander && shouldBypassCommanderForTypeQuery(languageEnforcedQuery);
+    const applyCommanderLegality = enforceCommander && !bypassCommanderForTypeQuery;
     const explainRequested = payload.explain === true || String(payload.explain || '').toLowerCase() === 'true';
-    const randomQuery = enforceCommander
+    const randomQuery = applyCommanderLegality
       ? ensureCommanderLegalityQuery(languageEnforcedQuery)
       : normalizeCommanderFormatAliases(languageEnforcedQuery);
     if (queryWarning) {
@@ -1379,30 +1387,13 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     }
 
     const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
-    const hasTokenFilter = randomQuery && /\b(?:t|type|is):token\b/i.test(randomQuery);
-    const hasFunnyFilter = randomQuery && /\b-?is:funny\b/i.test(randomQuery);
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
-      hasPriceFilter,
-      hasFunnyFilter,
-      hasTokenFilter
+      hasPriceFilter
     });
     setQueryPlanHeader(res, executionPlan);
     if (explainRequested && executionPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
-    }
-
-    if (hasPriceFilter) {
-      console.log(`[API] Price filter detected in query: "${randomQuery}", using live API for real-time pricing`);
-    }
-    if (hasTokenFilter) {
-      console.log(`[BulkData] Token filter detected in query: "${randomQuery}", using bulk data first with API fallback`);
-    }
-    if (hasFunnyFilter) {
-      console.log(`[API] Funny filter detected in query: "${randomQuery}", using Scryfall API for accurate classification`);
-      if (USE_BULK_DATA) {
-        console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
-      }
     }
 
     const randomCards = [];
@@ -1460,48 +1451,27 @@ app.post('/random/build', randomLimiter, async (req, res) => {
             randomCards.push(card);
           }
         } catch (error) {
-          console.warn(`Skipped: ${error.message}`);
+          debugLog(`Skipped: ${error.message}`);
         }
       }
 
       if (randomCards.length < count) {
         res.setHeader('X-Bulk-Fallback', 'bulk_insufficient_unique_cards');
         const remaining = count - randomCards.length;
-        let apiAttempts = 0;
-        const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-
-        while (randomCards.length < count && apiAttempts < maxApiAttempts) {
-          apiAttempts++;
-          const card = await scryfallLib.getRandomCard(randomQuery, true);
+        const searchLimit = Math.max(remaining, Math.ceil(remaining * DUPLICATE_BUFFER_MULTIPLIER));
+        const apiCards = await scryfallLib.searchCards(randomQuery, searchLimit, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+        for (const card of apiCards) {
           const cardKey = getRandomUniqKey(card);
           if (card && cardKey && !seenCardKeys.has(cardKey)) {
             seenCardKeys.add(cardKey);
             randomCards.push(card);
           }
-        }
-      }
-    } else {
-      const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
-      if (count > 1 && hasRandomQuery && !hasFunnyFilter) {
-        const cards = await scryfallLib.searchCards(randomQuery, count, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
-
-        if (!cards || cards.length === 0) {
-          const hint = getQueryHint(normalizedQuery);
-          const enhancedError = `Invalid search query: "${normalizedQuery}"${hint}. No cards match this query.`;
-          cacheFailedQuery(normalizedQuery, enhancedError);
-          throw new Error(enhancedError);
-        }
-
-        for (const card of cards) {
-          const cardKey = getRandomUniqKey(card);
-          if (cardKey && !seenCardKeys.has(cardKey)) {
-            seenCardKeys.add(cardKey);
-            randomCards.push(card);
+          if (randomCards.length >= count) {
+            break;
           }
         }
 
         if (randomCards.length < count) {
-          const remaining = count - randomCards.length;
           let apiAttempts = 0;
           const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
 
@@ -1512,6 +1482,56 @@ app.post('/random/build', randomLimiter, async (req, res) => {
             if (card && cardKey && !seenCardKeys.has(cardKey)) {
               seenCardKeys.add(cardKey);
               randomCards.push(card);
+            }
+          }
+        }
+      }
+    } else {
+      const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
+      if (count > 1 && hasRandomQuery) {
+        if (hasPriceFilter) {
+          let apiAttempts = 0;
+          const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+          while (randomCards.length < count && apiAttempts < maxApiAttempts) {
+            apiAttempts++;
+            const card = await scryfallLib.getRandomCard(randomQuery, true);
+            const cardKey = getRandomUniqKey(card);
+            if (card && cardKey && !seenCardKeys.has(cardKey)) {
+              seenCardKeys.add(cardKey);
+              randomCards.push(card);
+            }
+          }
+        } else {
+          const cards = await scryfallLib.searchCards(randomQuery, count, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+
+          if (!cards || cards.length === 0) {
+            const hint = getQueryHint(normalizedQuery);
+            const enhancedError = `Invalid search query: "${normalizedQuery}"${hint}. No cards match this query.`;
+            cacheFailedQuery(normalizedQuery, enhancedError);
+            throw new Error(enhancedError);
+          }
+
+          for (const card of cards) {
+            const cardKey = getRandomUniqKey(card);
+            if (cardKey && !seenCardKeys.has(cardKey)) {
+              seenCardKeys.add(cardKey);
+              randomCards.push(card);
+            }
+          }
+
+          if (randomCards.length < count) {
+            const remaining = count - randomCards.length;
+            let apiAttempts = 0;
+            const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
+            while (randomCards.length < count && apiAttempts < maxApiAttempts) {
+              apiAttempts++;
+              const card = await scryfallLib.getRandomCard(randomQuery, true);
+              const cardKey = getRandomUniqKey(card);
+              if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                seenCardKeys.add(cardKey);
+                randomCards.push(card);
+              }
             }
           }
         }
@@ -1540,32 +1560,39 @@ app.post('/random/build', randomLimiter, async (req, res) => {
         }
 
         if (count > 1) {
-          const cardPromises = [];
-          const baseDelay = 100;
-          const cardsToFetch = Math.ceil((count - 1) * DUPLICATE_BUFFER_MULTIPLIER);
-
-          for (let i = 0; i < cardsToFetch; i++) {
-            const staggerDelay = i * baseDelay;
-            const promise = new Promise(resolve => {
-              setTimeout(async () => {
-                try {
-                  const scryfallCard = await scryfallLib.getRandomCard(randomQuery, true);
-                  resolve(scryfallCard);
-                } catch {
-                  resolve(null);
-                }
-              }, staggerDelay);
-            });
-            cardPromises.push(promise);
-          }
-
-          const results = await Promise.all(cardPromises);
-          for (const card of results) {
-            if (card && randomCards.length < count) {
+          const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
+          if (hasRandomQuery) {
+            const remaining = count - randomCards.length;
+            const searchLimit = Math.max(remaining, Math.ceil(remaining * DUPLICATE_BUFFER_MULTIPLIER));
+            const apiCards = await scryfallLib.searchCards(randomQuery, searchLimit, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+            for (const card of apiCards) {
               const cardKey = getRandomUniqKey(card);
-              if (cardKey && !seenCardKeys.has(cardKey)) {
+              if (card && cardKey && !seenCardKeys.has(cardKey)) {
                 seenCardKeys.add(cardKey);
                 randomCards.push(card);
+              }
+              if (randomCards.length >= count) {
+                break;
+              }
+            }
+          }
+
+          if (randomCards.length < count) {
+            const remaining = count - randomCards.length;
+            let apiAttempts = 0;
+            const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
+            while (randomCards.length < count && apiAttempts < maxApiAttempts) {
+              apiAttempts++;
+              try {
+                const scryfallCard = await scryfallLib.getRandomCard(randomQuery, true);
+                const cardKey = getRandomUniqKey(scryfallCard);
+                if (scryfallCard && cardKey && !seenCardKeys.has(cardKey)) {
+                  seenCardKeys.add(cardKey);
+                  randomCards.push(scryfallCard);
+                }
+              } catch {
+                // Continue attempting until cap is reached.
               }
             }
           }
@@ -1592,6 +1619,33 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     }
 
     if (ttsCards.length < count) {
+      const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
+      if (hasRandomQuery) {
+        const remaining = count - ttsCards.length;
+        const searchLimit = Math.max(remaining, Math.ceil(remaining * DUPLICATE_BUFFER_MULTIPLIER));
+        const refillCards = await scryfallLib.searchCards(randomQuery, searchLimit, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+
+        for (const refillCandidate of refillCards) {
+          const refillKey = getRandomUniqKey(refillCandidate);
+          if (!refillCandidate || (refillKey && seenCardKeys.has(refillKey))) {
+            continue;
+          }
+          try {
+            const hydratedRefill = await hydrateCardForTts(refillCandidate);
+            const ttsCard = scryfallLib.convertToTTSCard(hydratedRefill, cardBack);
+            if (refillKey) {
+              seenCardKeys.add(refillKey);
+            }
+            ttsCards.push(ttsCard);
+            if (ttsCards.length >= count) {
+              break;
+            }
+          } catch {
+            // Continue to next refill candidate.
+          }
+        }
+      }
+
       let refillAttempts = 0;
       const maxRefillAttempts = (count - ttsCards.length) * MAX_RETRY_ATTEMPTS_MULTIPLIER;
 
@@ -1643,20 +1697,24 @@ app.post('/random/build', randomLimiter, async (req, res) => {
 app.get('/random', randomLimiter, async (req, res) => {
   try {
     const { count } = req.query;
+    const compactMode = String(req.query.compact || '').toLowerCase();
+    const useSpawnCompact = compactMode === 'spawn';
     const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
     const languageEnforcedQuery = enforceDefaultQueryLanguage(q);
     const explainRequested = req.query.explain === 'true' || req.query.explain === true;
     const requestEnforceCommander = req.query.enforceCommander === undefined
       ? true
       : parseBooleanLike(String(req.query.enforceCommander)) !== false;
-    const randomQuery = requestEnforceCommander ? ensureCommanderLegalityQuery(languageEnforcedQuery) : normalizeCommanderFormatAliases(languageEnforcedQuery);
+    const bypassCommanderForTypeQuery = requestEnforceCommander && shouldBypassCommanderForTypeQuery(languageEnforcedQuery);
+    const enforceCommander = requestEnforceCommander && !bypassCommanderForTypeQuery;
+    const randomQuery = enforceCommander ? ensureCommanderLegalityQuery(languageEnforcedQuery) : normalizeCommanderFormatAliases(languageEnforcedQuery);
     if (queryWarning) {
       res.setHeader('X-Query-Warning', queryWarning);
     }
     // Security: Enforce maximum count to prevent resource exhaustion
     const numCards = count ? Math.min(Math.max(parseInt(count) || 1, 1), 100) : 1;
     
-    console.log(`GET /random - count: ${numCards}, query: "${randomQuery}"`);
+    debugLog(`GET /random - count: ${numCards}, query: "${randomQuery}"`);
 
     // Security: Validate query length
     if (q && q.length > MAX_INPUT_LENGTH) {
@@ -1670,7 +1728,7 @@ app.get('/random', randomLimiter, async (req, res) => {
     if (q) {
       const cachedError = isQueryCachedAsFailed(q);
       if (cachedError) {
-        console.log(`Returning cached error for query: "${q}"`);
+        debugLog(`Returning cached error for query: "${q}"`);
         
         // Only show detailed error once per cooldown period to avoid spamming TTS chat
         // When users spawn a 15-card booster with invalid query, show error on first request only
@@ -1686,38 +1744,16 @@ app.get('/random', randomLimiter, async (req, res) => {
       }
     }
 
-    // Check if query contains price filters (usd, eur, tix)
-    // Price queries always use API for real-time market data
     const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
-    
-    // Check if query contains token type filters (t:token, type:token, is:token)
-    const hasTokenFilter = randomQuery && /\b(?:t|type|is):token\b/i.test(randomQuery);
-    // Route funny filters to API for authoritative set_type handling
-    const hasFunnyFilter = randomQuery && /\b-?is:funny\b/i.test(randomQuery);
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
-      hasPriceFilter,
-      hasFunnyFilter,
-      hasTokenFilter
+      hasPriceFilter
     });
     setQueryPlanHeader(res, executionPlan);
     if (explainRequested && executionPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
     }
     
-    if (hasPriceFilter) {
-      console.log(`[API] Price filter detected in query: "${randomQuery}", using live API for real-time pricing`);
-    }
-    if (hasTokenFilter) {
-      console.log(`[BulkData] Token filter detected in query: "${randomQuery}", using bulk data first with API fallback`);
-    }
-    if (hasFunnyFilter) {
-      console.log(`[API] Funny filter detected in query: "${randomQuery}", using Scryfall API for accurate classification`);
-      if (USE_BULK_DATA) {
-        console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
-      }
-    }
-
     if (numCards === 1) {
       // Single random card
       let scryfallCard = null;
@@ -1727,7 +1763,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         scryfallCard = await bulkData.getRandomCard(randomQuery);
       }
       
-      // Fallback to API if bulk data not loaded, returned null, or has price/token filter
+      // Fallback to API if bulk data not loaded or returned null
       if (!scryfallCard) {
         const maxAttempts = MAX_RETRY_ATTEMPTS_MULTIPLIER;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -1755,7 +1791,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         });
       }
       
-      res.json(sanitizeCardForResponse(scryfallCard));
+      res.json(useSpawnCompact ? sanitizeCardForSpawn(scryfallCard) : sanitizeCardForResponse(scryfallCard));
     } else {
       // Multiple random cards - return as list
       const cards = [];
@@ -1778,24 +1814,59 @@ app.get('/random', randomLimiter, async (req, res) => {
               cards.push(card);
             }
           } catch (error) {
-            console.warn(`Skipped: ${error.message}`);
+            debugLog(`Skipped: ${error.message}`);
           }
         }
         
         if (attempts >= maxAttempts && cards.length < numCards) {
-          console.log(`[BulkData] Reached max attempts (${maxAttempts}) with ${cards.length}/${numCards} unique cards`);
+          debugLog(`[BulkData] Reached max attempts (${maxAttempts}) with ${cards.length}/${numCards} unique cards`);
         }
         
         // Fallback to API if bulk data didn't return enough cards
         if (cards.length < numCards) {
-          console.log(`[Fallback] Bulk data returned ${cards.length} cards, switching to API for remaining ${numCards - cards.length}`);
+          debugLog(`[Fallback] Bulk data returned ${cards.length} cards, switching to API for remaining ${numCards - cards.length}`);
           res.setHeader('X-Bulk-Fallback', 'bulk_insufficient_unique_cards');
           try {
             // Get remaining cards from API
             const remaining = numCards - cards.length;
+            const searchLimit = Math.max(remaining, Math.ceil(remaining * DUPLICATE_BUFFER_MULTIPLIER));
+            const apiCards = await scryfallLib.searchCards(randomQuery, searchLimit, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+            for (const card of apiCards) {
+              const cardKey = getRandomUniqKey(card);
+              if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                seenCardKeys.add(cardKey);
+                cards.push(card);
+              }
+              if (cards.length >= numCards) {
+                break;
+              }
+            }
+
+            if (cards.length < numCards) {
+              let apiAttempts = 0;
+              const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
+              while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+                apiAttempts++;
+                const card = await scryfallLib.getRandomCard(randomQuery, true);
+                const cardKey = getRandomUniqKey(card);
+                if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                  seenCardKeys.add(cardKey);
+                  cards.push(card);
+                }
+              }
+            }
+          } catch (error) {
+            debugLog(`API fallback failed: ${error.message}`);
+          }
+        }
+      } else {
+        const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
+        if (numCards > 1 && hasRandomQuery) {
+          if (hasPriceFilter) {
             let apiAttempts = 0;
-            const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-            
+            const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
             while (cards.length < numCards && apiAttempts < maxApiAttempts) {
               apiAttempts++;
               const card = await scryfallLib.getRandomCard(randomQuery, true);
@@ -1805,42 +1876,37 @@ app.get('/random', randomLimiter, async (req, res) => {
                 cards.push(card);
               }
             }
-          } catch (error) {
-            console.warn(`API fallback failed: ${error.message}`);
-          }
-        }
-      } else {
-        const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
-        if (numCards > 1 && hasRandomQuery && !hasFunnyFilter) {
-          const randomCards = await scryfallLib.searchCards(randomQuery, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+          } else {
+            const randomCards = await scryfallLib.searchCards(randomQuery, numCards, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
 
-          if (!randomCards || randomCards.length === 0) {
-            const hint = getQueryHint(q);
-            const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
-            cacheFailedQuery(q, enhancedError);
-            throw new Error(enhancedError);
-          }
-
-          for (const card of randomCards) {
-            const cardKey = getRandomUniqKey(card);
-            if (cardKey && !seenCardKeys.has(cardKey)) {
-              seenCardKeys.add(cardKey);
-              cards.push(card);
+            if (!randomCards || randomCards.length === 0) {
+              const hint = getQueryHint(q);
+              const enhancedError = `Invalid search query: "${q}"${hint}. No cards match this query.`;
+              cacheFailedQuery(q, enhancedError);
+              throw new Error(enhancedError);
             }
-          }
 
-          if (cards.length < numCards) {
-            const remaining = numCards - cards.length;
-            let apiAttempts = 0;
-            const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-
-            while (cards.length < numCards && apiAttempts < maxApiAttempts) {
-              apiAttempts++;
-              const card = await scryfallLib.getRandomCard(randomQuery, true);
+            for (const card of randomCards) {
               const cardKey = getRandomUniqKey(card);
-              if (card && cardKey && !seenCardKeys.has(cardKey)) {
+              if (cardKey && !seenCardKeys.has(cardKey)) {
                 seenCardKeys.add(cardKey);
                 cards.push(card);
+              }
+            }
+
+            if (cards.length < numCards) {
+              const remaining = numCards - cards.length;
+              let apiAttempts = 0;
+              const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
+              while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+                apiAttempts++;
+                const card = await scryfallLib.getRandomCard(randomQuery, true);
+                const cardKey = getRandomUniqKey(card);
+                if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                  seenCardKeys.add(cardKey);
+                  cards.push(card);
+                }
               }
             }
           }
@@ -1874,45 +1940,21 @@ app.get('/random', randomLimiter, async (req, res) => {
             throw error;
           }
           
-          // First card succeeded, fetch the rest in parallel with deduplication
+          // First card succeeded; fetch the rest via random search first, then bounded random fallback.
           if (numCards > 1) {
-            console.log(`Fetching ${numCards - 1} additional random cards (logs suppressed)...`);
-            const cardPromises = [];
+            const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
             const fetchStartTime = Date.now();
-            const baseDelay = 100; // Base delay in ms between request starts
-            
-            // Request extra cards to account for potential duplicates
-            const cardsToFetch = Math.ceil((numCards - 1) * DUPLICATE_BUFFER_MULTIPLIER);
-            
-            for (let i = 0; i < cardsToFetch; i++) {
-              // Stagger request starts to spread load and avoid overwhelming rate limits
-              // Use linear staggering to space out requests evenly
-              const staggerDelay = i * baseDelay;
-              
-              const promise = new Promise(resolve => {
-                setTimeout(async () => {
-                  try {
-                    // Suppress individual API call logs for bulk operations
-                    const scryfallCard = await scryfallLib.getRandomCard(randomQuery, true);
-                    resolve(scryfallCard);
-                  } catch (error) {
-                    console.warn(`Random card ${i + 1} failed: ${error.message}`);
-                    resolve(null);
-                  }
-                }, staggerDelay);
-              });
-              cardPromises.push(promise);
-            }
-            const results = await Promise.all(cardPromises);
-            
-            // Calculate failures from results and deduplicate
             let failedCount = 0;
             let duplicateCount = 0;
-            
-            for (const card of results) {
-              if (card === null) {
-                failedCount++;
-              } else if (cards.length < numCards) {
+
+            if (hasRandomQuery) {
+              const remaining = numCards - cards.length;
+              const searchLimit = Math.max(remaining, Math.ceil(remaining * DUPLICATE_BUFFER_MULTIPLIER));
+              const randomCards = await scryfallLib.searchCards(randomQuery, searchLimit, RANDOM_SEARCH_UNIQUE, RANDOM_SEARCH_ORDER);
+              for (const card of randomCards) {
+                if (cards.length >= numCards) {
+                  break;
+                }
                 const cardKey = getRandomUniqKey(card);
                 if (cardKey && !seenCardKeys.has(cardKey)) {
                   seenCardKeys.add(cardKey);
@@ -1920,13 +1962,34 @@ app.get('/random', randomLimiter, async (req, res) => {
                 } else {
                   duplicateCount++;
                 }
-              } else {
-                duplicateCount++;
+              }
+            }
+
+            if (cards.length < numCards) {
+              const remaining = numCards - cards.length;
+              let apiAttempts = 0;
+              const maxApiAttempts = remaining * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+
+              while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+                apiAttempts++;
+                try {
+                  const scryfallCard = await scryfallLib.getRandomCard(randomQuery, true);
+                  const cardKey = getRandomUniqKey(scryfallCard);
+                  if (cardKey && !seenCardKeys.has(cardKey)) {
+                    seenCardKeys.add(cardKey);
+                    cards.push(scryfallCard);
+                  } else {
+                    duplicateCount++;
+                  }
+                } catch (error) {
+                  failedCount++;
+                  debugLog(`Random card fallback ${apiAttempts} failed: ${error.message}`);
+                }
               }
             }
             
             const fetchDuration = Date.now() - fetchStartTime;
-            console.log(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates/excess skipped)`);
+            debugLog(`Bulk random completed: ${cards.length}/${numCards} unique cards fetched in ${fetchDuration}ms (${failedCount} failed, ${duplicateCount} duplicates/excess skipped)`);
           }
         }
       }
@@ -1934,7 +1997,7 @@ app.get('/random', randomLimiter, async (req, res) => {
       res.json({
         object: 'list',
         total_cards: cards.length,
-        data: sanitizeCardsForResponse(cards)
+        data: useSpawnCompact ? sanitizeCardsForSpawn(cards) : sanitizeCardsForResponse(cards)
       });
     }
   } catch (error) {
@@ -1962,14 +2025,19 @@ app.get('/random', randomLimiter, async (req, res) => {
 app.get('/search', async (req, res) => {
   try {
     const { limit = 100, unique } = req.query;
+    const compactMode = String(req.query.compact || '').toLowerCase();
+    const useSpawnCompact = compactMode === 'spawn';
     const { query: q, warning: queryWarning } = normalizeQueryOperators(String(req.query.q || ''));
     const explainRequested = req.query.explain === 'true' || req.query.explain === true;
     const requestEnforceCommander = req.query.enforceCommander === undefined
       ? null
       : parseBooleanLike(String(req.query.enforceCommander)) !== false;
-    const searchQuery = requestEnforceCommander === null
+    const applyCommanderLegality = requestEnforceCommander === null
+      ? null
+      : (requestEnforceCommander && !shouldBypassCommanderForTypeQuery(q));
+    const searchQuery = applyCommanderLegality === null
       ? q
-      : (requestEnforceCommander ? ensureCommanderLegalityQuery(q) : normalizeCommanderFormatAliases(q));
+      : (applyCommanderLegality ? ensureCommanderLegalityQuery(q) : normalizeCommanderFormatAliases(q));
     if (queryWarning) {
       res.setHeader('X-Query-Warning', queryWarning);
     }
@@ -1991,44 +2059,22 @@ app.get('/search', async (req, res) => {
     
     let scryfallCards = null;
     
-    // Check if query contains price filters (usd, eur, tix)
-    // Price queries always use API for real-time market data
     const hasPriceFilter = /\b(usd|eur|tix)[:=<>]/i.test(searchQuery);
-    
-    // Check if query contains token type filters (t:token, type:token, is:token)
-    const hasTokenFilter = /\b(?:t|type|is):token\b/i.test(searchQuery);
-    // Route funny filters to API for authoritative set_type handling
-    const hasFunnyFilter = /\b-?is:funny\b/i.test(searchQuery);
     const canUseBulkSearch = USE_BULK_DATA && bulkData.isLoaded();
-    const searchPlan = (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter)
-      ? { primary: 'api', reason: requestedUnique === 'prints' ? 'prints_mode' : (hasPriceFilter ? 'price_filter' : 'funny_filter') }
-      : (canUseBulkSearch ? { primary: 'bulk', reason: hasTokenFilter ? 'token_bulk_first' : 'bulk_loaded' } : { primary: 'api', reason: 'bulk_unavailable' });
+    const searchPlan = hasPriceFilter
+      ? { primary: 'api', reason: 'price_filter' }
+      : (canUseBulkSearch ? { primary: 'bulk', reason: 'bulk_loaded' } : { primary: 'api', reason: 'bulk_unavailable' });
     setQueryPlanHeader(res, searchPlan);
     if (explainRequested && searchPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(searchQuery, 'search'));
     }
     
-    // For full printings list, funny filters, or price filters, prefer live API to ensure completeness/freshness
-    if (requestedUnique === 'prints' || hasPriceFilter || hasFunnyFilter) {
-      if (hasPriceFilter) {
-        console.log(`[API] Price filter detected in query: "${searchQuery}", using live API for real-time pricing`);
-      }
-      if (hasFunnyFilter) {
-        console.log(`[API] Funny filter detected in query: "${searchQuery}", using Scryfall API for accurate classification`);
-        if (USE_BULK_DATA) {
-          console.log('[API] Funny filter forces Scryfall API (bulk data bypassed).');
-        }
-      }
-      scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
-    } else if (searchPlan.primary === 'bulk') {
-      if (hasTokenFilter) {
-        console.log(`[BulkData] Token filter detected in query: "${searchQuery}", using bulk data first with API fallback`);
-      }
+    if (searchPlan.primary === 'bulk') {
       scryfallCards = await bulkData.searchCards(searchQuery, limitNum);
       
       // Fallback to API if bulk data returned null (no matches)
       if (!scryfallCards) {
-        console.log(`[Fallback] Bulk data returned no results for "${searchQuery}", using API`);
+        debugLog(`[Fallback] Bulk data returned no results for "${searchQuery}", using API`);
         res.setHeader('X-Bulk-Fallback', 'bulk_no_results');
         scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
       }
@@ -2054,7 +2100,7 @@ app.get('/search', async (req, res) => {
       object: 'list',
       total_cards: scryfallCards.length,
       has_more: false,
-      data: sanitizeCardsForResponse(scryfallCards)
+      data: useSpawnCompact ? sanitizeCardsForSpawn(scryfallCards) : sanitizeCardsForResponse(scryfallCards)
     });
   } catch (error) {
     console.error('Error searching cards:', error.message);
@@ -2092,30 +2138,116 @@ app.get('/rulings/:name', async (req, res) => {
 
 /**
  * GET /tokens/:name
- * Get tokens associated with a card - returns array of Scryfall cards
+ * Removed endpoint
  */
 app.get('/tokens/:name', async (req, res) => {
+  return res.status(410).json({
+    object: 'error',
+    details: 'Token lookup endpoint has been removed.'
+  });
+});
+
+/**
+ * GET /related?name=...&oracleId=...&set=...
+ * Returns related token/emblem parts for a source card.
+ */
+app.get('/related', async (req, res) => {
   try {
-    const { name } = req.params;
+    const rawName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+    const rawOracleId = typeof req.query.oracleId === 'string' ? req.query.oracleId.trim() : '';
+    const set = typeof req.query.set === 'string' ? req.query.set.trim().toLowerCase() : '';
+    const resolveMode = String(req.query.resolve || '').trim().toLowerCase();
+    const resolveCards = resolveMode === 'cards';
+    const compactMode = String(req.query.compact || '').toLowerCase();
+    const useSpawnCompact = compactMode === 'spawn';
 
-    if (!name) {
-      return res.status(400).json({ error: 'Card name required' });
+    if (!rawName && !rawOracleId) {
+      return res.status(400).json({ object: 'error', details: 'name or oracleId is required' });
     }
 
-    let tokens = null;
+    if (rawName.length > MAX_INPUT_LENGTH || rawOracleId.length > 128 || set.length > 10) {
+      return res.status(400).json({ object: 'error', details: 'Invalid related lookup parameters' });
+    }
+
+    const normalizedOracleId = rawOracleId.replace(/^oracleid:/i, '');
+    let sourceCard = null;
+
     if (USE_BULK_DATA && bulkData.isLoaded()) {
-      tokens = await tryGetTokensFromBulkData(name);
+      if (normalizedOracleId) {
+        sourceCard = bulkData.getCardByOracleId(normalizedOracleId);
+      }
+      if (!sourceCard && rawName) {
+        sourceCard = bulkData.getCardByName(rawName, set || null);
+      }
     }
-    if (tokens === null) {
-      tokens = await scryfallLib.getTokens(name);
+
+    if (!sourceCard) {
+      if (normalizedOracleId) {
+        const oracleMatches = await scryfallLib.searchCards(`oracleid:${normalizedOracleId}`, 1, 'prints');
+        sourceCard = oracleMatches[0] || null;
+      }
+      if (!sourceCard && rawName) {
+        sourceCard = await scryfallLib.getCard(rawName, set || null);
+      }
     }
-    
-    // Return array of Scryfall token cards
-    res.json(sanitizeCardsForResponse(tokens));
+
+    if (!sourceCard) {
+      return res.status(404).json({ object: 'error', details: 'Source card not found' });
+    }
+
+    let rawParts = [];
+    if (USE_BULK_DATA && bulkData.isLoaded() && sourceCard.id) {
+      rawParts = bulkData.getAllPartsById(sourceCard.id) || [];
+    }
+    if ((!Array.isArray(rawParts) || rawParts.length === 0) && Array.isArray(sourceCard.all_parts)) {
+      rawParts = sourceCard.all_parts;
+    }
+
+    const seenUris = new Set();
+    const related = [];
+    for (const part of rawParts || []) {
+      if (!part || !part.uri || !isTokenOrEmblemRelatedPart(part)) {
+        continue;
+      }
+      if (seenUris.has(part.uri)) {
+        continue;
+      }
+      seenUris.add(part.uri);
+
+      if (!resolveCards) {
+        related.push(buildRelatedPartPayload(part));
+        continue;
+      }
+
+      let resolvedCard = part.card || null;
+      if (!resolvedCard && part.id && USE_BULK_DATA && bulkData.isLoaded()) {
+        resolvedCard = bulkData.getCardById(part.id);
+      }
+      if (!resolvedCard) {
+        resolvedCard = getBulkCardFromUri(part.uri);
+      }
+      if (!resolvedCard) {
+        try {
+          resolvedCard = await scryfallLib.proxyUri(part.uri);
+        } catch (resolveError) {
+          console.warn(`[Related] Failed to resolve part URI ${part.uri}: ${resolveError.message}`);
+          continue;
+        }
+      }
+
+      related.push(useSpawnCompact ? sanitizeCardForSpawn(resolvedCard) : sanitizeCardForResponse(resolvedCard));
+    }
+
+    return res.json({
+      object: 'list',
+      total_cards: related.length,
+      has_more: false,
+      data: related
+    });
   } catch (error) {
-    console.error('Error fetching tokens:', error.message);
+    console.error('Error fetching related token/emblem parts:', error.message);
     const { status, details } = normalizeError(error, 502);
-    res.status(status).json({ object: 'error', details });
+    return res.status(status).json({ object: 'error', details });
   }
 });
 
