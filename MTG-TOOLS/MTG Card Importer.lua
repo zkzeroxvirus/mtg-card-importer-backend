@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.917'
+mod_name, version = 'Card Importer', '1.918'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -1370,10 +1370,17 @@ Importer=setmetatable({
       Player[qTbl.color].broadcast('Clearing Previous requests yours added and being processed.')
       endLoop()
     elseif qTbl and t.request[2]then
-      local msg='Queueing request '..#t.request
-      if t.request[4]then msg=msg..'. Queue auto clears after the 13th request!'
-      elseif t.request[3]then msg=msg..'. Type `Scryfall clear queue` to Force quit the queue!'end
-      Player[qTbl.color].broadcast(msg)
+      local queueSize=#t.request
+      local shouldNotify=(queueSize==2)or(queueSize==4)or(queueSize==8)or(queueSize>=12)
+      if shouldNotify then
+        local msg='Queued request '..queueSize
+        if queueSize>=12 then
+          msg=msg..'. Queue auto clears at 13.'
+        elseif queueSize>=8 then
+          msg=msg..'. Queue is busy; use `Scryfall clear queue` if needed.'
+        end
+        Player[qTbl.color].broadcast(msg,{0.85,0.85,0.85})
+      end
     elseif t.request[1]then
       local tbl = t.request[1]
       -- Set start time for timeout detection
@@ -1464,10 +1471,15 @@ function checkRequestTimeout()
       local requestInfo = failedRequest.full or failedRequest.name or 'Unknown'
       
       log('[Card Importer] Request timeout detected after ' .. elapsed .. 's: ' .. requestInfo)
-      broadcastToAll('[b][FF7700]⚠️ Request Timeout[/b]\n' ..
-                     '[FFFFFF]Request took too long (>' .. elapsed .. 's):\n' ..
-                     '[AAAAAA]' .. requestInfo .. '\n' ..
-                     '[77FF77]✓ Automatically moving to next request...', {1, 0.5, 0})
+      local timeoutMsg='[b][FF7700]⚠️ Request Timeout[/b]\n' ..
+                       '[FFFFFF]Request took too long (>' .. elapsed .. 's):\n' ..
+                       '[AAAAAA]' .. requestInfo .. '\n' ..
+                       '[77FF77]✓ Automatically moving to next request...'
+      if Player[playerColor] then
+        Player[playerColor].broadcast(timeoutMsg,{1,0.5,0})
+      else
+        broadcastToAll(timeoutMsg,{1,0.5,0})
+      end
       
       -- Clear the hung request and move to next
       if failedRequest.text and type(failedRequest.text) == 'function' then
@@ -1531,6 +1543,31 @@ function uLog(a,b)if Test then log(a,b)end end
 function uNotebook(t,b,c)local p={index=-1,title=t,body=b or'',color=c or'Grey'}
   for i,v in ipairs(getNotebookTabs())do if v.title==p.title then p.index=i end end
   if p.index<0 then addNotebookTab(p)else editNotebookTab(p)end return p.index end
+
+local function rewriteSHelpTab(body)
+  local tabs = getNotebookTabs() or {}
+  local wrote = false
+  for i, tab in ipairs(tabs) do
+    if tab and tab.title == 'SHelp' then
+      editNotebookTab({
+        index = i,
+        title = 'SHelp',
+        body = body or '',
+        color = tab.color or 'Grey'
+      })
+      wrote = true
+    end
+  end
+
+  if not wrote then
+    addNotebookTab({
+      index = -1,
+      title = 'SHelp',
+      body = body or '',
+      color = 'Grey'
+    })
+  end
+end
 function uVersion(wr)
   -- Check if WebRequest failed
   if wr.is_error then
@@ -1710,17 +1747,18 @@ function onLoad(data)
   
   -- Setup usage text and description
   Usage = Usage:format(mod_name, version)
-  uNotebook('SHelp', Usage)
+  rewriteSHelpTab(Usage)
   local u = Usage:gsub('\n\n.*', '\n\n[b][FFFF77]📖 Full help available in Notebook tab: SHelp[/b]')
   u = u .. '\n\n[b][77FF77]✨ Ready to import cards![/b]'
   -- Backend URL and Auto-update status removed from chat display
   self.setDescription(u:gsub('[^\n]*\n', '', 1):gsub('%]  %[', ']\n['))
   -- Less intrusive chat message - full help in notebook (SHelp)
-  printToAll('[b][77FF77]' .. self.getName() .. ' [/b] Check [b]Notebook > SHelp[/b]', {0.9, 0.9, 0.9})
   local enforceCommander = isCommanderFormatEnforcedForTable()
   local formatColor = enforceCommander and '[77FF77]' or '[FFAA00]'
   local formatLabel = enforceCommander and 'ON' or 'OFF'
-  printToAll('[b][Card Importer][/b] Commander format enforcement: ' .. formatColor .. formatLabel .. '[-] [AAAAAA](host: Scryfall format on|off|toggle|status)[-]', {0.9, 0.9, 0.9})
+  printToAll('[b][00CCFF]✨ ' .. self.getName() .. ' Ready[/b]\n' ..
+             '[FFFFFF]Format Enforcement: ' .. formatColor .. formatLabel .. '[-]\n' ..
+             '[77FF77]Notebook > [b]SHelp[/b] for commands and details.[-]', {0.9, 0.9, 0.9})
   
   -- Registration happens in uVersion() after update check, or above if auto-update is disabled
   startTimeoutMonitor()
@@ -1764,9 +1802,9 @@ function onChat(msg,p)
     if a=='hide'and p.admin then
       chatToggle=not chatToggle
       if chatToggle then msg='hiding' else msg='showing'end
-      broadcastToAll('[b][FFAA00]👁️ Chat Display Toggle[/b]\n' ..
-                     '[FFFFFF]Now [b]' .. msg .. '[/b] importer chat messages.\n' ..
-                     '[AAAAAA]Toggle anytime with "[b]Scryfall hide[/b]"',SMC)
+      p.print('[b][FFAA00]👁️ Chat Display Toggle[/b]\n' ..
+              '[FFFFFF]Now [b]' .. msg .. '[/b] importer chat messages.\n' ..
+              '[AAAAAA]Toggle anytime with "[b]Scryfall hide[/b]"',SMC)
     elseif a=='help'then
       p.print('[b][00CCFF]📖 Help Documentation[/b]\n\n' ..
               '[FFFFFF]Full command list available in [b][FFFF77]Notebook > SHelp tab[/b]\n\n' ..
@@ -1779,7 +1817,7 @@ function onChat(msg,p)
       p.promote()
     elseif a=='clear queue'then
       -- Clear the queue by reloading the object
-      printToAll('[b][00CCFF]♻️ Respawning Importer...[/b]',SMC)
+      p.print('[b][00CCFF]♻️ Respawning Importer...[/b]',SMC)
       self.reload()
     elseif a=='clear back'then
       self.script_state=string.gsub([[{}]],'\n','')
