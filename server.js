@@ -633,7 +633,7 @@ async function hydrateCardForTts(card) {
 
 const COLON_ONLY_PREFIXES = [
   'is', 't', 'type', 's', 'set', 'r', 'rarity', 'o', 'oracle', 'name',
-  'a', 'artist', 'ft', 'flavor', 'kw', 'keyword', 'layout', 'wm', 'watermark',
+  'a', 'artist', 'ft', 'flavor', 'k', 'kw', 'keyword', 'layout', 'wm', 'watermark',
   'lang', 'language', 'game', 'format', 'f', 'legal', 'banned', 'restricted',
   'block', 'stamp', 'frame', 'border', 'has'
 ];
@@ -684,6 +684,13 @@ function normalizeQueryOperators(rawQuery) {
   }
 
   let normalized = rawQuery.replace(COLON_ONLY_PREFIX_REPLACE, '$1$2:');
+  normalized = normalized.replace(/(^|[\s+(])(-?(?:k|kw)):/gi, (_full, boundary, prefix) => {
+    const normalizedPrefix = String(prefix || '');
+    if (normalizedPrefix.startsWith('-')) {
+      return `${boundary}-keyword:`;
+    }
+    return `${boundary}keyword:`;
+  });
   normalized = normalized.replace(POWER_TOUGHNESS_OPERATOR_WITH_SPACED_EQUAL_REPLACE, '$1$2$3=$4');
   normalized = normalized.replace(POWER_TOUGHNESS_OPERATOR_SPACING_REPLACE, '$1$2$3$4');
   normalized = normalized.replace(RARITY_COMPARISON_REPLACE, (fullMatch, prefixBoundary, prefix, operator, value) => {
@@ -1438,21 +1445,34 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       }
       randomCards.push(scryfallCard);
     } else if (executionPlan.primary === 'bulk') {
-      const maxAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-      let attempts = 0;
-
-      while (randomCards.length < count && attempts < maxAttempts) {
-        attempts++;
-        try {
-          const card = await bulkData.getRandomCard(randomQuery, true);
-          const cardKey = getRandomUniqKey(card);
-          if (card && cardKey && !seenCardKeys.has(cardKey)) {
-            seenCardKeys.add(cardKey);
-            randomCards.push(card);
+      try {
+        if (typeof bulkData.getRandomCards === 'function') {
+          const bulkCards = await bulkData.getRandomCards(randomQuery, count, true);
+          if (Array.isArray(bulkCards)) {
+            for (const card of bulkCards) {
+              const cardKey = getRandomUniqKey(card);
+              if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                seenCardKeys.add(cardKey);
+                randomCards.push(card);
+              }
+            }
           }
-        } catch (error) {
-          debugLog(`Skipped: ${error.message}`);
+        } else {
+          const maxAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+          let attempts = 0;
+
+          while (randomCards.length < count && attempts < maxAttempts) {
+            attempts++;
+            const card = await bulkData.getRandomCard(randomQuery, true);
+            const cardKey = getRandomUniqKey(card);
+            if (card && cardKey && !seenCardKeys.has(cardKey)) {
+              seenCardKeys.add(cardKey);
+              randomCards.push(card);
+            }
+          }
         }
+      } catch (error) {
+        debugLog(`Skipped: ${error.message}`);
       }
 
       if (randomCards.length < count) {
@@ -1799,27 +1819,34 @@ app.get('/random', randomLimiter, async (req, res) => {
       
       // Skip bulk mode for price/funny filters to ensure accurate data
       if (executionPlan.primary === 'bulk') {
-        // Bulk data - instant responses (with logging suppressed)
-        // Try up to numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER attempts to account for duplicates
-        const maxAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-        let attempts = 0;
-        
-        while (cards.length < numCards && attempts < maxAttempts) {
-          attempts++;
-          try {
-            const card = await bulkData.getRandomCard(randomQuery, true);  // suppressLog=true
-            const cardKey = getRandomUniqKey(card);
-            if (card && cardKey && !seenCardKeys.has(cardKey)) {
-              seenCardKeys.add(cardKey);
-              cards.push(card);
+        try {
+          if (typeof bulkData.getRandomCards === 'function') {
+            const bulkCards = await bulkData.getRandomCards(randomQuery, numCards, true);
+            if (Array.isArray(bulkCards)) {
+              for (const card of bulkCards) {
+                const cardKey = getRandomUniqKey(card);
+                if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                  seenCardKeys.add(cardKey);
+                  cards.push(card);
+                }
+              }
             }
-          } catch (error) {
-            debugLog(`Skipped: ${error.message}`);
+          } else {
+            const maxAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+            let attempts = 0;
+
+            while (cards.length < numCards && attempts < maxAttempts) {
+              attempts++;
+              const card = await bulkData.getRandomCard(randomQuery, true);
+              const cardKey = getRandomUniqKey(card);
+              if (card && cardKey && !seenCardKeys.has(cardKey)) {
+                seenCardKeys.add(cardKey);
+                cards.push(card);
+              }
+            }
           }
-        }
-        
-        if (attempts >= maxAttempts && cards.length < numCards) {
-          debugLog(`[BulkData] Reached max attempts (${maxAttempts}) with ${cards.length}/${numCards} unique cards`);
+        } catch (error) {
+          debugLog(`Skipped: ${error.message}`);
         }
         
         // Fallback to API if bulk data didn't return enough cards

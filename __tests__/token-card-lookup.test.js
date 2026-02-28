@@ -16,6 +16,7 @@ jest.mock('../lib/bulk-data', () => ({
   getCardById: jest.fn(),
   getCardBySetNumber: jest.fn(),
   getRandomCard: jest.fn(),
+  getRandomCards: jest.fn(),
   searchCards: jest.fn(),
   getQueryExplain: jest.fn(),
   getStats: jest.fn(() => ({ loaded: false })),

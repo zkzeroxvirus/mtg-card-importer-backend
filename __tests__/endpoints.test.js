@@ -373,6 +373,32 @@ describe('Server Endpoints - Random Card', () => {
     expect(calledQuery).not.toMatch(/\bf:c\b/i);
   });
 
+  test('GET /random should normalize kw: alias to keyword:', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const response = await request(app)
+      .get('/random')
+      .query({ q: 'kw:trample', count: 1, enforceCommander: 'false' });
+
+    expect(response.status).toBe(200);
+    const calledQuery = scryfallLib.getRandomCard.mock.calls.at(-1)[0];
+    expect(calledQuery).toContain('keyword:trample');
+    expect(calledQuery).not.toContain('kw:trample');
+  });
+
+  test('GET /random should normalize k= alias to keyword:', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const response = await request(app)
+      .get('/random')
+      .query({ q: 'k=partner', count: 1, enforceCommander: 'false' });
+
+    expect(response.status).toBe(200);
+    const calledQuery = scryfallLib.getRandomCard.mock.calls.at(-1)[0];
+    expect(calledQuery).toContain('keyword:partner');
+    expect(calledQuery).not.toContain('k=partner');
+  });
+
   test('POST /random/build should return one DeckCustom NDJSON object', async () => {
     scryfallLib.searchCards.mockResolvedValueOnce([
       {

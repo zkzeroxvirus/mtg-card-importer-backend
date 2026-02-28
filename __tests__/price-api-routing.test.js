@@ -42,6 +42,11 @@ describe('Price Filter API Routing', () => {
     bulkData.getRandomCard.mockResolvedValue(
       { id: '2', name: 'Test Card 2', prices: { usd: '5.00' } }
     );
+    bulkData.getRandomCards.mockResolvedValue([
+      { id: '2', oracle_id: 'oracle-2', name: 'Test Card 2', prices: { usd: '5.00' } },
+      { id: '9', oracle_id: 'oracle-9', name: 'Test Card 9', prices: { usd: '6.00' } },
+      { id: '10', oracle_id: 'oracle-10', name: 'Test Card 10', prices: { usd: '7.00' } }
+    ]);
     bulkData.getQueryExplain.mockReturnValue({
       mode: 'random',
       totalCards: 100,
@@ -151,6 +156,15 @@ describe('Price Filter API Routing', () => {
         .expect(200);
 
       expect(bulkData.getRandomCard).toHaveBeenCalled();
+    });
+
+    test('should use bulk multi-card sampler for non-price random count queries', async () => {
+      await request(app)
+        .get('/random?count=3&q=t:goblin')
+        .expect(200);
+
+      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:goblin lang:en f:commander', 3, true);
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
     test('should use API for tix filter in random', async () => {
