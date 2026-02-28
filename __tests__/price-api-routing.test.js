@@ -158,12 +158,30 @@ describe('Price Filter API Routing', () => {
       expect(bulkData.getRandomCard).toHaveBeenCalled();
     });
 
+    test('should use bulk data for t:vanguard random query', async () => {
+      await request(app)
+        .get('/random?q=t:vanguard')
+        .expect(200);
+
+      expect(bulkData.getRandomCard).toHaveBeenCalledWith('t:vanguard lang:en');
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+    });
+
     test('should use bulk multi-card sampler for non-price random count queries', async () => {
       await request(app)
         .get('/random?count=3&q=t:goblin')
         .expect(200);
 
       expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:goblin lang:en f:commander', 3, true);
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+    });
+
+    test('should use bulk multi-card sampler for t:vanguard count queries', async () => {
+      await request(app)
+        .get('/random?count=2&q=t:vanguard')
+        .expect(200);
+
+      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:vanguard lang:en', 2, true);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
@@ -189,6 +207,95 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:price_filter');
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('usd>=50 t:artifact lang:en f:commander');
+    });
+
+    test('should use bulk multi-card sampler for non-price random/build queries', async () => {
+      scryfallLib.convertToTTSCard = jest.fn((card) => ({
+        Name: 'Card',
+        Nickname: card.name,
+        Memo: card.oracle_id,
+        CustomDeck: {
+          '1': {
+            FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+            BackURL: 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+          }
+        }
+      }));
+
+      bulkData.getRandomCards.mockResolvedValueOnce([
+        {
+          id: 'bulk-rb-1',
+          oracle_id: 'bulk-rb-o1',
+          name: 'Bulk Build Card 1',
+          type_line: 'Artifact',
+          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+          games: ['paper']
+        },
+        {
+          id: 'bulk-rb-2',
+          oracle_id: 'bulk-rb-o2',
+          name: 'Bulk Build Card 2',
+          type_line: 'Artifact',
+          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+          games: ['paper']
+        }
+      ]);
+
+      const response = await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 't:artifact', count: 2, enforceCommander: true })
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:artifact lang:en f:commander', 2, true);
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+    });
+
+    test('should bypass commander legality for random/build type:vanguard query', async () => {
+      scryfallLib.convertToTTSCard = jest.fn((card) => ({
+        Name: 'Card',
+        Nickname: card.name,
+        Memo: card.oracle_id,
+        CustomDeck: {
+          '1': {
+            FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+            BackURL: 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+          }
+        }
+      }));
+
+      bulkData.getRandomCards.mockResolvedValueOnce([
+        {
+          id: 'bulk-vg-1',
+          oracle_id: 'bulk-vg-o1',
+          name: 'Vanguard Card 1',
+          layout: 'vanguard',
+          type_line: 'Vanguard',
+          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+          games: ['paper']
+        },
+        {
+          id: 'bulk-vg-2',
+          oracle_id: 'bulk-vg-o2',
+          name: 'Vanguard Card 2',
+          layout: 'vanguard',
+          type_line: 'Vanguard',
+          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+          games: ['paper']
+        }
+      ]);
+
+      await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 't:vanguard', count: 2, enforceCommander: true })
+        .expect(200);
+
+      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:vanguard lang:en', 2, true);
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
   });
 

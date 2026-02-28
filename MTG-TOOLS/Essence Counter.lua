@@ -535,6 +535,74 @@ local function parseCaptureNotes(notes)
     return trim(nameLine or ""), trim(urlLine or "")
 end
 
+local function getFirstCustomDeckInfo(customDeck)
+    if type(customDeck) ~= "table" then return nil end
+    for _, deck in pairs(customDeck) do
+        if type(deck) == "table" then
+            return {
+                faceURL = tostring(deck.FaceURL or ""),
+                backURL = tostring(deck.BackURL or ""),
+                numWidth = tonumber(deck.NumWidth) or 1,
+                numHeight = tonumber(deck.NumHeight) or 1,
+                backIsHidden = (deck.BackIsHidden ~= false),
+                uniqueBack = (deck.UniqueBack == true),
+                deckType = tonumber(deck.Type) or 0,
+            }
+        end
+    end
+    return nil
+end
+
+local function hasContainedCardPayload(data)
+    if type(data) ~= "table" then return false end
+    local contained = data.ContainedObjects
+    if type(contained) ~= "table" or #contained == 0 then
+        return false
+    end
+
+    local first = contained[1]
+    if type(first) ~= "table" then return false end
+    if type(first.CustomDeck) == "table" then return true end
+    if first.Name == "Card" then return true end
+    return false
+end
+
+local function buildCapturePayloadFromSingleCardData(data)
+    if type(data) ~= "table" then return nil end
+    if type(data.CustomDeck) ~= "table" then return nil end
+
+    local deckInfo = getFirstCustomDeckInfo(data.CustomDeck)
+    if not deckInfo or deckInfo.faceURL == "" then return nil end
+
+    local card = {
+        Name = "Card",
+        Nickname = tostring(data.Nickname or ""),
+        Description = tostring(data.Description or ""),
+        Memo = tostring(data.Memo or ""),
+        CardID = tonumber(data.CardID) or 100,
+        HideWhenFaceDown = (data.HideWhenFaceDown ~= false),
+        Hands = (data.Hands ~= false),
+        SidewaysCard = (data.SidewaysCard == true),
+        CustomDeck = {
+            [1] = {
+                FaceURL = deckInfo.faceURL,
+                BackURL = deckInfo.backURL,
+                NumWidth = deckInfo.numWidth or 1,
+                NumHeight = deckInfo.numHeight or 1,
+                BackIsHidden = (deckInfo.backIsHidden ~= false),
+                UniqueBack = (deckInfo.uniqueBack == true),
+                Type = deckInfo.deckType or 0,
+            }
+        }
+    }
+
+    return {
+        _schema = "capture_payload_v1",
+        DiffuseURL = deckInfo.faceURL,
+        ContainedObjects = { card }
+    }
+end
+
 local function sanitizeCaptureBagData(data)
     if type(data) ~= "table" then return nil end
 
@@ -543,27 +611,55 @@ local function sanitizeCaptureBagData(data)
         return data
     end
 
-    -- Build minimal payload from full TTS object data.
-    if data.Name == "Custom_Model_Infinite_Bag" and type(data.ContainedObjects) == "table" and #data.ContainedObjects > 0 then
-        local minimalContained = JSON.decode(JSON.encode(data.ContainedObjects))
-        for _, contained in ipairs(minimalContained) do
-            if type(contained) == "table" then
-                contained.GUID = nil
-                contained.LuaScript = nil
-                contained.LuaScriptState = nil
-            end
+    -- Build compact payload from full TTS object data to avoid heavy deep clones.
+    if hasContainedCardPayload(data) then
+        local first = data.ContainedObjects[1]
+        if type(first) ~= "table" then return nil end
+
+        local deckInfo = getFirstCustomDeckInfo(first.CustomDeck)
+        local faceUrl = ""
+        local backUrl = ""
+        if deckInfo then
+            faceUrl = deckInfo.faceURL
+            backUrl = deckInfo.backURL
         end
+
+        if faceUrl == "" and type(data.CustomMesh) == "table" and data.CustomMesh.DiffuseURL then
+            faceUrl = tostring(data.CustomMesh.DiffuseURL)
+        end
+
         return {
-            _schema = "capture_payload_v1",
-            Nickname = data.Nickname or "",
-            DiffuseURL = (data.CustomMesh and data.CustomMesh.DiffuseURL) or "",
-            ContainedObjects = minimalContained,
+            _compact = true,
+            bag = {
+                diffuseURL = (type(data.CustomMesh) == "table" and tostring(data.CustomMesh.DiffuseURL or "")) or ""
+            },
+            card = {
+                nickname = tostring(first.Nickname or ""),
+                description = tostring(first.Description or ""),
+                memo = tostring(first.Memo or ""),
+                cardID = tonumber(first.CardID) or 100,
+                hideWhenFaceDown = (first.HideWhenFaceDown ~= false),
+                hands = (first.Hands ~= false),
+                sideways = (first.SidewaysCard == true),
+                faceURL = faceUrl,
+                backURL = backUrl,
+                numWidth = deckInfo and deckInfo.numWidth or 1,
+                numHeight = deckInfo and deckInfo.numHeight or 1,
+                backIsHidden = deckInfo and deckInfo.backIsHidden or true,
+                uniqueBack = deckInfo and deckInfo.uniqueBack or false,
+                deckType = deckInfo and deckInfo.deckType or 0,
+            }
         }
     end
 
     -- Backward compatibility: compact/legacy payloads are preserved and handled at spawn time.
-    if data._compact == true or data.Name == "Custom_Model_Infinite_Bag" then
+    if data._compact == true or hasContainedCardPayload(data) then
         return data
+    end
+
+    local singleCardPayload = buildCapturePayloadFromSingleCardData(data)
+    if singleCardPayload then
+        return singleCardPayload
     end
 
     return nil
@@ -622,7 +718,7 @@ buildCaptureBagSpawnData = function(captureItem)
     end
 
     -- Legacy full payload remains supported.
-    if payload.Name == "Custom_Model_Infinite_Bag" and type(payload.ContainedObjects) == "table" and #payload.ContainedObjects > 0 then
+    if hasContainedCardPayload(payload) then
         local out = JSON.decode(JSON.encode(payload))
         local faceUrl = extractCaptureFaceUrlFromPayload(payload)
         out.Nickname = buildCaptureTicketName(captureItem.name)
@@ -681,9 +777,6 @@ local function extractCaptureBagData(obj)
     if not obj or not obj.getData then return nil end
     local ok, data = pcall(function() return obj.getData() end)
     if not ok or type(data) ~= "table" then return nil end
-    if type(data.ContainedObjects) ~= "table" or #data.ContainedObjects == 0 then
-        return nil
-    end
     return sanitizeCaptureBagData(data)
 end
 
