@@ -188,7 +188,7 @@ describe('Non-Playable Card Filtering', () => {
       expect(scryfall.isNonPlayableCard(enchantedCard)).toBe(false);
     });
 
-    test('should identify meld result cards (ending in b) as non-playable', () => {
+    test('should identify meld cards as non-playable', () => {
       const meldResult = {
         name: 'Chittering Host',
         set: 'emn',
@@ -225,7 +225,7 @@ describe('Non-Playable Card Filtering', () => {
       expect(scryfall.isNonPlayableCard(nonBasicLand)).toBe(false);
     });
 
-    test('should allow meld cards that are not results (ending in a)', () => {
+    test('should treat meld component cards as non-playable', () => {
       const meldCard = {
         name: 'Midnight Scavengers',
         set: 'emn',
@@ -235,7 +235,7 @@ describe('Non-Playable Card Filtering', () => {
         collector_number: '96a'
       };
       
-      expect(scryfall.isNonPlayableCard(meldCard)).toBe(false);
+      expect(scryfall.isNonPlayableCard(meldCard)).toBe(true);
     });
   });
 

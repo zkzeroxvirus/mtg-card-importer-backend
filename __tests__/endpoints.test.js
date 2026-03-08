@@ -253,6 +253,17 @@ describe('Server Endpoints - Random Card', () => {
     expect(response.status).not.toBe(400);
   });
 
+  test('GET /random should treat trailing count in query as count', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const response = await request(app)
+      .get('/random')
+      .query({ q: 't:creature 1', enforceCommander: 'false' });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:creature lang:en');
+  });
+
   test('GET /random should clamp count over limit', async () => {
     const response = await request(app)
       .get('/random')
@@ -634,7 +645,9 @@ describe('Server Endpoints - Random Card', () => {
     expect(response.headers['x-query-warning']).toContain('Normalized query operators');
   });
 
-  test('POST /random/build should dedupe duplicates and fallback for unique cards', async () => {
+  test('POST /random/build should dedupe duplicates and return partial results warning', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
     scryfallLib.searchCards.mockResolvedValueOnce([
       {
         id: 'id-dup-1',
@@ -669,9 +682,13 @@ describe('Server Endpoints - Random Card', () => {
       .send({ q: 't:artifact', count: 2 });
 
     expect(response.status).toBe(200);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+    expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     const lines = response.text.split('\n').filter(Boolean).map(line => JSON.parse(line));
-    expect(lines[0].ContainedObjects).toHaveLength(2);
+    expect(lines[0].object).toBe('warning');
+    expect(lines[0].warning).toContain('Only 1 card(s) matched; returning partial results.');
+    const deckLine = lines.find(line => Array.isArray(line.ContainedObjects));
+    expect(deckLine).toBeDefined();
+    expect(deckLine.ContainedObjects).toHaveLength(1);
   });
 
   test('POST /random/build should hydrate cards without image_uris before conversion', async () => {
@@ -896,6 +913,174 @@ describe('Server Endpoints - Rulings and Tokens', () => {
   test('GET /printings/:name should accept card name', async () => {
     const response = await request(app).get('/printings/Mountain');
     expect(response.status).not.toBe(400);
+  });
+
+  test('GET /related should allow token sources to return token children only', async () => {
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'token-1',
+      oracle_id: 'oracle-token-1',
+      name: 'Soldier',
+      layout: 'token',
+      type_line: 'Token Creature - Soldier',
+      all_parts: [
+        {
+          id: 'token-1',
+          component: 'token',
+          name: 'Soldier',
+          type_line: 'Token Creature - Soldier',
+          uri: 'https://api.scryfall.com/cards/token-1'
+        },
+        {
+          id: 'emblem-1',
+          component: 'combo_piece',
+          name: 'Basri Ket Emblem',
+          type_line: 'Emblem - Basri',
+          uri: 'https://api.scryfall.com/cards/emblem-1'
+        },
+        {
+          id: 'fish-1',
+          component: 'token',
+          name: 'Fish',
+          type_line: 'Token Creature - Fish',
+          uri: 'https://api.scryfall.com/cards/fish-1'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get('/related')
+      .query({ name: 'Soldier' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.object).toBe('list');
+    expect(response.body.total_cards).toBe(1);
+    expect(response.body.data.map((item) => item.id)).toEqual(['fish-1']);
+  });
+
+  test('GET /related should allow emblem sources to return token children', async () => {
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'emblem-basri-1',
+      oracle_id: 'oracle-emblem-basri-1',
+      name: 'Basri Ket Emblem',
+      layout: 'emblem',
+      type_line: 'Emblem',
+      all_parts: [
+        {
+          id: 'emblem-basri-1',
+          component: 'combo_piece',
+          name: 'Basri Ket Emblem',
+          type_line: 'Emblem',
+          uri: 'https://api.scryfall.com/cards/emblem-basri-1'
+        },
+        {
+          id: 'basri-1',
+          component: 'combo_piece',
+          name: 'Basri Ket',
+          type_line: 'Legendary Planeswalker - Basri',
+          uri: 'https://api.scryfall.com/cards/basri-1'
+        },
+        {
+          id: 'soldier-1',
+          component: 'token',
+          name: 'Soldier',
+          type_line: 'Token Creature - Soldier',
+          uri: 'https://api.scryfall.com/cards/soldier-1'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get('/related')
+      .query({ name: 'Basri Ket Emblem' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.object).toBe('list');
+    expect(response.body.total_cards).toBe(1);
+    expect(response.body.data.map((item) => item.id)).toEqual(['soldier-1']);
+  });
+
+  test('GET /related should exclude self references from all_parts', async () => {
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'creator-1',
+      oracle_id: 'oracle-creator-1',
+      name: 'Basri Ket',
+      layout: 'normal',
+      type_line: 'Legendary Planeswalker - Basri',
+      all_parts: [
+        {
+          id: 'creator-1',
+          component: 'token',
+          name: 'Basri Ket',
+          type_line: 'Emblem - Basri',
+          uri: 'https://api.scryfall.com/cards/creator-1'
+        },
+        {
+          id: 'emblem-1',
+          component: 'token',
+          name: 'Basri Ket Emblem',
+          type_line: 'Emblem - Basri',
+          uri: 'https://api.scryfall.com/cards/emblem-1'
+        },
+        {
+          id: 'soldier-1',
+          component: 'token',
+          name: 'Soldier',
+          type_line: 'Token Creature - Soldier',
+          uri: 'https://api.scryfall.com/cards/soldier-1'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get('/related')
+      .query({ name: 'Basri Ket' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.object).toBe('list');
+    expect(response.body.total_cards).toBe(2);
+    expect(response.body.data.map((item) => item.id)).toEqual(['emblem-1', 'soldier-1']);
+  });
+
+  test('GET /related should include emblem combo_piece parts for planeswalkers', async () => {
+    scryfallLib.getCard.mockResolvedValueOnce({
+      id: 'basri-1',
+      oracle_id: 'oracle-basri-1',
+      name: 'Basri Ket',
+      layout: 'normal',
+      type_line: 'Legendary Planeswalker - Basri',
+      all_parts: [
+        {
+          id: 'basri-1',
+          component: 'combo_piece',
+          name: 'Basri Ket',
+          type_line: 'Legendary Planeswalker - Basri',
+          uri: 'https://api.scryfall.com/cards/basri-1'
+        },
+        {
+          id: 'emblem-basri-1',
+          component: 'combo_piece',
+          name: 'Basri Ket Emblem',
+          type_line: 'Emblem',
+          uri: 'https://api.scryfall.com/cards/emblem-basri-1'
+        },
+        {
+          id: 'soldier-basri-1',
+          component: 'token',
+          name: 'Soldier',
+          type_line: 'Token Creature - Soldier',
+          uri: 'https://api.scryfall.com/cards/soldier-basri-1'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get('/related')
+      .query({ name: 'Basri Ket' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.object).toBe('list');
+    expect(response.body.total_cards).toBe(2);
+    expect(response.body.data.map((item) => item.id)).toEqual(['emblem-basri-1', 'soldier-basri-1']);
   });
 });
 

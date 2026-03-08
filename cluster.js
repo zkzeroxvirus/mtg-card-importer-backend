@@ -18,9 +18,14 @@ const {
 } = calculateWorkerCount({ workersEnv });
 // Stagger worker startup to prevent simultaneous JSON parsing (configurable via env var)
 // Reduced to 500ms since decompression is now cached - only JSON.parse() is CPU intensive
-const STARTUP_STAGGER_MS = parseInt(process.env.STARTUP_STAGGER_MS || '500', 10);
+const startupStaggerRaw = parseInt(process.env.STARTUP_STAGGER_MS || '500', 10);
+const STARTUP_STAGGER_MS = Number.isFinite(startupStaggerRaw) && startupStaggerRaw >= 0
+  ? startupStaggerRaw
+  : 500;
 
 if (cluster.isPrimary) {
+  let isShuttingDown = false;
+
   console.log(`[Cluster] Primary process ${process.pid} is running`);
   if (workersEnv === 'auto') {
     const memoryNote = `${memoryLimitMB}MB limit, ${memoryPerWorkerMB}MB per worker estimate`;
@@ -60,7 +65,11 @@ if (cluster.isPrimary) {
 
   // Handle worker exits and automatic restart
   cluster.on('exit', (worker, code, signal) => {
-    const stats = workerStats.get(worker.id);
+    const stats = workerStats.get(worker.id) || {
+      startTime: Date.now(),
+      restarts: 0
+    };
+    workerStats.delete(worker.id);
     const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
     
     if (signal) {
@@ -69,6 +78,10 @@ if (cluster.isPrimary) {
       console.log(`[Cluster] Worker ${worker.id} exited with error code: ${code} (uptime: ${uptime}s)`);
     } else {
       console.log(`[Cluster] Worker ${worker.id} exited cleanly (uptime: ${uptime}s)`);
+    }
+
+    if (isShuttingDown) {
+      return;
     }
 
     // Restart worker with exponential backoff to prevent crash loops
@@ -92,6 +105,7 @@ if (cluster.isPrimary) {
 
   // Graceful shutdown handler
   process.on('SIGTERM', () => {
+    isShuttingDown = true;
     console.log('[Cluster] Primary received SIGTERM, shutting down workers...');
     for (const id in cluster.workers) {
       cluster.workers[id].process.kill('SIGTERM');
@@ -99,6 +113,7 @@ if (cluster.isPrimary) {
   });
 
   process.on('SIGINT', () => {
+    isShuttingDown = true;
     console.log('[Cluster] Primary received SIGINT, shutting down workers...');
     for (const id in cluster.workers) {
       cluster.workers[id].process.kill('SIGINT');

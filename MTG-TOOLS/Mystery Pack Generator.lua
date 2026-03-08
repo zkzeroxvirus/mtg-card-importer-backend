@@ -2,9 +2,9 @@ function onLoad()
   --customize card-back image
   backURL='https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
-  -- Backend URL - change this to your deployed backend URL
-  backendURL='http://api.mtginfo.org'
-
+  -- Backend URL - default to local dev server (docker-compose.local.yml maps 3000:3000)
+  backendURL='http://localhost:3000'
+  --backendURL='http://api.mtginfo.org'
   setCode='Mystery'
   -- setCode='KLM'
   -- setCode='STX'
@@ -25,6 +25,8 @@ end
 
 local BOOSTER_BUILD_TIMEOUT = 25
 local BOOSTER_REST_TIMEOUT = 8
+local RANDOM_ENDPOINT_PATH = '/random'
+local RANDOM_BUILD_ENDPOINT_PATH = '/random/build'
 
 --------------------------------------------------------------------------------
 ---- Booster Set Lookup Function
@@ -32,7 +34,7 @@ local BOOSTER_REST_TIMEOUT = 8
 ---- if not add special cases e.g. using the set:lower()=='mystery' example
 --------------------------------------------------------------------------------
 local function apiSet(set)
-  return backendURL..'/random?q=is:booster+s:'..set..'++-is:alchemy+'
+  return backendURL..RANDOM_ENDPOINT_PATH..'?q=is:booster+s:'..set..'++-is:alchemy+'
 end
 function rarity(m,r,u)
   if math.random(1,m or 36)==1 then return'r:mythic'
@@ -251,12 +253,38 @@ local function decodeQueryValue(value)
   return decoded
 end
 
+local function normalizeQueryForBuild(query)
+  local normalized = tostring(query or '')
+  normalized = normalized:gsub('%s+', ' ')
+  normalized = normalized:gsub('^%s+', '')
+  normalized = normalized:gsub('%s+$', '')
+  return normalized
+end
+
 local function extractQueryFromRandomUrl(url)
-  local rawQuery = url and url:match('/random%?q=(.*)')
+  if type(url) ~= 'string' or url == '' then
+    return nil
+  end
+
+  local rawQuery = nil
+  -- Primary path: full URL with ?q=...
+  rawQuery = url:match('[%?&]q=([^&]+)')
+
+  -- Fallback path: already a raw query (no endpoint wrapper)
+  if not rawQuery and not url:find('/random?', 1, true) then
+    rawQuery = url
+  end
+
   if not rawQuery or rawQuery == '' then
     return nil
   end
-  return decodeQueryValue(rawQuery)
+
+  local decoded = decodeQueryValue(rawQuery)
+  local normalized = normalizeQueryForBuild(decoded)
+  if normalized == '' then
+    return nil
+  end
+  return normalized
 end
 
 local function firstDeckFromNDJSON(respText)
@@ -278,7 +306,7 @@ end
 
 local function postBuildNDJSON(payload, callback)
   WebRequest.custom(
-    backendURL..'/random/build',
+    backendURL..RANDOM_BUILD_ENDPOINT_PATH,
     'POST',
     true,
     JSON.encode(payload),
@@ -392,6 +420,7 @@ function getDeckDat(urlTable,boosterN)
         q = randomQuery,
         count = 1,
         enforceCommander = false,
+        forceApi = true,
         back = backURL
       }
 

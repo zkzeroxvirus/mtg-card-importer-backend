@@ -403,7 +403,7 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
 
     test('should allow playable layouts', () => {
       const playableLayouts = [
-        'normal', 'split', 'flip', 'transform', 'modal_dfc', 'meld',
+        'normal', 'split', 'flip', 'transform', 'modal_dfc',
         'leveler', 'class', 'case', 'saga', 'adventure', 'mutate',
         'prototype', 'battle'
       ];
@@ -428,14 +428,14 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       expect(filtered).toHaveLength(playableLayouts.length);
     });
 
-    test('should exclude meld result cards (collector number ending in b)', () => {
+    test('should exclude meld cards from random pools', () => {
       const mockCards = [
-        // Playable meld component cards
+        // Meld cards (components and results)
         { name: 'Graf Rats', set: 'emn', layout: 'meld', collector_number: '113' },
         { name: 'Midnight Scavengers', set: 'emn', layout: 'meld', collector_number: '125' },
         { name: 'Bruna, the Fading Light', set: 'emn', layout: 'meld', collector_number: '15a' },
         { name: 'Gisela, the Broken Blade', set: 'emn', layout: 'meld', collector_number: '28a' },
-        // Unplayable meld results (collector number ends with 'b')
+        // Meld results (collector number ends with 'b')
         { name: 'Chittering Host', set: 'emn', layout: 'meld', collector_number: '123b' },
         { name: 'Brisela, Voice of Nightmares', set: 'emn', layout: 'meld', collector_number: '15b' },
         // Regular playable cards for comparison
@@ -445,25 +445,24 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
 
       const filtered = mockCards.filter(card => {
         const layout = card.layout || '';
-        const collectorNumber = card.collector_number || '';
-        // Exclude meld results (layout:meld + collector number ending in 'b')
-        if (layout.toLowerCase() === 'meld' && collectorNumber.toLowerCase().endsWith('b')) {
+        // Exclude all meld cards
+        if (layout.toLowerCase() === 'meld') {
           return false;
         }
         return true;
       });
 
-      expect(filtered).toHaveLength(6);
-      // Should include all cards except the two meld results
+      expect(filtered).toHaveLength(2);
+      // Should include only non-meld cards
       expect(filtered.map(c => c.name)).toEqual([
-        'Graf Rats',
-        'Midnight Scavengers',
-        'Bruna, the Fading Light',
-        'Gisela, the Broken Blade',
         'Normal Card',
         'Transform Card'
       ]);
-      // Should exclude meld results
+      // Should exclude all meld cards
+      expect(filtered.map(c => c.name)).not.toContain('Graf Rats');
+      expect(filtered.map(c => c.name)).not.toContain('Midnight Scavengers');
+      expect(filtered.map(c => c.name)).not.toContain('Bruna, the Fading Light');
+      expect(filtered.map(c => c.name)).not.toContain('Gisela, the Broken Blade');
       expect(filtered.map(c => c.name)).not.toContain('Chittering Host');
       expect(filtered.map(c => c.name)).not.toContain('Brisela, Voice of Nightmares');
     });
@@ -516,7 +515,7 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       const nonPlayableLayouts = [
         'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
         'vanguard', 'art_series', 'reversible_card', 'augment', 'host',
-        'dungeon', 'hero', 'attraction', 'stickers'
+        'dungeon', 'hero', 'attraction', 'stickers', 'meld'
       ];
       const nonPlayableSetTypes = ['funny', 'memorabilia', 'token', 'minigame'];
 
@@ -572,7 +571,7 @@ describe('Bulk Data Filtering - Non-Playable Cards', () => {
       const nonPlayableLayouts = [
         'token', 'double_faced_token', 'emblem', 'planar', 'scheme',
         'vanguard', 'art_series', 'reversible_card', 'augment', 'host',
-        'dungeon', 'hero', 'attraction', 'stickers'
+        'dungeon', 'hero', 'attraction', 'stickers', 'meld'
       ];
 
       const filtered = mockCards.filter(card => {

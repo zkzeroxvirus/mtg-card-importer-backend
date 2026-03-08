@@ -248,7 +248,7 @@ describe('Price Filter API Routing', () => {
         .expect(200);
 
       expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
-      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:artifact lang:en f:commander', 2, true);
+      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:artifact lang:en f:commander', 2, true, false);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
@@ -293,7 +293,7 @@ describe('Price Filter API Routing', () => {
         .send({ q: 't:vanguard', count: 2, enforceCommander: true })
         .expect(200);
 
-      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:vanguard lang:en', 2, true);
+      expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:vanguard lang:en', 2, true, false);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });

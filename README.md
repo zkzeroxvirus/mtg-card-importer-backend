@@ -208,20 +208,23 @@ Example: `GET /search?q=type:creature%20power>5`
 
 **GET `/random`**
 - Fetch random card(s)
-- Query parameters: `?count=5&q=FILTER` (both optional)
+- Query parameters: `?count=5&q=FILTER&forceApi=true` (`count`/`q` optional, `forceApi` optional)
 - Returns: Single card or list of cards depending on count
 - Note: Automatically enforces Commander legality (`f:commander`) on random requests
+- Note: Set `forceApi=true` to bypass bulk-mode planning and force direct Scryfall API random selection
 - Note: Automatically enforces default language `lang:en` for random queries unless `lang:`/`language:` is explicitly provided
-- Note: Automatically excludes non-playable cards (basic lands, tokens, emblems, art cards, test cards, digital-only cards, meld results, etc.) to match paper Magic gameplay
+- Note: Automatically excludes non-playable cards (basic lands, tokens, emblems, art cards, test cards, digital-only cards, meld cards, etc.) to match paper Magic gameplay
 - Note: Automatically filters to unique cards (by oracle_id) to prevent skewing results with heavily reprinted cards or alternative arts
 - Note: For truly colorless identity filtering (including DFC-safe behavior), prefer `id=c` over `c=c`
 - Optional diagnostics: `?explain=true` adds `X-Query-Plan` and `X-Query-Explain` headers when bulk mode handles the query
 
 **POST `/random/build`**
 - Build and return a fully assembled random `DeckCustom` object in one request
-- Consumes: `{ "q": "FILTER", "count": 22, "back": "URL", "hand": { ... } }`
+- Consumes: `{ "q": "FILTER", "count": 22, "back": "URL", "hand": { ... }, "enforceCommander": true, "forceApi": false }`
 - Returns: NDJSON with a single deck object line (optimized for TTS spawning)
 - Recommended for multi-card random spawns to avoid client-side multi-request assembly
+- Note: Set `"enforceCommander": false` to skip Commander legality auto-enforcement for this request
+- Note: Set `"forceApi": true` to force direct Scryfall API random selection instead of bulk-mode random planning
 - Note: Applies the same default language enforcement (`lang:en`) as `GET /random` unless `lang:`/`language:` is explicitly provided
 - Optional diagnostics: include `"explain": true` in payload to receive `X-Query-Plan` and `X-Query-Explain` headers
 

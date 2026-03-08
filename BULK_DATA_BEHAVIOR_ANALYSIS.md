@@ -156,7 +156,7 @@ GET /search?q=usd>10
 - Tokens, emblems, art cards
 - Oversized cards
 - Basic lands
-- Meld results (backside cards)
+- Meld cards
 
 **Examples:**
 ```bash

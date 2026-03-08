@@ -6,12 +6,15 @@ services:
     container_name: mtg-card-importer-local
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3000:3000"
 
     environment:
       NODE_ENV: development
       PORT: 3000
-      USE_BULK_DATA: "false"
+      USE_BULK_DATA: "true"
+      BULK_DATA_PATH: /app/data
+      BULK_DATA_TYPE: oracle_cards
+      BULK_INCLUDE_RULINGS: "true"
       WORKERS: 1
       STARTUP_STAGGER_MS: 0
       MAX_CACHE_SIZE: 2000

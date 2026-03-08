@@ -4,7 +4,8 @@ DEBOUNCE_SECONDS = 3.0
 MIN_SYNC_INTERVAL_SECONDS = 8.0
 local TOOLTIP_WRAP = 80
 local BAG_MARKER = "[from-bag]"
-local CAPTURE_NOTE_PREFIX = "CAPTURE_TICKET_V1"
+local CAPTURE_NOTE_PREFIX = "CAPTURE_TICKET"
+local CAPTURE_NOTE_PREFIX_LEGACY = "CAPTURE_TICKET_V1"
 local CAPTURE_TICKET_LABEL = "Capture Ticket:"
 
 -- Relative anchor for spawned reward tokens
@@ -56,24 +57,24 @@ local ACHIEVEMENTS_LIST = {
     { name = "Happy Fun Land", desc = "At the beginning of the game, spawn 5 random attractions to create your attraction deck.\nUnlock: Beat a crypt fight with attractions." },
     { name = "Nature's Blessing", desc = "Instead of gaining dual lands during deck creation, you may instead get triomes.\nUnlock: Beat a crypt with 50 or more lands in your deck." },
     { name = "Dog's Best Friend", desc = "At the beginning of the game, before deckbuilding, gain a random companion. You must adhere to the companion rules when deckbuilding. Free mulligan cards must also follow your companion.\nUnlock: Beat a crypt fight with a companion in your deck." },
-    { name = "Orzhov Identity Buff - Tithe and Toil", desc = "If your commander is White: Once per turn, when a token enters the battlefield under your control, you may populate 1. If your commander is Black: Once per turn, when a non-token creature you control dies, you may create a 1/1 Black Zombie.\nUnlock: Beat a crypt fight where all players' commander identities were either White, Black, or Orzhov." },
-    { name = "Simic Identity Buff - Adaptive Pattern", desc = "If your commander is Blue: Once per turn, when you draw your second card this turn, you may put a +1/+1 counter on a creature you control. If your commander is Green: Once per turn, when a +1/+1 counter is placed on a creature you control, you may draw a card.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, Blue, or Simic." },
-    { name = "Azorius Identity Buff - Law of Efficiency", desc = "If your commander is White: Once per turn, when you cast a spell during another player's turn, you may gain 1 life. If your commander is Blue: Once per turn, when you counter a spell or ability, you may draw a card.\nUnlock: Beat a crypt fight where all players' commander identities were either White, Blue, or Azorius." },
-    { name = "Boros Identity Buff - Charge of Conviction", desc = "If your commander is White: Once per turn, when one or more creatures you control attacks, you may untap one creature you control. If your commander is Red: Once per turn, when a creature you control attacks alone, you may give it +2/+0 until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, White, or Boros." },
+    { name = "Orzhov Identity Buff - Tithe and Toil", desc = "If your commander is White: Once per turn, when a token enters the battlefield under your control, you may populate 1. \nIf your commander is Black: Once per turn, when a non-token creature you control dies, you may create a 1/1 Black Zombie.\nUnlock: Beat a crypt fight where all players' commander identities were either White, Black, or Orzhov." },
+    { name = "Simic Identity Buff - Adaptive Pattern", desc = "If your commander is Blue: Once per turn, when you draw your second card this turn, you may put a +1/+1 counter on a creature you control. \nIf your commander is Green: Once per turn, when a +1/+1 counter is placed on a creature you control, you may draw a card.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, Blue, or Simic." },
+    { name = "Azorius Identity Buff - Law of Efficiency", desc = "If your commander is White: Once per turn, when you cast a spell during another player's turn, you may gain 1 life. \nIf your commander is Blue: Once per turn, when you counter a spell or ability, you may draw a card.\nUnlock: Beat a crypt fight where all players' commander identities were either White, Blue, or Azorius." },
+    { name = "Boros Identity Buff - Charge of Conviction", desc = "If your commander is White: Once per turn, when one or more creatures you control attacks, you may untap one creature you control. \nIf your commander is Red: Once per turn, when a creature you control attacks alone, you may give it +2/+0 until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, White, or Boros." },
     { name = "Changeling's Land Form", desc = "At the beginning of the game start with a random basic land on the battlefield.\nUnlock: Beat a crypt fight with a Changeling commander." },
-    { name = "Golgari Identity Buff - Cycle of Rot", desc = "If your commander is Black: Once per turn, when a permanent enters your graveyard from the battlefield, you may put a -1/-1 counter on target creature. If your commander is Green: Once per turn, when a creature dies, you may create a Food token.\nUnlock: Beat a crypt fight where all players' commander identities were either Black, Green, or Golgari." },
-    { name = "Izzet Identity Buff - Experimental Sparks", desc = "If your commander is Blue: Once per turn, when you cast an instant, you may scry 1, then draw 1. If your commander is Red: Once per turn, when you cast a sorcery, you may deal 1 damage to any target.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Red, or Izzet." },
-    { name = "Dimir Identity Buff - Whisper Network", desc = "If your commander is Blue: Once per turn, when you cast a spell on an opponent's turn, you may untap target nonland permanent. If your commander is Black: Once per turn, when you target a permanent you don't control, you may exile target card in any graveyard.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Black, or Dimir." },
-    { name = "Selesnya Identity Buff - Harmony's Bloom", desc = "If your commander is White: Once per turn, when you gain life, you may put a +1/+1 counter on a creature you control. If your commander is Green: Once per turn, when you cast a creature spell, you may gain 1 life.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, White, or Selesnya." },
+    { name = "Golgari Identity Buff - Cycle of Rot", desc = "If your commander is Black: Once per turn, when a permanent enters your graveyard from the battlefield, you may put a -1/-1 counter on target creature. \nIf your commander is Green: Once per turn, when a creature dies, you may create a Food token.\nUnlock: Beat a crypt fight where all players' commander identities were either Black, Green, or Golgari." },
+    { name = "Izzet Identity Buff - Experimental Sparks", desc = "If your commander is Blue: Once per turn, when you cast an instant, you may scry 1, then draw 1. \nIf your commander is Red: Once per turn, when you cast a sorcery, you may deal 1 damage to any target.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Red, or Izzet." },
+    { name = "Dimir Identity Buff - Whisper Network", desc = "If your commander is Blue: Once per turn, when you cast a spell on an opponent's turn, you may untap target nonland permanent. \nIf your commander is Black: Once per turn, when you target a permanent you don't control, you may exile target card in any graveyard.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Black, or Dimir." },
+    { name = "Selesnya Identity Buff - Harmony's Bloom", desc = "If your commander is White: Once per turn, when you gain life, you may put a +1/+1 counter on a creature you control. \nIf your commander is Green: Once per turn, when you cast a creature spell, you may gain 1 life.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, White, or Selesnya." },
     { name = "Raccoon's Rage", desc = "At the beginning of the game start with a Mountain on the battlefield.\nUnlock: Beat a crypt fight with a Raccoon commander." },
     { name = "Gamblers never quit", desc = "Once per town, when you pick your first town action that costs XP, you flip a coin. You may not use this buff if you cannot pay double the XP cost. If you win the coin flip, the town action is free. If you lose the coin flip, the town action costs double XP.\nUnlock: Win a coin flip 6 times in a row." },
     { name = "Stick it To Me", desc = "At the beginning of the game, spawn 5 random sticker sheets to create your sticker deck.\nUnlock: Beat a crypt fight with stickers." },
-    { name = "Gruul Identity Buff - Primal Fury", desc = "If your commander is Red: Once per turn, when a creature you control becomes modified, you may give it haste until end of turn. If your commander is Green: Once per turn, when a creature you control attacks, you may give it trample until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, Green, or Gruul." },
+    { name = "Gruul Identity Buff - Primal Fury", desc = "If your commander is Red: Once per turn, when a creature you control becomes modified, you may give it haste until end of turn. \nIf your commander is Green: Once per turn, when a creature you control attacks, you may give it trample until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, Green, or Gruul." },
     { name = "Chaos", desc = "Once per game, reroll an event.\nUnlock: Open 5 events in a row before an encounter." },
     { name = "Horse's Gallop", desc = "At the beginning of the game start with a Forest on the battlefield.\nUnlock: Beat a crypt fight with a Horse commander." },
     { name = "Victory lap", desc = "Your buff maximum increases by 3 (from 4 to 7).\nUnlock: Beat 3 crypt bosses in a single session." },
     { name = "Dawn of Crabs", desc = "At the beginning of the game start with a Plains on the battlefield.\nUnlock: Beat a crypt fight with a Crab commander." },
-    { name = "Rakdos Identity Buff - Showstopper's Encore", desc = "If your commander is Black: Once per turn, when a creature dies, you may draw a card and lose 1 life. If your commander is Red: Once per turn, when you deal combat damage to an opponent, you may create a Treasure token.\nUnlock: Beat a crypt fight where all players' commander identities were either Black, Red, or Rakdos." },
+    { name = "Rakdos Identity Buff - Showstopper's Encore", desc = "If your commander is Black: Once per turn, when a creature dies, you may draw a card and lose 1 life. \nIf your commander is Red: Once per turn, when you deal combat damage to an opponent, you may create a Treasure token.\nUnlock: Beat a crypt fight where all players' commander identities were either Black, Red, or Rakdos." },
     { name = "One with death", desc = "Gain a second free card during deck creation. One of those free cards can be a Game Changer.\nUnlock: Beat a crypt fight on turn one." },
     { name = "Compelling Madness", desc = "Once per encounter, target player gains 5 life. This can be done at instant speed.\nUnlock: Only if you indirectly kill one non-host player in a session." },
     { name = "Fish Pond", desc = "At the beginning of the game start with an Island on the battlefield.\nUnlock: Beat a crypt fight with a Fish commander." },
@@ -211,6 +212,44 @@ local CAPTURE_BAG_TEMPLATE = {
     LuaScriptState = "",
     XmlUI = "",
     ContainedObjects = {},
+}
+
+local CAPTURE_DEFAULT_BACK_URL = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
+
+local CAPTURE_CARD_TEMPLATE = {
+    GUID = "",
+    Name = "Card",
+    Transform = {
+        posX = 0, posY = 0, posZ = 0,
+        rotX = 0, rotY = 0, rotZ = 0,
+        scaleX = 1, scaleY = 1, scaleZ = 1,
+    },
+    Nickname = "",
+    Description = "",
+    GMNotes = "",
+    Memo = "",
+    AltLookAngle = { x = 0, y = 0, z = 0 },
+    ColorDiffuse = { r = 0.713235259, g = 0.713235259, b = 0.713235259 },
+    LayoutGroupSortIndex = 0,
+    Value = 0,
+    Locked = false,
+    Grid = true,
+    Snap = true,
+    IgnoreFoW = false,
+    MeasureMovement = false,
+    DragSelectable = true,
+    Autoraise = true,
+    Sticky = true,
+    Tooltip = true,
+    GridProjection = false,
+    HideWhenFaceDown = true,
+    Hands = true,
+    CardID = 100,
+    SidewaysCard = false,
+    LuaScript = "",
+    LuaScriptState = "",
+    XmlUI = "",
+    CustomDeck = {}
 }
 
 local extractCaptureFaceUrlFromPayload
@@ -530,16 +569,46 @@ end
 local function parseCaptureNotes(notes)
     if notes == nil or notes == "" then return nil, nil end
     local header, nameLine, rest = tostring(notes):match("^([^\r\n]*)\r?\n([^\r\n]*)\r?\n?(.*)$")
-    if header ~= CAPTURE_NOTE_PREFIX then return nil, nil end
+    if header ~= CAPTURE_NOTE_PREFIX and header ~= CAPTURE_NOTE_PREFIX_LEGACY then return nil, nil end
     local urlLine = rest and rest:match("^([^\r\n]+)") or ""
     return trim(nameLine or ""), trim(urlLine or "")
 end
 
 local function getFirstCustomDeckInfo(customDeck)
     if type(customDeck) ~= "table" then return nil end
+    local slots = {}
+    for slotKey, deck in pairs(customDeck) do
+        if type(deck) == "table" then
+            local deckSlot = tonumber(slotKey)
+            if deckSlot and deckSlot >= 1 then
+                deckSlot = math.floor(deckSlot)
+                slots[#slots + 1] = { slot = deckSlot, deck = deck }
+            end
+        end
+    end
+
+    table.sort(slots, function(a, b) return a.slot < b.slot end)
+    if #slots > 0 then
+        local deckSlot = slots[1].slot
+        local deck = slots[1].deck
+        return {
+            deckSlot = deckSlot,
+            deckKey = tostring(deckSlot),
+            faceURL = tostring(deck.FaceURL or ""),
+            backURL = tostring(deck.BackURL or ""),
+            numWidth = tonumber(deck.NumWidth) or 1,
+            numHeight = tonumber(deck.NumHeight) or 1,
+            backIsHidden = (deck.BackIsHidden ~= false),
+            uniqueBack = (deck.UniqueBack == true),
+            deckType = tonumber(deck.Type) or 0,
+        }
+    end
+
     for _, deck in pairs(customDeck) do
         if type(deck) == "table" then
             return {
+                deckSlot = 1,
+                deckKey = "1",
                 faceURL = tostring(deck.FaceURL or ""),
                 backURL = tostring(deck.BackURL or ""),
                 numWidth = tonumber(deck.NumWidth) or 1,
@@ -553,10 +622,43 @@ local function getFirstCustomDeckInfo(customDeck)
     return nil
 end
 
+local function normalizeContainedObjectsList(contained)
+    local out = {}
+    if type(contained) ~= "table" then return out end
+    local seen = {}
+
+    for _, obj in ipairs(contained) do
+        if type(obj) == "table" then
+            out[#out + 1] = obj
+            seen[obj] = true
+        end
+    end
+
+    local keyed = {}
+    for key, obj in pairs(contained) do
+        if type(obj) == "table" then
+            local index = tonumber(key)
+            if index and index >= 1 then
+                keyed[#keyed + 1] = { index = index, obj = obj }
+            end
+        end
+    end
+    table.sort(keyed, function(a, b) return a.index < b.index end)
+
+    for _, entry in ipairs(keyed) do
+        if not seen[entry.obj] then
+            out[#out + 1] = entry.obj
+            seen[entry.obj] = true
+        end
+    end
+
+    return out
+end
+
 local function hasContainedCardPayload(data)
     if type(data) ~= "table" then return false end
-    local contained = data.ContainedObjects
-    if type(contained) ~= "table" or #contained == 0 then
+    local contained = normalizeContainedObjectsList(data.ContainedObjects)
+    if #contained == 0 then
         return false
     end
 
@@ -574,87 +676,86 @@ local function buildCapturePayloadFromSingleCardData(data)
     local deckInfo = getFirstCustomDeckInfo(data.CustomDeck)
     if not deckInfo or deckInfo.faceURL == "" then return nil end
 
-    local card = {
-        Name = "Card",
-        Nickname = tostring(data.Nickname or ""),
-        Description = tostring(data.Description or ""),
-        Memo = tostring(data.Memo or ""),
-        CardID = tonumber(data.CardID) or 100,
-        HideWhenFaceDown = (data.HideWhenFaceDown ~= false),
-        Hands = (data.Hands ~= false),
-        SidewaysCard = (data.SidewaysCard == true),
-        CustomDeck = {
-            [1] = {
-                FaceURL = deckInfo.faceURL,
-                BackURL = deckInfo.backURL,
-                NumWidth = deckInfo.numWidth or 1,
-                NumHeight = deckInfo.numHeight or 1,
-                BackIsHidden = (deckInfo.backIsHidden ~= false),
-                UniqueBack = (deckInfo.uniqueBack == true),
-                Type = deckInfo.deckType or 0,
-            }
+    local stateTwoCompact = nil
+    if type(data.States) == "table" then
+        local rawStateTwo = data.States[2] or data.States["2"]
+        if type(rawStateTwo) == "table" and type(rawStateTwo.CustomDeck) == "table" then
+            local stateDeckInfo = getFirstCustomDeckInfo(rawStateTwo.CustomDeck)
+            if stateDeckInfo and stateDeckInfo.faceURL ~= "" then
+                stateTwoCompact = {
+                    nickname = tostring(rawStateTwo.Nickname or ""),
+                    description = tostring(rawStateTwo.Description or ""),
+                    gmNotes = tostring(rawStateTwo.GMNotes or ""),
+                    memo = tostring(rawStateTwo.Memo or ""),
+                    cardID = tonumber(rawStateTwo.CardID) or ((stateDeckInfo.deckSlot or 2) * 100),
+                    hideWhenFaceDown = (rawStateTwo.HideWhenFaceDown ~= false),
+                    hands = (rawStateTwo.Hands ~= false),
+                    sideways = (rawStateTwo.SidewaysCard == true),
+                    faceURL = stateDeckInfo.faceURL,
+                    backURL = stateDeckInfo.backURL,
+                    numWidth = stateDeckInfo.numWidth or 1,
+                    numHeight = stateDeckInfo.numHeight or 1,
+                    backIsHidden = (stateDeckInfo.backIsHidden ~= false),
+                    uniqueBack = (stateDeckInfo.uniqueBack == true),
+                    deckType = stateDeckInfo.deckType or 0,
+                    deckSlot = stateDeckInfo.deckSlot or 2,
+                }
+            end
+        end
+    end
+
+    local compactPayload = {
+        _schema = "capture_payload_v2",
+        bagDiffuseURL = deckInfo.faceURL,
+        card = {
+            nickname = tostring(data.Nickname or ""),
+            description = tostring(data.Description or ""),
+            gmNotes = tostring(data.GMNotes or ""),
+            memo = tostring(data.Memo or ""),
+            cardID = tonumber(data.CardID) or ((deckInfo.deckSlot or 1) * 100),
+            hideWhenFaceDown = (data.HideWhenFaceDown ~= false),
+            hands = (data.Hands ~= false),
+            sideways = (data.SidewaysCard == true),
+            faceURL = deckInfo.faceURL,
+            backURL = deckInfo.backURL,
+            numWidth = deckInfo.numWidth or 1,
+            numHeight = deckInfo.numHeight or 1,
+            backIsHidden = (deckInfo.backIsHidden ~= false),
+            uniqueBack = (deckInfo.uniqueBack == true),
+            deckType = deckInfo.deckType or 0,
+            deckSlot = deckInfo.deckSlot or 1,
         }
     }
 
-    return {
-        _schema = "capture_payload_v1",
-        DiffuseURL = deckInfo.faceURL,
-        ContainedObjects = { card }
-    }
+    if stateTwoCompact then
+        compactPayload.card.stateTwo = stateTwoCompact
+    end
+
+    return compactPayload
 end
 
 local function sanitizeCaptureBagData(data)
     if type(data) ~= "table" then return nil end
 
-    -- Keep already-minimized payloads as-is.
-    if data._schema == "capture_payload_v1" then
+    -- Keep compact schema as-is.
+    if data._schema == "capture_payload_v2" then
         return data
     end
 
-    -- Build compact payload from full TTS object data to avoid heavy deep clones.
+    -- Build minimal schema payload from full TTS object data.
     if hasContainedCardPayload(data) then
-        local first = data.ContainedObjects[1]
+        local containedList = normalizeContainedObjectsList(data.ContainedObjects)
+        local first = containedList[1]
         if type(first) ~= "table" then return nil end
 
-        local deckInfo = getFirstCustomDeckInfo(first.CustomDeck)
-        local faceUrl = ""
-        local backUrl = ""
-        if deckInfo then
-            faceUrl = deckInfo.faceURL
-            backUrl = deckInfo.backURL
+        local compact = buildCapturePayloadFromSingleCardData(first)
+        if not compact then return nil end
+        if type(data.CustomMesh) == "table" and data.CustomMesh.DiffuseURL and data.CustomMesh.DiffuseURL ~= "" then
+            compact.bagDiffuseURL = tostring(data.CustomMesh.DiffuseURL)
+        elseif compact.bagDiffuseURL == "" and compact.card and compact.card.faceURL then
+            compact.bagDiffuseURL = tostring(compact.card.faceURL)
         end
-
-        if faceUrl == "" and type(data.CustomMesh) == "table" and data.CustomMesh.DiffuseURL then
-            faceUrl = tostring(data.CustomMesh.DiffuseURL)
-        end
-
-        return {
-            _compact = true,
-            bag = {
-                diffuseURL = (type(data.CustomMesh) == "table" and tostring(data.CustomMesh.DiffuseURL or "")) or ""
-            },
-            card = {
-                nickname = tostring(first.Nickname or ""),
-                description = tostring(first.Description or ""),
-                memo = tostring(first.Memo or ""),
-                cardID = tonumber(first.CardID) or 100,
-                hideWhenFaceDown = (first.HideWhenFaceDown ~= false),
-                hands = (first.Hands ~= false),
-                sideways = (first.SidewaysCard == true),
-                faceURL = faceUrl,
-                backURL = backUrl,
-                numWidth = deckInfo and deckInfo.numWidth or 1,
-                numHeight = deckInfo and deckInfo.numHeight or 1,
-                backIsHidden = deckInfo and deckInfo.backIsHidden or true,
-                uniqueBack = deckInfo and deckInfo.uniqueBack or false,
-                deckType = deckInfo and deckInfo.deckType or 0,
-            }
-        }
-    end
-
-    -- Backward compatibility: compact/legacy payloads are preserved and handled at spawn time.
-    if data._compact == true or hasContainedCardPayload(data) then
-        return data
+        return compact
     end
 
     local singleCardPayload = buildCapturePayloadFromSingleCardData(data)
@@ -668,6 +769,15 @@ end
 extractCaptureFaceUrlFromPayload = function(payload)
     if type(payload) ~= "table" then return "" end
 
+    if payload._schema == "capture_payload_v2" and type(payload.card) == "table" then
+        if payload.card.faceURL and payload.card.faceURL ~= "" then
+            return tostring(payload.card.faceURL)
+        end
+        if payload.bagDiffuseURL and payload.bagDiffuseURL ~= "" then
+            return tostring(payload.bagDiffuseURL)
+        end
+    end
+
     if payload.DiffuseURL and payload.DiffuseURL ~= "" then
         return tostring(payload.DiffuseURL)
     end
@@ -676,8 +786,8 @@ extractCaptureFaceUrlFromPayload = function(payload)
         return tostring(payload.CustomMesh.DiffuseURL)
     end
 
-    local contained = payload.ContainedObjects
-    if type(contained) == "table" and #contained > 0 then
+    local contained = normalizeContainedObjectsList(payload.ContainedObjects)
+    if #contained > 0 then
         local first = contained[1]
         if type(first) == "table" and type(first.CustomDeck) == "table" then
             for _, deck in pairs(first.CustomDeck) do
@@ -691,10 +801,6 @@ extractCaptureFaceUrlFromPayload = function(payload)
     if type(payload.card) == "table" and payload.card.faceURL and payload.card.faceURL ~= "" then
         return tostring(payload.card.faceURL)
     end
-    if type(payload.bag) == "table" and payload.bag.diffuseURL and payload.bag.diffuseURL ~= "" then
-        return tostring(payload.bag.diffuseURL)
-    end
-
     return ""
 end
 
@@ -703,17 +809,89 @@ buildCaptureBagSpawnData = function(captureItem)
 
     local payload = captureItem.bagData
 
-    -- Minimal payload: plug data into a fixed full template.
-    if payload._schema == "capture_payload_v1" then
-        local contained = payload.ContainedObjects
-        if type(contained) ~= "table" or #contained == 0 then return nil end
+    if payload._schema == "capture_payload_v2" and type(payload.card) == "table" then
+        local card = payload.card
+        local cardId = tonumber(card.cardID) or 100
+        if cardId < 100 then cardId = 100 end
+        local deckSlot = tonumber(card.deckSlot) or math.floor(cardId / 100)
+        if deckSlot < 1 then deckSlot = 1 end
+        local deckKey = tostring(deckSlot)
+
+        local faceUrl = tostring(card.faceURL or "")
+        if faceUrl == "" then
+            faceUrl = tostring(payload.bagDiffuseURL or captureItem.url or "")
+        end
+        local backUrl = tostring(card.backURL or "")
+        if backUrl == "" then backUrl = CAPTURE_DEFAULT_BACK_URL end
 
         local out = JSON.decode(JSON.encode(CAPTURE_BAG_TEMPLATE))
-        local faceUrl = payload.DiffuseURL or captureItem.url or extractCaptureFaceUrlFromPayload(payload)
         out.Nickname = buildCaptureTicketName(captureItem.name)
         out.GMNotes = buildCaptureNotes(captureItem.name, faceUrl or "")
-        out.CustomMesh.DiffuseURL = faceUrl or ""
-        out.ContainedObjects = JSON.decode(JSON.encode(contained))
+        out.CustomMesh.DiffuseURL = tostring(payload.bagDiffuseURL or faceUrl or "")
+
+        local outCard = JSON.decode(JSON.encode(CAPTURE_CARD_TEMPLATE))
+        outCard.Nickname = card.nickname or tostring(captureItem.name or "")
+        outCard.Description = card.description or ""
+        outCard.GMNotes = card.gmNotes or ""
+        outCard.Memo = card.memo or ""
+        outCard.CardID = cardId
+        outCard.HideWhenFaceDown = (card.hideWhenFaceDown ~= false)
+        outCard.Hands = (card.hands ~= false)
+        outCard.SidewaysCard = (card.sideways == true)
+        outCard.CustomDeck = {
+            [deckKey] = {
+                FaceURL = faceUrl,
+                BackURL = backUrl,
+                NumWidth = tonumber(card.numWidth) or 1,
+                NumHeight = tonumber(card.numHeight) or 1,
+                BackIsHidden = (card.backIsHidden ~= false),
+                UniqueBack = (card.uniqueBack == true),
+                Type = tonumber(card.deckType) or 0,
+            }
+        }
+
+        if type(card.stateTwo) == "table" then
+            local stateTwo = card.stateTwo
+            local stateCardId = tonumber(stateTwo.cardID) or 200
+            if stateCardId < 100 then stateCardId = 200 end
+
+            local stateDeckSlot = tonumber(stateTwo.deckSlot) or math.floor(stateCardId / 100)
+            if stateDeckSlot < 1 then stateDeckSlot = 2 end
+            local stateDeckKey = tostring(stateDeckSlot)
+
+            local stateFaceUrl = tostring(stateTwo.faceURL or "")
+            if stateFaceUrl ~= "" then
+                local stateBackUrl = tostring(stateTwo.backURL or "")
+                if stateBackUrl == "" then stateBackUrl = CAPTURE_DEFAULT_BACK_URL end
+
+                local outState = JSON.decode(JSON.encode(CAPTURE_CARD_TEMPLATE))
+                outState.Nickname = stateTwo.nickname or ""
+                outState.Description = stateTwo.description or ""
+                outState.GMNotes = stateTwo.gmNotes or ""
+                outState.Memo = stateTwo.memo or ""
+                outState.CardID = stateCardId
+                outState.HideWhenFaceDown = (stateTwo.hideWhenFaceDown ~= false)
+                outState.Hands = (stateTwo.hands ~= false)
+                outState.SidewaysCard = (stateTwo.sideways == true)
+                outState.CustomDeck = {
+                    [stateDeckKey] = {
+                        FaceURL = stateFaceUrl,
+                        BackURL = stateBackUrl,
+                        NumWidth = tonumber(stateTwo.numWidth) or 1,
+                        NumHeight = tonumber(stateTwo.numHeight) or 1,
+                        BackIsHidden = (stateTwo.backIsHidden ~= false),
+                        UniqueBack = (stateTwo.uniqueBack == true),
+                        Type = tonumber(stateTwo.deckType) or 0,
+                    }
+                }
+
+                outCard.States = {
+                    [2] = outState
+                }
+            end
+        end
+
+        out.ContainedObjects = { outCard }
         return out
     end
 
@@ -726,47 +904,6 @@ buildCaptureBagSpawnData = function(captureItem)
         if out.CustomMesh and (not out.CustomMesh.DiffuseURL or out.CustomMesh.DiffuseURL == "") then
             out.CustomMesh.DiffuseURL = faceUrl
         end
-        return out
-    end
-
-    -- Backward-compatible conversion for compact payload shape.
-    if payload._compact == true and type(payload.card) == "table" then
-        local faceUrl = extractCaptureFaceUrlFromPayload(payload)
-        local backUrl = payload.card.backURL or "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
-        local cardId = tonumber(payload.card.cardID) or 100
-        if cardId < 100 then cardId = 100 end
-        local deckSlot = math.floor(cardId / 100)
-        if deckSlot < 1 then deckSlot = 1 end
-
-        local contained = {
-            {
-                Name = "Card",
-                Nickname = payload.card.nickname or tostring(captureItem.name or ""),
-                Description = payload.card.description or "",
-                Memo = payload.card.memo or "",
-                CardID = cardId,
-                HideWhenFaceDown = (payload.card.hideWhenFaceDown ~= false),
-                Hands = (payload.card.hands ~= false),
-                SidewaysCard = (payload.card.sideways == true),
-                CustomDeck = {
-                    [deckSlot] = {
-                        FaceURL = faceUrl,
-                        BackURL = backUrl,
-                        NumWidth = payload.card.numWidth or 1,
-                        NumHeight = payload.card.numHeight or 1,
-                        BackIsHidden = (payload.card.backIsHidden ~= false),
-                        UniqueBack = (payload.card.uniqueBack == true),
-                        Type = payload.card.deckType or 0,
-                    }
-                }
-            }
-        }
-
-        local out = JSON.decode(JSON.encode(CAPTURE_BAG_TEMPLATE))
-        out.Nickname = buildCaptureTicketName(captureItem.name)
-        out.GMNotes = buildCaptureNotes(captureItem.name, faceUrl)
-        out.CustomMesh.DiffuseURL = faceUrl
-        out.ContainedObjects = contained
         return out
     end
 
@@ -1426,10 +1563,6 @@ function onPickUp(player_color)
         return
     end
 
-    -- Existing counters without the marker still need a key to sync; fetch if we just set one
-    if localPlayerKey and not isSyncEnabled then
-        fetchSavedValue()
-    end
 end
 
 function onNameChanged(new_name)

@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.918'
+mod_name, version = 'Card Importer', '1.919'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -993,8 +993,9 @@ Importer=setmetatable({
         end
 
         if #relatedUris == 0 then
-          tokenPathLog(qTbl, '/related returned 0 parts -> fallback')
-          onFallback()
+          tokenPathLog(qTbl, '/related returned 0 parts')
+          Player[qTbl.color].broadcast('No Tokens Found',{0.9,0.9,0.9})
+          endLoop()
           return
         end
 
@@ -1009,6 +1010,15 @@ Importer=setmetatable({
         return false
       end
 
+      local sourceLayout = tostring(sourceCard.layout or ''):lower()
+      local sourceTypeLine = tostring(sourceCard.type_line or ''):lower()
+      local sourceKind = 'other'
+      if sourceLayout == 'emblem' or sourceTypeLine:find('emblem', 1, true) ~= nil then
+        sourceKind = 'emblem'
+      elseif sourceLayout == 'token' or sourceLayout == 'double_faced_token' or sourceTypeLine:find('token', 1, true) ~= nil then
+        sourceKind = 'token'
+      end
+
       local cacheKeys = getTokenCacheKeys(sourceCard)
       local cachedUris = getCachedRelatedUris(cacheKeys)
       if cachedUris then
@@ -1018,12 +1028,26 @@ Importer=setmetatable({
 
       local relatedUris = {}
       local seen = {}
+      local sourceId = tostring(sourceCard.id or '')
+      local sourceName = tostring(sourceCard.name or ''):lower()
       if sourceCard.all_parts and type(sourceCard.all_parts) == 'table' then
         for _, part in ipairs(sourceCard.all_parts) do
           local component = tostring(part and part.component or ''):lower()
           local typeLine = tostring(part and part.type_line or ''):lower()
           local isTokenOrEmblemType = typeLine:find('token', 1, true) ~= nil or typeLine:find('emblem', 1, true) ~= nil
-          if part and part.uri and (component == 'token' or component == 'emblem' or isTokenOrEmblemType) and not seen[part.uri] then
+          local isTokenType = typeLine:find('token', 1, true) ~= nil
+          local partId = tostring(part and part.id or '')
+          local partName = tostring(part and part.name or ''):lower()
+          local isSelfPart = (sourceId ~= '' and partId ~= '' and sourceId == partId) or (sourceName ~= '' and partName ~= '' and sourceName == partName)
+
+          local includePart = false
+          if sourceKind == 'other' then
+            includePart = (component == 'token' or component == 'emblem' or isTokenOrEmblemType)
+          else
+            includePart = (component == 'token' or isTokenType)
+          end
+
+          if part and part.uri and not isSelfPart and includePart and not seen[part.uri] then
             seen[part.uri] = true
             table.insert(relatedUris, part.uri)
           end
