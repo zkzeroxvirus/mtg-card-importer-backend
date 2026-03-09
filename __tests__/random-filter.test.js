@@ -27,7 +27,7 @@ describe('Non-Playable Card Filtering', () => {
       expect(filter).toContain('-o:"ante"');
       expect(filter).toContain('-layout:token');
       expect(filter).toContain('-layout:emblem');
-      expect(filter).toContain('-set_type:funny');
+      expect(filter).not.toContain('-set_type:funny');
     });
 
     test('should place is:unique at the beginning of filter query', () => {
@@ -149,7 +149,7 @@ describe('Non-Playable Card Filtering', () => {
       expect(scryfall.isNonPlayableCard(oversizedCard)).toBe(true);
     });
 
-    test('should identify funny set type cards as non-playable', () => {
+    test('should identify funny set type cards without commander legality as non-playable', () => {
       const funnyCard = {
         name: 'Unstable Card',
         set: 'ust',
@@ -160,6 +160,22 @@ describe('Non-Playable Card Filtering', () => {
       };
       
       expect(scryfall.isNonPlayableCard(funnyCard)).toBe(true);
+    });
+
+    test('should allow funny set type cards that are commander legal', () => {
+      const commanderLegalFunnyCard = {
+        name: 'Embiggen',
+        set: 'und',
+        games: ['paper'],
+        layout: 'normal',
+        type_line: 'Sorcery',
+        set_type: 'funny',
+        legalities: {
+          commander: 'legal'
+        }
+      };
+
+      expect(scryfall.isNonPlayableCard(commanderLegalFunnyCard)).toBe(false);
     });
 
     test('should identify ante cards as non-playable', () => {

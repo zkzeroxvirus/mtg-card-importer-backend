@@ -157,4 +157,88 @@ describe('Bulk Data - Commander Filter', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test('should keep commander-legal funny cards in random commander pool', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-funny-commander-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const cards = [
+      {
+        id: 'legal-funny',
+        oracle_id: 'oracle-legal-funny',
+        name: 'Legal Funny Card',
+        type_line: 'Creature — Clown',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'und',
+        set_type: 'funny',
+        lang: 'en',
+        legalities: {
+          commander: 'legal'
+        }
+      },
+      {
+        id: 'acorn-funny',
+        oracle_id: 'oracle-acorn-funny',
+        name: 'Acorn Funny Card',
+        type_line: 'Creature — Clown',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'unf',
+        set_type: 'funny',
+        security_stamp: 'acorn',
+        lang: 'en',
+        legalities: {
+          commander: 'legal'
+        }
+      },
+      {
+        id: 'not-legal-funny',
+        oracle_id: 'oracle-not-legal-funny',
+        name: 'Not Legal Funny Card',
+        type_line: 'Creature — Clown',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'ust',
+        set_type: 'funny',
+        lang: 'en',
+        legalities: {
+          commander: 'not_legal'
+        }
+      }
+    ];
+
+    fs.writeFileSync(cardFile, zlib.gzipSync(JSON.stringify(cards)));
+
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      jest.resetModules();
+      let bulkData;
+      jest.isolateModules(() => {
+        bulkData = require('../lib/bulk-data');
+      });
+
+      await bulkData.loadBulkData();
+
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+      const card = await bulkData.getRandomCard('t:creature f:commander');
+      randomSpy.mockRestore();
+
+      expect(card).toBeTruthy();
+      expect(card.id).toBe('legal-funny');
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

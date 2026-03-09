@@ -413,11 +413,13 @@ function shouldRateLimitRandomRequest(req) {
     ? ensureCommanderLegalityQuery(languageEnforcedQuery)
     : normalizeCommanderFormatAliases(languageEnforcedQuery);
 
-  const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
+  const priceFilterPresent = hasPriceFilter(randomQuery);
+  const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
   const forceApi = parseBooleanLike(String(forceApiInput)) === true;
   const executionPlan = buildRandomExecutionPlan({
     useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
-    hasPriceFilter,
+    hasPriceFilter: priceFilterPresent,
+    hasApiOnlyFilter: apiOnlyFilterPresent,
     forceApi
   });
   return executionPlan.primary === 'api';
@@ -811,6 +813,16 @@ function normalizeRarityValue(rawValue) {
 
 const DEFAULT_QUERY_LANG = String(process.env.DEFAULT_QUERY_LANG || 'en').toLowerCase();
 const LANG_FILTER_REGEX = /(?:^|[\s+(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
+const PRICE_FILTER_REGEX = /\b(usd|eur|tix)[:=<>]/i;
+const API_ONLY_FILTER_REGEX = /\b(?:otag)[:=]/i;
+
+function hasPriceFilter(query) {
+  return PRICE_FILTER_REGEX.test(String(query || ''));
+}
+
+function hasApiOnlyFilter(query) {
+  return API_ONLY_FILTER_REGEX.test(String(query || ''));
+}
 
 function enforceDefaultQueryLanguage(query, defaultLang = DEFAULT_QUERY_LANG) {
   const normalizedQuery = String(query || '').trim();
@@ -867,6 +879,7 @@ function normalizeQueryOperators(rawQuery) {
 function buildRandomExecutionPlan({
   useBulkLoaded,
   hasPriceFilter,
+  hasApiOnlyFilter,
   forceApi
 }) {
   if (forceApi) {
@@ -874,6 +887,9 @@ function buildRandomExecutionPlan({
   }
   if (hasPriceFilter) {
     return { primary: 'api', reason: 'price_filter' };
+  }
+  if (hasApiOnlyFilter) {
+    return { primary: 'api', reason: 'api_only_filter' };
   }
   if (useBulkLoaded) {
     return { primary: 'bulk', reason: 'bulk_loaded' };
@@ -1548,11 +1564,13 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       }
     }
 
-    const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
+    const priceFilterPresent = hasPriceFilter(randomQuery);
+    const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
     const forceApi = parseBooleanLike(String(payload.forceApi)) === true;
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
-      hasPriceFilter,
+      hasPriceFilter: priceFilterPresent,
+      hasApiOnlyFilter: apiOnlyFilterPresent,
       forceApi
     });
     setQueryPlanHeader(res, executionPlan);
@@ -1667,7 +1685,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     } else {
       const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
       if (count > 1 && hasRandomQuery) {
-        if (hasPriceFilter) {
+        if (priceFilterPresent || apiOnlyFilterPresent) {
           let apiAttempts = 0;
           const maxApiAttempts = count;
           while (randomCards.length < count && apiAttempts < maxApiAttempts) {
@@ -1858,10 +1876,12 @@ app.get('/random', randomLimiter, async (req, res) => {
       }
     }
 
-    const hasPriceFilter = randomQuery && /\b(usd|eur|tix)[:=<>]/i.test(randomQuery);
+    const priceFilterPresent = hasPriceFilter(randomQuery);
+    const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
-      hasPriceFilter,
+      hasPriceFilter: priceFilterPresent,
+      hasApiOnlyFilter: apiOnlyFilterPresent,
       forceApi
     });
     setQueryPlanHeader(res, executionPlan);
@@ -1983,7 +2003,7 @@ app.get('/random', randomLimiter, async (req, res) => {
       } else {
         const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
         if (numCards > 1 && hasRandomQuery) {
-          if (hasPriceFilter) {
+          if (priceFilterPresent || apiOnlyFilterPresent) {
             let apiAttempts = 0;
             const maxApiAttempts = numCards;
 
@@ -2144,11 +2164,14 @@ app.get('/search', async (req, res) => {
     
     let scryfallCards = null;
     
-    const hasPriceFilter = /\b(usd|eur|tix)[:=<>]/i.test(searchQuery);
+    const priceFilterPresent = hasPriceFilter(searchQuery);
+    const apiOnlyFilterPresent = hasApiOnlyFilter(searchQuery);
     const canUseBulkSearch = USE_BULK_DATA && bulkData.isLoaded();
-    const searchPlan = hasPriceFilter
+    const searchPlan = priceFilterPresent
       ? { primary: 'api', reason: 'price_filter' }
-      : (canUseBulkSearch ? { primary: 'bulk', reason: 'bulk_loaded' } : { primary: 'api', reason: 'bulk_unavailable' });
+      : (apiOnlyFilterPresent
+        ? { primary: 'api', reason: 'api_only_filter' }
+        : (canUseBulkSearch ? { primary: 'bulk', reason: 'bulk_loaded' } : { primary: 'api', reason: 'bulk_unavailable' }));
     setQueryPlanHeader(res, searchPlan);
     if (explainRequested && searchPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(searchQuery, 'search'));

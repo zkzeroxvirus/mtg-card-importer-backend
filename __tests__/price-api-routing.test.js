@@ -128,6 +128,16 @@ describe('Price Filter API Routing', () => {
       expect(bulkData.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.searchCards).toHaveBeenCalled();
     });
+
+    test('should use API for otag filters', async () => {
+      const response = await request(app)
+        .get('/search?q=otag:draw')
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
+      expect(bulkData.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.searchCards).toHaveBeenCalledWith('otag:draw', expect.any(Number), 'cards');
+    });
   });
 
   describe('GET /random with price filters', () => {
@@ -192,6 +202,16 @@ describe('Price Filter API Routing', () => {
 
       expect(bulkData.getRandomCard).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+    });
+
+    test('should use API for random queries with otag filter', async () => {
+      const response = await request(app)
+        .get('/random?count=3&q=otag:draw')
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
+      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander', true);
     });
 
   });
@@ -296,6 +316,38 @@ describe('Price Filter API Routing', () => {
       expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:vanguard lang:en', 2, true, false);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+    });
+
+    test('should use API for random/build queries with otag filter', async () => {
+      scryfallLib.getRandomCard.mockResolvedValue({
+        id: 'otag-card',
+        oracle_id: 'oracle-otag-card',
+        name: 'Otag Card',
+        type_line: 'Creature',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      });
+      scryfallLib.convertToTTSCard = jest.fn((card) => ({
+        Name: 'Card',
+        Nickname: card.name,
+        Memo: card.oracle_id,
+        CustomDeck: {
+          '1': {
+            FaceURL: card.image_uris.normal,
+            BackURL: 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+          }
+        }
+      }));
+
+      const response = await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 'otag:draw', count: 2, enforceCommander: true })
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
+      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander', true);
     });
   });
 
