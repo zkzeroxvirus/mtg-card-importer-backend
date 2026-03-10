@@ -155,6 +155,12 @@ function shouldBypassCommanderForTypeQuery(rawQuery) {
     return false;
   }
 
+  // Some random-only filters (like otag) are not commander-legality aware.
+  // Appending f:commander silently excludes many valid matches.
+  if (/(?:^|[\s+(])-?otag[:=]/i.test(query)) {
+    return true;
+  }
+
   return /\b(?:t|type):\s*"?(?:token|emblem|vanguard|conspiracy)\b/i.test(query);
 }
 
@@ -1687,7 +1693,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       if (count > 1 && hasRandomQuery) {
         if (priceFilterPresent || apiOnlyFilterPresent) {
           let apiAttempts = 0;
-          const maxApiAttempts = count;
+          const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
           while (randomCards.length < count && apiAttempts < maxApiAttempts) {
             apiAttempts++;
             const card = await scryfallLib.getRandomCard(randomQuery, true);
@@ -2005,7 +2011,7 @@ app.get('/random', randomLimiter, async (req, res) => {
         if (numCards > 1 && hasRandomQuery) {
           if (priceFilterPresent || apiOnlyFilterPresent) {
             let apiAttempts = 0;
-            const maxApiAttempts = numCards;
+            const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
 
             while (cards.length < numCards && apiAttempts < maxApiAttempts) {
               apiAttempts++;

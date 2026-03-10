@@ -313,6 +313,63 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:emblem lang:en');
   });
 
+  test('GET /random should bypass commander legality for otag queries when enforceCommander=true', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const randomResponse = await request(app)
+      .get('/random')
+      .query({ q: 'otag:draw', count: 1, enforceCommander: 'true' });
+
+    expect(randomResponse.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
+  });
+
+  test('GET /random should keep retrying otag random until count is satisfied when duplicates are returned', async () => {
+    scryfallLib.getRandomCard.mockClear();
+    scryfallLib.getRandomCard
+      .mockResolvedValueOnce({
+        id: 'id-otag-a-1',
+        oracle_id: 'oracle-otag-a',
+        name: 'Otag A',
+        type_line: 'Sorcery',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      })
+      .mockResolvedValueOnce({
+        id: 'id-otag-a-2',
+        oracle_id: 'oracle-otag-a',
+        name: 'Otag A (dupe)',
+        type_line: 'Sorcery',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      })
+      .mockResolvedValueOnce({
+        id: 'id-otag-b',
+        oracle_id: 'oracle-otag-b',
+        name: 'Otag B',
+        type_line: 'Instant',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      })
+      .mockResolvedValueOnce({
+        id: 'id-otag-c',
+        oracle_id: 'oracle-otag-c',
+        name: 'Otag C',
+        type_line: 'Enchantment',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      });
+
+    const response = await request(app)
+      .get('/random')
+      .query({ q: 'otag:draw', count: 3 })
+      .expect(200);
+
+    expect(response.body.total_cards).toBe(3);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledTimes(4);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
+  });
+
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
     scryfallLib.searchCards.mockResolvedValueOnce([
       {
@@ -623,6 +680,74 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.status).toBe(200);
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:vanguard lang:en');
+  });
+
+  test('POST /random/build should bypass commander legality for otag queries when enforceCommander is true', async () => {
+    scryfallLib.getRandomCard.mockResolvedValueOnce({
+      id: 'id-otag-slot',
+      oracle_id: 'oracle-otag-slot',
+      name: 'Otag Slot',
+      type_line: 'Sorcery',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 'otag:draw', count: 1, enforceCommander: true });
+
+    expect(response.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
+  });
+
+  test('POST /random/build should keep retrying otag random until count is satisfied when duplicates are returned', async () => {
+    scryfallLib.getRandomCard.mockClear();
+    scryfallLib.getRandomCard
+      .mockResolvedValueOnce({
+        id: 'id-build-otag-a-1',
+        oracle_id: 'oracle-build-otag-a',
+        name: 'Build Otag A',
+        type_line: 'Sorcery',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      })
+      .mockResolvedValueOnce({
+        id: 'id-build-otag-a-2',
+        oracle_id: 'oracle-build-otag-a',
+        name: 'Build Otag A (dupe)',
+        type_line: 'Sorcery',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      })
+      .mockResolvedValueOnce({
+        id: 'id-build-otag-b',
+        oracle_id: 'oracle-build-otag-b',
+        name: 'Build Otag B',
+        type_line: 'Instant',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      })
+      .mockResolvedValueOnce({
+        id: 'id-build-otag-c',
+        oracle_id: 'oracle-build-otag-c',
+        name: 'Build Otag C',
+        type_line: 'Enchantment',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      });
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 'otag:draw', count: 3, enforceCommander: true })
+      .expect(200);
+
+    expect(response.text).toContain('Build Otag A');
+    expect(response.text).toContain('Build Otag B');
+    expect(response.text).toContain('Build Otag C');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledTimes(4);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
   });
 
   test('POST /random/build should normalize c=c query to id=c', async () => {

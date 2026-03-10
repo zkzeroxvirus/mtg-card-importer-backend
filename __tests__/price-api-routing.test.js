@@ -211,7 +211,7 @@ describe('Price Filter API Routing', () => {
 
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander', true);
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
     });
 
   });
@@ -347,7 +347,7 @@ describe('Price Filter API Routing', () => {
 
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander', true);
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
     });
   });
 
