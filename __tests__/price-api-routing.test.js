@@ -214,6 +214,16 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
     });
 
+    test('should force API for set:lea random queries', async () => {
+      const response = await request(app)
+        .get('/random?count=3&q=set:lea')
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:forced_api_set');
+      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
+      expect(scryfallLib.searchCards).toHaveBeenCalledWith('set:lea lang:en f:commander', 3, 'prints', 'random');
+    });
+
   });
 
   describe('POST /random/build with price filters', () => {
@@ -348,6 +358,48 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
+    });
+
+    test('should force API for set:lea random/build queries', async () => {
+      scryfallLib.searchCards.mockResolvedValueOnce([
+        {
+          id: 'lea-api-1',
+          oracle_id: 'lea-oracle-1',
+          name: 'LEA API Card 1',
+          type_line: 'Creature',
+          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+          games: ['paper']
+        },
+        {
+          id: 'lea-api-2',
+          oracle_id: 'lea-oracle-2',
+          name: 'LEA API Card 2',
+          type_line: 'Creature',
+          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+          games: ['paper']
+        }
+      ]);
+      scryfallLib.convertToTTSCard = jest.fn((card) => ({
+        Name: 'Card',
+        Nickname: card.name,
+        Memo: card.oracle_id,
+        CustomDeck: {
+          '1': {
+            FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+            BackURL: 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+          }
+        }
+      }));
+
+      const response = await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 'set:lea', count: 2, enforceCommander: true })
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:forced_api_set');
+      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
+      expect(scryfallLib.searchCards).toHaveBeenCalledWith('set:lea lang:en f:commander', 2, 'prints', 'random');
     });
   });
 

@@ -45,6 +45,7 @@ const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
 const RANDOM_SEARCH_UNIQUE = 'prints';
 const RANDOM_SEARCH_ORDER = 'random';
+const FORCED_API_RANDOM_SET_CODES = new Set(['lea']);
 
 function parseBooleanLike(value) {
   if (typeof value === 'boolean') {
@@ -93,6 +94,28 @@ function extractTrailingCount(rawQuery) {
 
   const trimmedQuery = query.slice(0, match.index).trim();
   return { query: trimmedQuery, count };
+}
+
+function hasForcedApiSetFilter(query) {
+  const normalizedQuery = String(query || '');
+  if (!normalizedQuery) {
+    return false;
+  }
+
+  const setFilterRegex = /(?:^|[\s+(])(-?)(?:s|set):([a-z0-9]+)\b/ig;
+  for (const match of normalizedQuery.matchAll(setFilterRegex)) {
+    const isNegated = match[1] === '-';
+    if (isNegated) {
+      continue;
+    }
+
+    const setCode = String(match[2] || '').toLowerCase();
+    if (FORCED_API_RANDOM_SET_CODES.has(setCode)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function hasStructuredFilters(query) {
@@ -421,11 +444,13 @@ function shouldRateLimitRandomRequest(req) {
 
   const priceFilterPresent = hasPriceFilter(randomQuery);
   const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
+  const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
   const forceApi = parseBooleanLike(String(forceApiInput)) === true;
   const executionPlan = buildRandomExecutionPlan({
     useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
     hasPriceFilter: priceFilterPresent,
     hasApiOnlyFilter: apiOnlyFilterPresent,
+    hasForcedApiSet: forcedApiSetPresent,
     forceApi
   });
   return executionPlan.primary === 'api';
@@ -886,10 +911,14 @@ function buildRandomExecutionPlan({
   useBulkLoaded,
   hasPriceFilter,
   hasApiOnlyFilter,
+  hasForcedApiSet,
   forceApi
 }) {
   if (forceApi) {
     return { primary: 'api', reason: 'forced_api' };
+  }
+  if (hasForcedApiSet) {
+    return { primary: 'api', reason: 'forced_api_set' };
   }
   if (hasPriceFilter) {
     return { primary: 'api', reason: 'price_filter' };
@@ -1572,11 +1601,13 @@ app.post('/random/build', randomLimiter, async (req, res) => {
 
     const priceFilterPresent = hasPriceFilter(randomQuery);
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
+    const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
     const forceApi = parseBooleanLike(String(payload.forceApi)) === true;
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
       hasPriceFilter: priceFilterPresent,
       hasApiOnlyFilter: apiOnlyFilterPresent,
+      hasForcedApiSet: forcedApiSetPresent,
       forceApi
     });
     setQueryPlanHeader(res, executionPlan);
@@ -1884,10 +1915,12 @@ app.get('/random', randomLimiter, async (req, res) => {
 
     const priceFilterPresent = hasPriceFilter(randomQuery);
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
+    const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
       hasPriceFilter: priceFilterPresent,
       hasApiOnlyFilter: apiOnlyFilterPresent,
+      hasForcedApiSet: forcedApiSetPresent,
       forceApi
     });
     setQueryPlanHeader(res, executionPlan);
