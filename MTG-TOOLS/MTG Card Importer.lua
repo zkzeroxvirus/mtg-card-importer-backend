@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.919'
+mod_name, version = 'Card Importer', '1.920'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -738,6 +738,28 @@ local function fallbackRandomListRequest(url, qTbl, count)
   end)
 end
 
+local function dispatchRandomRequest(url, qTbl, count, queryRaw)
+  if count then
+    qTbl.deck = count
+
+    if count > 1 then
+      local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
+        fallbackRandomListRequest(url, qTbl, count)
+      end)
+      if startedFast then
+        return
+      end
+
+      fallbackRandomListRequest(url, qTbl, count)
+      return
+    end
+  end
+
+  WebRequest.get(url, function(wr)
+    setCard(wr, qTbl)
+  end)
+end
+
 --[[Importer Data Structure]]
 Importer=setmetatable({
   --Variables
@@ -1312,17 +1334,7 @@ Importer=setmetatable({
       url = applyCommanderEnforcementToUrl(url)
 
       uLog(url,qTbl.color..' Importer '..qTbl.full)
-      if count then
-        qTbl.deck=count
-        local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
-          fallbackRandomListRequest(url, qTbl, count)
-        end)
-        if startedFast then
-          return
-        end
-      else
-        WebRequest.get(url,function(wr)setCard(wr,qTbl)end)
-      end
+      dispatchRandomRequest(url, qTbl, count, queryRaw)
       return
     end
 
@@ -1342,17 +1354,10 @@ Importer=setmetatable({
     url = applyCommanderEnforcementToUrl(url)
 
     uLog(url,qTbl.color..' Importer '..qTbl.full)
-    if count then
-      qTbl.deck=count
-      local encodedQuery = url:match('%?q=(.+)$') or ''
-      local queryRaw = urlDecode(encodedQuery)
-      local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
-        fallbackRandomListRequest(url, qTbl, count)
-      end)
-      if startedFast then
-        return
-      end
-    else WebRequest.get(url,function(wr)setCard(wr,qTbl)end)end end,
+    local encodedQuery = url:match('[?&]q=([^&]+)') or ''
+    local queryRaw = urlDecode(encodedQuery)
+    dispatchRandomRequest(url, qTbl, count, queryRaw)
+  end,
 
   Quality=function(qTbl)
     if('small normal large art_crop border_crop'):find(qTbl.name) then
