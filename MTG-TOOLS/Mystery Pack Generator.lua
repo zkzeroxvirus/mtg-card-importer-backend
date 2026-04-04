@@ -41,12 +41,12 @@ function rarity(m,r,u)
   elseif math.random(1,r or 8)==1 then return'r:rare'
   elseif math.random(1,u or 4)==1 then return'r:uncommon'
   else return'r:common'end end
-function typeCo(p,t)local n=math.random(#p-1,#p)for i=13,#p do if n==i then p[i]=p[i]..'+'..t else p[i]=p[i]..'+-('..t..')'end end return p end
+function typeCo(p,t)local n=math.random(#p-1,#p)for i=13,#p do if n==i then p[i]=p[i]..'+'..t else p[i]=p[i]..'+-'..t end end return p end
 
 local Booster=setmetatable({
   dom=function(p)return typeCo(p,'t:legendary')end,
   war=function(p)return typeCo(p,'t:planeswalker')end,
-  znr=function(p)return typeCo(p,'t:land+(is:spell+or+pathway)')end,
+  znr=function(p)return typeCo(p,'t:pathway')end,
   tsp='tsb',mb1='fmb1',mh2='h1r',bfz='exp',ogw='exp',kld='mps',aer='mps',akh='mp2',hou='mp2',stx='sta'
 },{__call=function(t,set,n)
   local pack,u={},apiSet(set)
@@ -71,8 +71,9 @@ function rSlot(p,s,a,b)for i,v in pairs(p)do if i~=6 then p[i]=v..a else p[i]=ba
 --Weird Boosters
 Booster['mystery']=function()
   urlTable={}
-  -- MYSTERY BOOSTER (set mb1)
-  urlPrefix=backendURL..'/random?q=set:mb1+'
+  -- MYSTERY BOOSTER
+  -- Keep slots broad for bulk compatibility; only the playtest slot is set-locked.
+  urlPrefix=backendURL..'/random?q='
   -- slot 1-10: each Convention pack has 2 commons/uncommons of each color
   for _,c in pairs({'w','u','b','r','g'}) do
     table.insert(urlTable,urlPrefix..'r<rare+c='..c)
@@ -86,7 +87,7 @@ Booster['mystery']=function()
   table.insert(urlTable,urlPrefix..'r>=rare+frame:2015')
   -- slot 14: one pre-M15 card in its original frame
   table.insert(urlTable,urlPrefix..'r>=rare+-frame:2015')
-  -- slot 15: a pretend "playtest card" in the special slot that seems more like part of an Un-set
+  -- slot 15: playtest card slot (CMB1), force API for this specific query path
   table.insert(urlTable,backendURL..'/random?q=set:cmb1')
   return urlTable
 end
@@ -127,9 +128,10 @@ Booster.standard=function(qTbl)
   table.insert(pack,u..rarity(8,1))
   table.insert(pack,u..'t:basic')
   table.insert(pack,backendURL..'/random?q=(set:tafr+or+set:tstx+or+set:tkhm+or+set:tznr+or+set:sznr+or+set:tm21+or+set:tiko+or+set:tthb+or+set:teld)')
+  local specials={'frameeffect:showcase','frameeffect:extendedart','border:borderless','s:plist','s:sta+r>common'}
   for i=#pack-1,#pack do
     if math.random(1,2)==1 then
-      pack[i]=u..'(border:borderless+or+frame:showcase+or+frame:extendedart+or+set:plist+or+set:sta)'
+      pack[i]=u..specials[math.random(#specials)]
     end end
   return pack end
 Booster.conspiracy=function(qTbl)--wubrgCCCCCTUUURT
@@ -416,36 +418,64 @@ function getDeckDat(urlTable,boosterN)
 
     local randomQuery = extractQueryFromRandomUrl(url)
     if randomQuery then
-      local payload = {
-        q = randomQuery,
-        count = 1,
-        enforceCommander = false,
-        forceApi = true,
-        back = backURL
-      }
+      local triedApiFallback = false
 
-      postBuildNDJSON(payload, function(wr)
-        if not wr.is_done then
-          return
-        end
+      local function requestSlotCard(forceApiFlag)
+        local payload = {
+          q = randomQuery,
+          count = 1,
+          enforceCommander = false,
+          forceApi = forceApiFlag,
+          back = backURL
+        }
 
-        if wr.is_error or (wr.response_code and wr.response_code >= 400) then
-          assignCardDat(nil)
-          return
-        end
+        postBuildNDJSON(payload, function(wr)
+          if not wr.is_done then
+            return
+          end
 
-        if not wr.text or wr.text == '' then
-          assignCardDat(nil)
-          return
-        end
+          local shouldRetryWithApi = (not forceApiFlag) and (not triedApiFallback)
+          local hasError = wr.is_error or (wr.response_code and wr.response_code >= 400)
 
-        local cardDat = cardDatFromBuildResponse(wr.text, n)
-        if cardDat then
-          assignCardDat(cardDat)
-        else
-          assignCardDat(nil)
-        end
+          if hasError then
+            if shouldRetryWithApi then
+              triedApiFallback = true
+              requestSlotCard(true)
+              return
+            end
+            assignCardDat(nil)
+            return
+          end
+
+          if not wr.text or wr.text == '' then
+            if shouldRetryWithApi then
+              triedApiFallback = true
+              requestSlotCard(true)
+              return
+            end
+            assignCardDat(nil)
+            return
+          end
+
+          local cardDat = cardDatFromBuildResponse(wr.text, n)
+          if cardDat then
+            assignCardDat(cardDat)
+            return
+          end
+
+          if shouldRetryWithApi then
+            triedApiFallback = true
+            requestSlotCard(true)
+          else
+            assignCardDat(nil)
+          end
         end)
+      end
+
+      local forceApiByDefault = randomQuery:find('set:cmb1', 1, true) ~= nil
+        or randomQuery:find('s:cmb1', 1, true) ~= nil
+
+      requestSlotCard(forceApiByDefault)
     else
       assignCardDat(nil)
     end
