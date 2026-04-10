@@ -538,11 +538,19 @@ function normalizeError(error, defaultStatus = 502) {
     }
   }
 
-  const details =
+  let details =
     error?.response?.data?.details ||
     error?.response?.data?.error ||
     error?.message ||
     'Request failed';
+
+  // Provide user-friendly messages for known upstream (Scryfall) failure modes.
+  // After withRetry exhausts its attempts, these codes bubble up here.
+  if (status === 503) {
+    details = 'Scryfall is temporarily unavailable. Please try again in a moment.';
+  } else if (status === 429) {
+    details = 'Scryfall rate limit reached. Please wait a moment before retrying.';
+  }
 
   return { status, details };
 }
@@ -1336,18 +1344,23 @@ app.get('/card/:name', async (req, res) => {
       }
     }
 
-    if (!scryfallCard || bulkSingleTokenCandidate) {
-      const tokenMatches = await scryfallLib.searchCards(tokenLookupQuery, 25, 'cards');
-      if (tokenMatches.length > 1) {
-        return res.json({
-          object: 'list',
-          total_cards: tokenMatches.length,
-          has_more: false,
-          data: useSpawnCompact ? sanitizeCardsForSpawn(tokenMatches) : sanitizeCardsForResponse(tokenMatches)
-        });
-      }
-      if (!scryfallCard && tokenMatches.length === 1) {
-        scryfallCard = tokenMatches[0];
+    // API token search: skipped when bulk data is loaded - bulk data already covers tokens,
+    // and making this call for every request in bulk mode generates unnecessary Scryfall API
+    // load that can trigger rate limiting and 503 responses under high concurrency.
+    if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+      if (!scryfallCard || bulkSingleTokenCandidate) {
+        const tokenMatches = await scryfallLib.searchCards(tokenLookupQuery, 25, 'cards');
+        if (tokenMatches.length > 1) {
+          return res.json({
+            object: 'list',
+            total_cards: tokenMatches.length,
+            has_more: false,
+            data: useSpawnCompact ? sanitizeCardsForSpawn(tokenMatches) : sanitizeCardsForResponse(tokenMatches)
+          });
+        }
+        if (!scryfallCard && tokenMatches.length === 1) {
+          scryfallCard = tokenMatches[0];
+        }
       }
     }
     
