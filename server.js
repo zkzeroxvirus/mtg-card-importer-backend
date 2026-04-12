@@ -43,7 +43,9 @@ const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
 // A 1.5x multiplier balances between API efficiency and getting enough unique cards
 const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
+const API_ONLY_RANDOM_SEARCH_THRESHOLD = 10; // Use one search call for larger API-only random batches
 const RANDOM_SEARCH_UNIQUE = 'prints';
+const RANDOM_SEARCH_UNIQUE_CARDS = 'cards';
 const RANDOM_SEARCH_ORDER = 'random';
 const FORCED_API_RANDOM_SET_CODES = new Set(['lea']);
 
@@ -1735,7 +1737,16 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     } else {
       const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
       if (count > 1 && hasRandomQuery) {
-        if (priceFilterPresent || apiOnlyFilterPresent) {
+        const useApiOnlySearchBatch = apiOnlyFilterPresent
+          && !priceFilterPresent
+          && count >= API_ONLY_RANDOM_SEARCH_THRESHOLD;
+
+        if (useApiOnlySearchBatch) {
+          const cards = await scryfallLib.searchCards(randomQuery, count, RANDOM_SEARCH_UNIQUE_CARDS, RANDOM_SEARCH_ORDER);
+          for (const card of cards) {
+            addRandomCard(card);
+          }
+        } else if (priceFilterPresent || apiOnlyFilterPresent) {
           let apiAttempts = 0;
           const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
           while (randomCards.length < count && apiAttempts < maxApiAttempts) {
@@ -2055,7 +2066,16 @@ app.get('/random', randomLimiter, async (req, res) => {
       } else {
         const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
         if (numCards > 1 && hasRandomQuery) {
-          if (priceFilterPresent || apiOnlyFilterPresent) {
+          const useApiOnlySearchBatch = apiOnlyFilterPresent
+            && !priceFilterPresent
+            && numCards >= API_ONLY_RANDOM_SEARCH_THRESHOLD;
+
+          if (useApiOnlySearchBatch) {
+            const randomCards = await scryfallLib.searchCards(randomQuery, numCards, RANDOM_SEARCH_UNIQUE_CARDS, RANDOM_SEARCH_ORDER);
+            for (const card of randomCards) {
+              addCard(card);
+            }
+          } else if (priceFilterPresent || apiOnlyFilterPresent) {
             let apiAttempts = 0;
             const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
 

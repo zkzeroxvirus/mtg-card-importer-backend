@@ -370,6 +370,25 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
   });
 
+  test('GET /random should batch large otag queries through search to avoid timeout-prone retries', async () => {
+    scryfallLib.getRandomCard.mockClear();
+    scryfallLib.searchCards.mockClear();
+
+    const response = await request(app)
+      .get('/random')
+      .query({ q: 'id:r+otag:strive 15', enforceCommander: 'true' })
+      .expect(200);
+
+    expect(response.body.total_cards).toBe(15);
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith(
+      'id:r+otag:strive lang:en',
+      15,
+      'cards',
+      'random'
+    );
+    expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+  });
+
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
     scryfallLib.searchCards.mockResolvedValueOnce([
       {
@@ -748,6 +767,26 @@ describe('Server Endpoints - Random Card', () => {
     expect(response.text).toContain('Build Otag C');
     expect(scryfallLib.getRandomCard).toHaveBeenCalledTimes(4);
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
+  });
+
+  test('POST /random/build should batch large otag queries through search to avoid timeout-prone retries', async () => {
+    scryfallLib.getRandomCard.mockClear();
+    scryfallLib.searchCards.mockClear();
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 'id:r+otag:strive 15', enforceCommander: true })
+      .expect(200);
+
+    expect(response.text).toContain('DeckCustom');
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith(
+      'id:r+otag:strive lang:en',
+      15,
+      'cards',
+      'random'
+    );
+    expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
   });
 
   test('POST /random/build should normalize c=c query to id=c', async () => {
