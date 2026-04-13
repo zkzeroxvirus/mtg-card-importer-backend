@@ -370,6 +370,20 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
   });
 
+  test('GET /random should use per-card random draws for set filters', async () => {
+    scryfallLib.getRandomCard.mockClear();
+    scryfallLib.searchCards.mockClear();
+
+    const response = await request(app)
+      .get('/random')
+      .query({ q: 'set:mh2', count: 3 })
+      .expect(200);
+
+    expect(response.body.total_cards).toBe(3);
+    expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:mh2 lang:en f:commander', true);
+  });
+
   test('GET /random should batch large otag queries through search to avoid timeout-prone retries', async () => {
     scryfallLib.getRandomCard.mockClear();
     scryfallLib.searchCards.mockClear();

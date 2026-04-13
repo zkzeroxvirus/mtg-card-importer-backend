@@ -43,7 +43,10 @@ const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
 // A 1.5x multiplier balances between API efficiency and getting enough unique cards
 const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
-const API_ONLY_RANDOM_SEARCH_THRESHOLD = 10; // Use one search call for larger API-only random batches
+const API_ONLY_RANDOM_SEARCH_THRESHOLD = Math.max(
+  parseInt(process.env.API_ONLY_RANDOM_SEARCH_THRESHOLD || '15', 10) || 15,
+  1
+); // Use one search call for larger API-only random batches
 const RANDOM_SEARCH_UNIQUE = 'prints';
 const RANDOM_SEARCH_UNIQUE_CARDS = 'cards';
 const RANDOM_SEARCH_ORDER = 'random';
@@ -856,6 +859,7 @@ const DEFAULT_QUERY_LANG = String(process.env.DEFAULT_QUERY_LANG || 'en').toLowe
 const LANG_FILTER_REGEX = /(?:^|[\s+(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
 const PRICE_FILTER_REGEX = /\b(usd|eur|tix)[:=<>]/i;
 const API_ONLY_FILTER_REGEX = /\b(?:otag)[:=]/i;
+const POSITIVE_SET_FILTER_REGEX = /(?:^|[\s+(])(?:s|set):[a-z0-9]+\b/i;
 
 function hasPriceFilter(query) {
   return PRICE_FILTER_REGEX.test(String(query || ''));
@@ -863,6 +867,10 @@ function hasPriceFilter(query) {
 
 function hasApiOnlyFilter(query) {
   return API_ONLY_FILTER_REGEX.test(String(query || ''));
+}
+
+function hasPositiveSetFilter(query) {
+  return POSITIVE_SET_FILTER_REGEX.test(String(query || ''));
 }
 
 function enforceDefaultQueryLanguage(query, defaultLang = DEFAULT_QUERY_LANG) {
@@ -1616,6 +1624,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
 
     const priceFilterPresent = hasPriceFilter(randomQuery);
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
+    const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
     const forceApi = parseBooleanLike(String(payload.forceApi)) === true;
     const executionPlan = buildRandomExecutionPlan({
@@ -1746,7 +1755,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
           for (const card of cards) {
             addRandomCard(card);
           }
-        } else if (priceFilterPresent || apiOnlyFilterPresent) {
+        } else if (priceFilterPresent || apiOnlyFilterPresent || setFilterPresent) {
           let apiAttempts = 0;
           const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
           while (randomCards.length < count && apiAttempts < maxApiAttempts) {
@@ -1939,6 +1948,7 @@ app.get('/random', randomLimiter, async (req, res) => {
 
     const priceFilterPresent = hasPriceFilter(randomQuery);
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
+    const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
@@ -2075,7 +2085,7 @@ app.get('/random', randomLimiter, async (req, res) => {
             for (const card of randomCards) {
               addCard(card);
             }
-          } else if (priceFilterPresent || apiOnlyFilterPresent) {
+          } else if (priceFilterPresent || apiOnlyFilterPresent || setFilterPresent) {
             let apiAttempts = 0;
             const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
 

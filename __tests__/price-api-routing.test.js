@@ -214,14 +214,15 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
     });
 
-    test('should force API for set:lea random queries', async () => {
+    test('should force API for set:lea random queries and draw via random endpoint', async () => {
       const response = await request(app)
         .get('/random?count=3&q=set:lea')
         .expect(200);
 
       expect(response.headers['x-query-plan']).toBe('api:forced_api_set');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalledWith('set:lea lang:en f:commander', 3, 'prints', 'random');
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:lea lang:en f:commander', true);
     });
 
   });
@@ -361,24 +362,23 @@ describe('Price Filter API Routing', () => {
     });
 
     test('should force API for set:lea random/build queries', async () => {
-      scryfallLib.searchCards.mockResolvedValueOnce([
-        {
+      scryfallLib.getRandomCard
+        .mockResolvedValueOnce({
           id: 'lea-api-1',
           oracle_id: 'lea-oracle-1',
           name: 'LEA API Card 1',
           type_line: 'Creature',
           image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
           games: ['paper']
-        },
-        {
+        })
+        .mockResolvedValueOnce({
           id: 'lea-api-2',
           oracle_id: 'lea-oracle-2',
           name: 'LEA API Card 2',
           type_line: 'Creature',
           image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
           games: ['paper']
-        }
-      ]);
+        });
       scryfallLib.convertToTTSCard = jest.fn((card) => ({
         Name: 'Card',
         Nickname: card.name,
@@ -399,7 +399,8 @@ describe('Price Filter API Routing', () => {
 
       expect(response.headers['x-query-plan']).toBe('api:forced_api_set');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalledWith('set:lea lang:en f:commander', 2, 'prints', 'random');
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:lea lang:en f:commander', true);
     });
   });
 
