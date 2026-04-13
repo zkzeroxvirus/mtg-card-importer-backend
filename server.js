@@ -43,10 +43,6 @@ const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
 // A 1.5x multiplier balances between API efficiency and getting enough unique cards
 const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
-const API_ONLY_RANDOM_SEARCH_THRESHOLD = Math.max(
-  parseInt(process.env.API_ONLY_RANDOM_SEARCH_THRESHOLD || '15', 10) || 15,
-  1
-); // Use one search call for larger API-only random batches
 const RANDOM_SEARCH_UNIQUE = 'prints';
 const RANDOM_SEARCH_UNIQUE_CARDS = 'cards';
 const RANDOM_SEARCH_ORDER = 'random';
@@ -1627,6 +1623,9 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
     const forceApi = parseBooleanLike(String(payload.forceApi)) === true;
+    if (apiOnlyFilterPresent) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
       hasPriceFilter: priceFilterPresent,
@@ -1746,9 +1745,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     } else {
       const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
       if (count > 1 && hasRandomQuery) {
-        const useApiOnlySearchBatch = apiOnlyFilterPresent
-          && !priceFilterPresent
-          && count >= API_ONLY_RANDOM_SEARCH_THRESHOLD;
+        const useApiOnlySearchBatch = false;
 
         if (useApiOnlySearchBatch) {
           const cards = await scryfallLib.searchCards(randomQuery, count, RANDOM_SEARCH_UNIQUE_CARDS, RANDOM_SEARCH_ORDER);
@@ -1950,6 +1947,9 @@ app.get('/random', randomLimiter, async (req, res) => {
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
     const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
+    if (apiOnlyFilterPresent) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
     const executionPlan = buildRandomExecutionPlan({
       useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
       hasPriceFilter: priceFilterPresent,
@@ -2076,9 +2076,7 @@ app.get('/random', randomLimiter, async (req, res) => {
       } else {
         const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
         if (numCards > 1 && hasRandomQuery) {
-          const useApiOnlySearchBatch = apiOnlyFilterPresent
-            && !priceFilterPresent
-            && numCards >= API_ONLY_RANDOM_SEARCH_THRESHOLD;
+          const useApiOnlySearchBatch = false;
 
           if (useApiOnlySearchBatch) {
             const randomCards = await scryfallLib.searchCards(randomQuery, numCards, RANDOM_SEARCH_UNIQUE_CARDS, RANDOM_SEARCH_ORDER);

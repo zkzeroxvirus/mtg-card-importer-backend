@@ -384,7 +384,7 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:mh2 lang:en f:commander', true);
   });
 
-  test('GET /random should batch large otag queries through search to avoid timeout-prone retries', async () => {
+  test('GET /random should keep using per-card random draws for large otag queries', async () => {
     scryfallLib.getRandomCard.mockClear();
     scryfallLib.searchCards.mockClear();
 
@@ -394,13 +394,8 @@ describe('Server Endpoints - Random Card', () => {
       .expect(200);
 
     expect(response.body.total_cards).toBe(15);
-    expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-      'id:r+otag:strive lang:en',
-      15,
-      'cards',
-      'random'
-    );
-    expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+    expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id:r+otag:strive lang:en', true);
   });
 
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
@@ -783,7 +778,7 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
   });
 
-  test('POST /random/build should batch large otag queries through search to avoid timeout-prone retries', async () => {
+  test('POST /random/build should keep using per-card random draws for large otag queries', async () => {
     scryfallLib.getRandomCard.mockClear();
     scryfallLib.searchCards.mockClear();
 
@@ -794,13 +789,8 @@ describe('Server Endpoints - Random Card', () => {
       .expect(200);
 
     expect(response.text).toContain('DeckCustom');
-    expect(scryfallLib.searchCards).toHaveBeenCalledWith(
-      'id:r+otag:strive lang:en',
-      15,
-      'cards',
-      'random'
-    );
-    expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+    expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id:r+otag:strive lang:en', true);
   });
 
   test('POST /random/build should normalize c=c query to id=c', async () => {
