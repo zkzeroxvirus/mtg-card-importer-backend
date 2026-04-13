@@ -43,6 +43,10 @@ const BULK_URI_BLOCKED_IDENTIFIERS = new Set([
 // A 1.5x multiplier balances between API efficiency and getting enough unique cards
 const DUPLICATE_BUFFER_MULTIPLIER = 1.5;
 const MAX_RETRY_ATTEMPTS_MULTIPLIER = 3; // Retry up to 3x the requested count for bulk data
+const RANDOM_API_TIME_BUDGET_MS = Math.max(
+  parseInt(process.env.RANDOM_API_TIME_BUDGET_MS || '8000', 10) || 8000,
+  1000
+);
 const RANDOM_SEARCH_UNIQUE = 'prints';
 const RANDOM_SEARCH_UNIQUE_CARDS = 'cards';
 const RANDOM_SEARCH_ORDER = 'random';
@@ -1623,7 +1627,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
     const forceApi = parseBooleanLike(String(payload.forceApi)) === true;
-    if (apiOnlyFilterPresent) {
+    if (apiOnlyFilterPresent || forcedApiSetPresent) {
       res.setHeader('Cache-Control', 'no-store');
     }
     const executionPlan = buildRandomExecutionPlan({
@@ -1755,7 +1759,12 @@ app.post('/random/build', randomLimiter, async (req, res) => {
         } else if (priceFilterPresent || apiOnlyFilterPresent || setFilterPresent) {
           let apiAttempts = 0;
           const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+          const apiLoopStart = Date.now();
           while (randomCards.length < count && apiAttempts < maxApiAttempts) {
+            if ((Date.now() - apiLoopStart) >= RANDOM_API_TIME_BUDGET_MS) {
+              warningMessage = `Timed out after ${RANDOM_API_TIME_BUDGET_MS}ms while fetching random cards; returning partial results.`;
+              break;
+            }
             apiAttempts++;
             const card = await scryfallLib.getRandomCard(randomQuery, true);
             addRandomCard(card);
@@ -1947,7 +1956,7 @@ app.get('/random', randomLimiter, async (req, res) => {
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
     const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forcedApiSetPresent = hasForcedApiSetFilter(randomQuery);
-    if (apiOnlyFilterPresent) {
+    if (apiOnlyFilterPresent || forcedApiSetPresent) {
       res.setHeader('Cache-Control', 'no-store');
     }
     const executionPlan = buildRandomExecutionPlan({
@@ -2086,8 +2095,13 @@ app.get('/random', randomLimiter, async (req, res) => {
           } else if (priceFilterPresent || apiOnlyFilterPresent || setFilterPresent) {
             let apiAttempts = 0;
             const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+            const apiLoopStart = Date.now();
 
             while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+              if ((Date.now() - apiLoopStart) >= RANDOM_API_TIME_BUDGET_MS) {
+                warningMessage = `Timed out after ${RANDOM_API_TIME_BUDGET_MS}ms while fetching random cards; returning partial results.`;
+                break;
+              }
               apiAttempts++;
               const card = await scryfallLib.getRandomCard(randomQuery, true);
               addCard(card);
