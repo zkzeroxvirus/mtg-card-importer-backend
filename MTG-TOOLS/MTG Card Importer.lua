@@ -577,6 +577,52 @@ local function applyCommanderPreferenceToUrl(url)
   return url .. separator .. 'enforceCommander=' .. value
 end
 
+local STRUCTURED_RANDOM_QUERY_PREFIXES = {
+  'is', 't', 'type', 's', 'set', 'r', 'rarity', 'o', 'oracle', 'name',
+  'kw', 'keyword', 'layout', 'lang', 'language', 'game', 'format', 'f', 'legal',
+  'banned', 'restricted', 'block', 'stamp', 'frame', 'border', 'has',
+  'c', 'color', 'id', 'identity', 'cmc', 'mv', 'pow', 'power', 'tou', 'toughness',
+  'loy', 'loyalty', 'm', 'mana', 'usd', 'eur', 'tix', 'year', 'date',
+  'otag', 'oracletag', 'function', 'atag', 'art', 'arttag'
+}
+
+local function trimString(value)
+  return tostring(value or ''):gsub('^%s+', ''):gsub('%s+$', '')
+end
+
+local function extractRandomQueryFromInput(rawInput)
+  local fullInput = tostring(rawInput or '')
+  local queryRaw = fullInput:match('[?&]q=(.+)') or fullInput:match('%sq=(.+)') or fullInput:match('^q=(.+)')
+  if not queryRaw then
+    return nil
+  end
+
+  queryRaw = trimString(queryRaw)
+  queryRaw = queryRaw:gsub('%s+%d+%s*$', '')
+  queryRaw = queryRaw:gsub('%+', ' ')
+  queryRaw = queryRaw:gsub('%%20', ' ')
+  return trimString(queryRaw)
+end
+
+local function looksLikeStructuredRandomQuery(rawInput)
+  local query = trimString(rawInput)
+  if query == '' then
+    return false
+  end
+
+  if extractRandomQueryFromInput(query) then
+    return true
+  end
+
+  for _, prefix in ipairs(STRUCTURED_RANDOM_QUERY_PREFIXES) do
+    if query:match('(^|[%s%(])%-?' .. prefix .. '[:=]') then
+      return true
+    end
+  end
+
+  return false
+end
+
 local function splitNDJSONLines(respText)
   local lines = {}
   if not respText or respText == '' then
@@ -1308,6 +1354,7 @@ Importer=setmetatable({
 
   Random=function(qTbl)
     local url,q1=BACKEND_URL..'/random?compact=spawn','&q=is:hires'
+    local directQueryRaw = nil
 
     local count = tonumber((qTbl.full or ''):match('%s(%d+)%s*$'))
     if not count then
@@ -1317,24 +1364,22 @@ Importer=setmetatable({
       count = 100
     end
 
-    if qTbl.name:find('q=') then
-      local queryRaw = (qTbl.full and qTbl.full:match('%?q=(.+)')) or ''
-      if queryRaw ~= '' then
-        queryRaw = queryRaw:gsub('%s+%d+%s*$', '')
-        queryRaw = queryRaw:gsub('%+', ' ')
-        queryRaw = queryRaw:gsub('%%20', ' ')
+    if looksLikeStructuredRandomQuery(qTbl.name) then
+      directQueryRaw = extractRandomQueryFromInput(qTbl.full)
+      if not directQueryRaw or directQueryRaw == '' then
+        directQueryRaw = trimString(qTbl.name):gsub('%s+%d+%s*$', '')
       end
 
-      if queryRaw == '' then
-        queryRaw = 'is:hires'
+      if directQueryRaw == '' then
+        directQueryRaw = 'is:hires'
       end
 
-      local encodedQuery = urlEncode(queryRaw)
+      local encodedQuery = urlEncode(directQueryRaw)
       url = BACKEND_URL..'/random?compact=spawn&q='..encodedQuery
       url = applyCommanderEnforcementToUrl(url)
 
       uLog(url,qTbl.color..' Importer '..qTbl.full)
-      dispatchRandomRequest(url, qTbl, count, queryRaw)
+      dispatchRandomRequest(url, qTbl, count, directQueryRaw)
       return
     end
 

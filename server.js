@@ -127,7 +127,7 @@ function hasStructuredFilters(query) {
   if (!query) {
     return false;
   }
-  const filterRegex = /(?:^|[\s+(])(?:t|type|s|set|r|rarity|c|color|id|identity|o|oracle|name|cmc|mv|pow|power|tou|toughness|loy|loyalty|is|f|format|legal|banned|restricted|layout|wm|watermark|lang|language|game|frame|border|stamp|has|kw|keyword|a|artist|ft|flavor|block|prints|usd|eur|tix|produces|m|mana|year|date):/i;
+  const filterRegex = /(?:^|[\s+(])(?:t|type|s|set|r|rarity|c|color|id|identity|o|oracle|name|cmc|mv|pow|power|tou|toughness|loy|loyalty|is|f|format|legal|banned|restricted|layout|wm|watermark|lang|language|game|frame|border|stamp|has|kw|keyword|a|artist|ft|flavor|block|prints|usd|eur|tix|produces|m|mana|year|date|otag|oracletag|function|atag|art|arttag):/i;
   return filterRegex.test(String(query));
 }
 function getRandomUniqKey(card) {
@@ -185,7 +185,7 @@ function shouldBypassCommanderForTypeQuery(rawQuery) {
 
   // Some random-only filters (like otag) are not commander-legality aware.
   // Appending f:commander silently excludes many valid matches.
-  if (/(?:^|[\s+(])-?otag[:=]/i.test(query)) {
+  if (TAGGER_FILTER_REGEX.test(query)) {
     return true;
   }
 
@@ -822,11 +822,14 @@ async function hydrateCardForTts(card) {
   return card;
 }
 
+const TAGGER_FILTER_PREFIXES = ['otag', 'oracletag', 'function', 'atag', 'art', 'arttag'];
+const TAGGER_FILTER_PATTERN = TAGGER_FILTER_PREFIXES.join('|');
+const TAGGER_FILTER_REGEX = new RegExp(`(?:^|[\\s+\\(])(-?(?:${TAGGER_FILTER_PATTERN}))[:=]`, 'i');
 const COLON_ONLY_PREFIXES = [
   'is', 't', 'type', 's', 'set', 'r', 'rarity', 'o', 'oracle', 'name',
   'a', 'artist', 'ft', 'flavor', 'k', 'kw', 'keyword', 'layout', 'wm', 'watermark',
   'lang', 'language', 'game', 'format', 'f', 'legal', 'banned', 'restricted',
-  'block', 'stamp', 'frame', 'border', 'has'
+  'block', 'stamp', 'frame', 'border', 'has', ...TAGGER_FILTER_PREFIXES
 ];
 const COLON_ONLY_PREFIX_PATTERN = COLON_ONLY_PREFIXES.join('|');
 const COLON_ONLY_PREFIX_REPLACE = new RegExp(`(^|[\\s+\\(])(-?(?:${COLON_ONLY_PREFIX_PATTERN}))=`, 'gi');
@@ -858,7 +861,7 @@ function normalizeRarityValue(rawValue) {
 const DEFAULT_QUERY_LANG = String(process.env.DEFAULT_QUERY_LANG || 'en').toLowerCase();
 const LANG_FILTER_REGEX = /(?:^|[\s+(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
 const PRICE_FILTER_REGEX = /\b(usd|eur|tix)[:=<>]/i;
-const API_ONLY_FILTER_REGEX = /\b(?:otag)[:=]/i;
+const API_ONLY_FILTER_REGEX = TAGGER_FILTER_REGEX;
 const POSITIVE_SET_FILTER_REGEX = /(?:^|[\s+(])(?:s|set):[a-z0-9]+\b/i;
 
 function hasPriceFilter(query) {
@@ -1013,7 +1016,7 @@ function getQueryHint(query) {
   const q = query.toLowerCase();
 
   // Non-numeric keyword filters require a colon operator
-  if (/\b(is|t|type|s|set|r|rarity|o|oracle|name|a|artist|ft|flavor|kw|keyword|layout|wm|watermark|lang|language|game|format|f|legal|banned|restricted|block|stamp|frame|border|has)=/i.test(q)) {
+  if (/\b(is|t|type|s|set|r|rarity|o|oracle|name|a|artist|ft|flavor|kw|keyword|layout|wm|watermark|lang|language|game|format|f|legal|banned|restricted|block|stamp|frame|border|has|otag|oracletag|function|atag|art|arttag)=/i.test(q)) {
     return ' (Use ":" for keyword filters, e.g., is:funny or t:token)';
   }
   

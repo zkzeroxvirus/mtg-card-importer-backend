@@ -324,6 +324,18 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
   });
 
+  test('GET /random should normalize function= queries and bypass commander legality', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const randomResponse = await request(app)
+      .get('/random')
+      .query({ q: 'function=draw', count: 1, enforceCommander: 'true' });
+
+    expect(randomResponse.status).toBe(200);
+    expect(randomResponse.headers['x-query-warning']).toContain('Normalized query operators');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en');
+  });
+
   test('GET /random should keep retrying otag random until count is satisfied when duplicates are returned', async () => {
     scryfallLib.getRandomCard.mockClear();
     scryfallLib.getRandomCard
@@ -727,6 +739,26 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.status).toBe(200);
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
+  });
+
+  test('POST /random/build should normalize function= queries and bypass commander legality', async () => {
+    scryfallLib.getRandomCard.mockResolvedValueOnce({
+      id: 'id-function-slot',
+      oracle_id: 'oracle-function-slot',
+      name: 'Function Slot',
+      type_line: 'Sorcery',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+      games: ['paper']
+    });
+
+    const response = await request(app)
+      .post('/random/build')
+      .set('Content-Type', 'application/json')
+      .send({ q: 'function=draw', count: 1, enforceCommander: true });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-query-warning']).toContain('Normalized query operators');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en');
   });
 
   test('POST /random/build should keep retrying otag random until count is satisfied when duplicates are returned', async () => {

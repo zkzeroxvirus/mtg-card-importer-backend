@@ -214,6 +214,16 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
     });
 
+    test('should use API for random queries with function tag alias', async () => {
+      const response = await request(app)
+        .get('/random?count=2&q=function:draw')
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
+      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en', true);
+    });
+
     test('should force API for set:lea random queries and draw via random endpoint', async () => {
       const response = await request(app)
         .get('/random?count=3&q=set:lea')
@@ -359,6 +369,38 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
+    });
+
+    test('should use API for random/build queries with function tag alias', async () => {
+      scryfallLib.getRandomCard.mockResolvedValue({
+        id: 'function-card',
+        oracle_id: 'oracle-function-card',
+        name: 'Function Card',
+        type_line: 'Creature',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      });
+      scryfallLib.convertToTTSCard = jest.fn((card) => ({
+        Name: 'Card',
+        Nickname: card.name,
+        Memo: card.oracle_id,
+        CustomDeck: {
+          '1': {
+            FaceURL: card.image_uris.normal,
+            BackURL: 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+          }
+        }
+      }));
+
+      const response = await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 'function:draw', count: 2, enforceCommander: true })
+        .expect(200);
+
+      expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
+      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en', true);
     });
 
     test('should force API for set:lea random/build queries', async () => {
