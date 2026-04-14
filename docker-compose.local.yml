@@ -13,7 +13,7 @@ services:
       PORT: 3000
       USE_BULK_DATA: "true"
       BULK_DATA_PATH: /app/data
-      BULK_DATA_TYPE: oracle_cards
+      BULK_DATA_TYPE: default_cards
       BULK_INCLUDE_RULINGS: "true"
       WORKERS: 1
       STARTUP_STAGGER_MS: 0

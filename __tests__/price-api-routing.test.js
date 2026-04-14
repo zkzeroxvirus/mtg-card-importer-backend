@@ -1,6 +1,7 @@
 /**
  * Tests to verify routing behavior:
- * - Price filters force API routing for real-time data
+ * - Price filters now use bulk data when available (default_cards has price fields)
+ * - otag/arttag/function filters still force API routing
  */
 
 const request = require('supertest');
@@ -67,46 +68,45 @@ describe('Price Filter API Routing', () => {
   });
 
   describe('GET /search with price filters', () => {
-    test('should use API for usd>= filter', async () => {
+    test('should use bulk for usd>= filter', async () => {
       await request(app)
         .get('/search?q=t:artifact+usd>=50')
         .expect(200);
 
-      // Should NOT call bulk data
-      expect(bulkData.searchCards).not.toHaveBeenCalled();
-      // Should call API
-      expect(scryfallLib.searchCards).toHaveBeenCalledWith(
+      // Should call bulk data (default_cards has price fields)
+      expect(bulkData.searchCards).toHaveBeenCalledWith(
         't:artifact usd>=50',
-        expect.any(Number),
-        'cards'
+        expect.any(Number)
       );
+      // Should NOT call API when bulk returns results
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
-    test('should use API for usd< filter', async () => {
+    test('should use bulk for usd< filter', async () => {
       await request(app)
         .get('/search?q=usd<2')
         .expect(200);
 
-      expect(bulkData.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalled();
+      expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
-    test('should use API for eur: filter', async () => {
+    test('should use bulk for eur: filter', async () => {
       await request(app)
         .get('/search?q=eur>10')
         .expect(200);
 
-      expect(bulkData.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalled();
+      expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
-    test('should use API for tix: filter', async () => {
+    test('should use bulk for tix: filter', async () => {
       await request(app)
         .get('/search?q=tix>=5')
         .expect(200);
 
-      expect(bulkData.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalled();
+      expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
     test('should use bulk data for non-price queries', async () => {
@@ -120,13 +120,13 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
-    test('should use API for mixed query with price filter', async () => {
+    test('should use bulk for mixed query with price filter', async () => {
       await request(app)
         .get('/search?q=t:artifact+c:r+usd>=10')
         .expect(200);
 
-      expect(bulkData.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalled();
+      expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
     test('should use API for otag filters', async () => {
@@ -141,23 +141,23 @@ describe('Price Filter API Routing', () => {
   });
 
   describe('GET /random with price filters', () => {
-    test('should use API for single random with usd filter', async () => {
+    test('should use bulk for single random with usd filter', async () => {
       await request(app)
         .get('/random?q=usd>=50')
         .expect(200);
 
-      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+      expect(bulkData.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
-    test('should use API for multiple random with eur filter', async () => {
+    test('should use bulk for multiple random with eur filter', async () => {
       await request(app)
         .get('/random?count=5&q=eur<10')
         .expect(200);
 
-      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
+      expect(bulkData.getRandomCards).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('eur<10 lang:en f:commander', true);
     });
 
     test('should use bulk data for non-price random queries', async () => {
@@ -195,13 +195,13 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
 
-    test('should use API for tix filter in random', async () => {
+    test('should use bulk for tix filter in random', async () => {
       await request(app)
         .get('/random?q=tix>=5')
         .expect(200);
 
-      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalled();
+      expect(bulkData.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
     test('should use API for random queries with otag filter', async () => {
@@ -224,30 +224,29 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en', true);
     });
 
-    test('should force API for set:lea random queries and draw via random endpoint', async () => {
+    test('should use bulk for set:lea random queries', async () => {
       const response = await request(app)
         .get('/random?count=3&q=set:lea')
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('api:forced_api_set');
-      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:lea lang:en f:commander', true);
+      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(bulkData.getRandomCards).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
   });
 
   describe('POST /random/build with price filters', () => {
-    test('should use API for random/build with usd filter', async () => {
+    test('should use bulk for random/build with usd filter', async () => {
       const response = await request(app)
         .post('/random/build')
         .set('Content-Type', 'application/json')
         .send({ q: 'usd>=50 t:artifact', count: 1, enforceCommander: true })
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('api:price_filter');
-      expect(bulkData.getRandomCard).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('usd>=50 t:artifact lang:en f:commander');
+      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(bulkData.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
     test('should use bulk multi-card sampler for non-price random/build queries', async () => {
@@ -403,24 +402,15 @@ describe('Price Filter API Routing', () => {
       expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en', true);
     });
 
-    test('should force API for set:lea random/build queries', async () => {
-      scryfallLib.getRandomCard
-        .mockResolvedValueOnce({
-          id: 'lea-api-1',
-          oracle_id: 'lea-oracle-1',
-          name: 'LEA API Card 1',
-          type_line: 'Creature',
-          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
-          games: ['paper']
-        })
-        .mockResolvedValueOnce({
-          id: 'lea-api-2',
-          oracle_id: 'lea-oracle-2',
-          name: 'LEA API Card 2',
-          type_line: 'Creature',
-          image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
-          games: ['paper']
-        });
+    test('should use bulk for set:lea random/build queries', async () => {
+      bulkData.getRandomCard.mockResolvedValueOnce({
+        id: 'lea-bulk-1',
+        oracle_id: 'lea-oracle-1',
+        name: 'LEA Bulk Card 1',
+        type_line: 'Creature',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      });
       scryfallLib.convertToTTSCard = jest.fn((card) => ({
         Name: 'Card',
         Nickname: card.name,
@@ -436,13 +426,12 @@ describe('Price Filter API Routing', () => {
       const response = await request(app)
         .post('/random/build')
         .set('Content-Type', 'application/json')
-        .send({ q: 'set:lea', count: 2, enforceCommander: true })
+        .send({ q: 'set:lea', count: 1, enforceCommander: true })
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('api:forced_api_set');
-      expect(bulkData.getRandomCards).not.toHaveBeenCalled();
-      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
-      expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('set:lea lang:en f:commander', true);
+      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(bulkData.getRandomCard).toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
   });
 
@@ -468,8 +457,9 @@ describe('Price Filter API Routing', () => {
           .expect(200);
 
         if (shouldMatch) {
-          expect(scryfallLib.searchCards).toHaveBeenCalled();
-          expect(bulkData.searchCards).not.toHaveBeenCalled();
+          // Price filters now use bulk data (default_cards has price fields)
+          expect(bulkData.searchCards).toHaveBeenCalled();
+          expect(scryfallLib.searchCards).not.toHaveBeenCalled();
         } else {
           expect(bulkData.searchCards).toHaveBeenCalled();
         }
@@ -478,13 +468,13 @@ describe('Price Filter API Routing', () => {
   });
 
   describe('Combined filters', () => {
-    test('should use API for query with both price and type filters', async () => {
+    test('should use bulk for query with both price and type filters', async () => {
       await request(app)
         .get('/search?q=t:token+usd>=5')
         .expect(200);
 
-      expect(scryfallLib.searchCards).toHaveBeenCalled();
-      expect(bulkData.searchCards).not.toHaveBeenCalled();
+      expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
   });
 

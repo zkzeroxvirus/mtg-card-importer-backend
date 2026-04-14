@@ -267,10 +267,10 @@ describe('Server Endpoints - Random Card', () => {
   test('GET /random should clamp count over limit', async () => {
     const response = await request(app)
       .get('/random')
-      .query({ count: 101, q: 't:creature' });
+      .query({ count: 9999, q: 't:creature' });
     expect(response.status).toBe(200);
     expect(response.body).toHaveProperty('total_cards');
-    expect(response.body.total_cards).toBeLessThanOrEqual(100);
+    expect(response.body.total_cards).toBeLessThanOrEqual(500);
   });
 
   test('GET /random should clamp negative count to valid range', async () => {
