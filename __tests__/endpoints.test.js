@@ -547,6 +547,20 @@ describe('Server Endpoints - Random Card', () => {
     expect(lines[0].Name).toBe('DeckCustom');
     expect(Array.isArray(lines[0].ContainedObjects)).toBe(true);
     expect(lines[0].ContainedObjects).toHaveLength(2);
+    expect(lines[0].ContainedObjects[0].CustomDeck).toEqual({
+      '1': expect.objectContaining({
+        FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+        BackURL: expect.any(String),
+        Type: 0
+      })
+    });
+    expect(lines[0].ContainedObjects[1].CustomDeck).toEqual({
+      '2': expect.objectContaining({
+        FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+        BackURL: expect.any(String),
+        Type: 0
+      })
+    });
     expect(scryfallLib.searchCards).toHaveBeenCalledWith(
       expect.stringContaining('f:commander'),
       2,

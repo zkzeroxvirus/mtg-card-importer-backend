@@ -284,21 +284,37 @@ function buildDeckCustomObject(ttsCards, hand) {
     ContainedObjects: []
   };
 
+  const normalizeTransform = (transform, fallback = {}) => ({
+    posX: transform?.posX ?? fallback.posX ?? 0,
+    posY: transform?.posY ?? fallback.posY ?? 0,
+    posZ: transform?.posZ ?? fallback.posZ ?? 0,
+    rotX: transform?.rotX ?? fallback.rotX ?? 0,
+    rotY: transform?.rotY ?? fallback.rotY ?? 0,
+    rotZ: transform?.rotZ ?? fallback.rotZ ?? 0,
+    scaleX: transform?.scaleX ?? fallback.scaleX ?? 1,
+    scaleY: transform?.scaleY ?? fallback.scaleY ?? 1,
+    scaleZ: transform?.scaleZ ?? fallback.scaleZ ?? 1
+  });
+
+  const normalizeCustomDeckEntry = (entry) => ({
+    FaceURL: entry?.FaceURL,
+    BackURL: entry?.BackURL,
+    NumWidth: entry?.NumWidth || 1,
+    NumHeight: entry?.NumHeight || 1,
+    Type: entry?.Type || 0,
+    BackIsHidden: entry?.BackIsHidden !== false,
+    UniqueBack: entry?.UniqueBack === true
+  });
+
   ttsCards.forEach((ttsCard, index) => {
     const deckNum = index + 1;
     const cardId = deckNum * 100;
     const customDeckEntry = ttsCard?.CustomDeck?.['1'] || ttsCard?.CustomDeck?.[1] || {};
     const stateTwo = ttsCard?.States?.[2];
+    const normalizedFrontDeck = normalizeCustomDeckEntry(customDeckEntry);
 
     deckObject.DeckIDs.push(cardId);
-    deckObject.CustomDeck[String(deckNum)] = {
-      FaceURL: customDeckEntry.FaceURL,
-      BackURL: customDeckEntry.BackURL,
-      NumWidth: customDeckEntry.NumWidth || 1,
-      NumHeight: customDeckEntry.NumHeight || 1,
-      BackIsHidden: customDeckEntry.BackIsHidden !== false,
-      UniqueBack: customDeckEntry.UniqueBack === true
-    };
+    deckObject.CustomDeck[String(deckNum)] = normalizedFrontDeck;
 
     const containedCard = {
       CardID: cardId,
@@ -306,34 +322,21 @@ function buildDeckCustomObject(ttsCards, hand) {
       Nickname: ttsCard?.Nickname || 'Unknown Card',
       Description: ttsCard?.Description || '',
       Memo: ttsCard?.Memo || '',
-      Transform: {
-        posX: 0,
-        posY: 1,
-        posZ: 0,
-        rotX: 0,
-        rotY: 180,
-        rotZ: 0,
-        scaleX: 1,
-        scaleY: 1,
-        scaleZ: 1
+      Transform: normalizeTransform(ttsCard?.Transform),
+      CustomDeck: {
+        [String(deckNum)]: normalizedFrontDeck
       },
-      HideWhenFaceDown: true,
-      AltLookAngle: { x: 0, y: 0, z: 0 }
+      HideWhenFaceDown: ttsCard?.HideWhenFaceDown === true,
+      AltLookAngle: ttsCard?.AltLookAngle || { x: 0, y: 0, z: 0 }
     };
 
     if (stateTwo?.CustomDeck) {
       const stateDeckNum = ttsCards.length + deckNum;
       const stateCardId = stateDeckNum * 100;
       const stateCustomDeckEntry = stateTwo.CustomDeck['2'] || stateTwo.CustomDeck[2] || stateTwo.CustomDeck[String(stateDeckNum)] || {};
+      const normalizedStateDeck = normalizeCustomDeckEntry(stateCustomDeckEntry);
 
-      deckObject.CustomDeck[String(stateDeckNum)] = {
-        FaceURL: stateCustomDeckEntry.FaceURL,
-        BackURL: stateCustomDeckEntry.BackURL,
-        NumWidth: stateCustomDeckEntry.NumWidth || 1,
-        NumHeight: stateCustomDeckEntry.NumHeight || 1,
-        BackIsHidden: stateCustomDeckEntry.BackIsHidden !== false,
-        UniqueBack: stateCustomDeckEntry.UniqueBack === true
-      };
+      deckObject.CustomDeck[String(stateDeckNum)] = normalizedStateDeck;
 
       containedCard.States = {
         2: {
@@ -342,26 +345,9 @@ function buildDeckCustomObject(ttsCards, hand) {
           Nickname: stateTwo.Nickname || `${ttsCard?.Nickname || 'Unknown Card'} (Back)`,
           Description: stateTwo.Description || '',
           Memo: stateTwo.Memo || ttsCard?.Memo || '',
-          Transform: {
-            posX: 0,
-            posY: 0,
-            posZ: 0,
-            rotX: 0,
-            rotY: 0,
-            rotZ: 0,
-            scaleX: 1,
-            scaleY: 1,
-            scaleZ: 1
-          },
+          Transform: normalizeTransform(stateTwo.Transform, ttsCard?.Transform),
           CustomDeck: {
-            [String(stateDeckNum)]: {
-              FaceURL: stateCustomDeckEntry.FaceURL,
-              BackURL: stateCustomDeckEntry.BackURL,
-              NumWidth: stateCustomDeckEntry.NumWidth || 1,
-              NumHeight: stateCustomDeckEntry.NumHeight || 1,
-              BackIsHidden: stateCustomDeckEntry.BackIsHidden !== false,
-              UniqueBack: stateCustomDeckEntry.UniqueBack === true
-            }
+            [String(stateDeckNum)]: normalizedStateDeck
           },
           AltLookAngle: stateTwo.AltLookAngle || { x: 0, y: 0, z: 0 },
           HideWhenFaceDown: stateTwo.HideWhenFaceDown === true
