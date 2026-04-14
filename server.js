@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
 const bulkData = require('./lib/bulk-data');
+const tagCache = require('./lib/tag-cache');
 
 const app = express();
 
@@ -824,6 +825,14 @@ const LANG_FILTER_REGEX = /(?:^|[\s+(])(?:-?(?:lang|language):[a-z0-9_-]+)/i;
 const PRICE_FILTER_REGEX = /\b(usd|eur|tix)[:=<>]/i;
 const API_ONLY_FILTER_REGEX = TAGGER_FILTER_REGEX;
 const POSITIVE_SET_FILTER_REGEX = /(?:^|[\s+(])(?:s|set):[a-z0-9]+\b/i;
+const TAGGER_CLAUSE_CAPTURE_REGEX = new RegExp(
+  `(?:^|[\\s+\\(])(-?(?:${TAGGER_FILTER_PATTERN})):("[^"]+"|[^\\s+)]+)`,
+  'gi'
+);
+const TAGGER_CACHE_PREFIX_ALIASES = Object.freeze({
+  oracletag: 'otag',
+  art: 'arttag'
+});
 
 function hasPriceFilter(query) {
   return PRICE_FILTER_REGEX.test(String(query || ''));
@@ -835,6 +844,65 @@ function hasApiOnlyFilter(query) {
 
 function hasPositiveSetFilter(query) {
   return POSITIVE_SET_FILTER_REGEX.test(String(query || ''));
+}
+
+function canonicalizeTaggerTerm(prefix, value) {
+  const normalizedPrefix = String(prefix || '').toLowerCase();
+  const canonicalPrefix = TAGGER_CACHE_PREFIX_ALIASES[normalizedPrefix] || normalizedPrefix;
+  return `${canonicalPrefix}:${String(value || '').toLowerCase()}`;
+}
+
+function extractPositiveTaggerTerms(query) {
+  const positiveTerms = [];
+  let hasNegativeTerms = false;
+  const normalizedQuery = String(query || '');
+
+  for (const match of normalizedQuery.matchAll(TAGGER_CLAUSE_CAPTURE_REGEX)) {
+    const prefix = String(match[1] || '');
+    const value = String(match[2] || '').replace(/^"|"$/g, '').trim();
+    if (!value) {
+      continue;
+    }
+    if (prefix.startsWith('-')) {
+      hasNegativeTerms = true;
+      continue;
+    }
+    positiveTerms.push(canonicalizeTaggerTerm(prefix, value));
+  }
+
+  return {
+    positiveTerms: [...new Set(positiveTerms)],
+    hasNegativeTerms
+  };
+}
+
+function stripTaggerTerms(query) {
+  return String(query || '')
+    .replace(TAGGER_CLAUSE_CAPTURE_REGEX, '$1')
+    .replace(/\+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function mergeTagCacheStatus(currentStatus, nextStatus) {
+  const priority = { warm: 0, stale: 1, cold: 2 };
+  const currentPriority = priority[currentStatus] ?? 0;
+  const nextPriority = priority[nextStatus] ?? 0;
+  return nextPriority > currentPriority ? nextStatus : currentStatus;
+}
+
+function intersectOracleIdLists(oracleIdLists) {
+  if (!Array.isArray(oracleIdLists) || oracleIdLists.length === 0) {
+    return [];
+  }
+
+  let intersection = [...new Set(oracleIdLists[0])];
+  for (let index = 1; index < oracleIdLists.length && intersection.length > 0; index++) {
+    const nextSet = new Set(oracleIdLists[index]);
+    intersection = intersection.filter((oracleId) => nextSet.has(oracleId));
+  }
+
+  return intersection;
 }
 
 function enforceDefaultQueryLanguage(query, defaultLang = DEFAULT_QUERY_LANG) {
@@ -926,24 +994,237 @@ function setExplainHeader(res, explainData) {
   res.setHeader('X-Query-Explain', value);
 }
 
-async function fetchApiTaggerBatch(query, requestedCount) {
+/**
+ * Sample up to `n` items from an array without replacement.
+ */
+function pickRandom(arr, n) {
+  if (!Array.isArray(arr) || arr.length === 0) {
+    return [];
+  }
+  if (arr.length <= n) {
+    return arr.slice().sort(() => Math.random() - 0.5);
+  }
+  const copy = arr.slice();
+  const result = [];
+  for (let i = 0; i < n; i++) {
+    const idx = Math.floor(Math.random() * (copy.length - i));
+    result.push(copy[idx]);
+    const last = copy.length - 1 - i;
+    const tmp = copy[idx]; copy[idx] = copy[last]; copy[last] = tmp;
+  }
+  return result;
+}
+
+/**
+ * Hydrate up to `requestedCount` card objects from bulk data using oracle_ids
+ * previously retrieved from Scryfall for a tagger query.
+ * Returns null when bulk is unavailable (caller should fall through to API).
+ */
+function hydrateFromTagCache(oracleIds, requestedCount) {
+  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+    return null;
+  }
+  const sampled = pickRandom(oracleIds, requestedCount);
+  const cards = [];
+  for (const oracleId of sampled) {
+    const printings = bulkData.getPrintingsByOracleId(oracleId);
+    if (printings && printings.length > 0) {
+      cards.push(printings[Math.floor(Math.random() * printings.length)]);
+    }
+  }
+  return cards;
+}
+
+/**
+ * Background refresh: fetch fresh oracle_ids for a stale tag query without
+ * blocking the current request.  Updates cache + broadcasts via IPC.
+ */
+function scheduleTagCacheRefresh(query) {
+  setImmediate(async () => {
+    try {
+      const cards = await scryfallLib.searchCards(
+        query,
+        Number.MAX_SAFE_INTEGER,
+        RANDOM_SEARCH_UNIQUE_CARDS,
+        'name'
+      );
+      if (Array.isArray(cards) && cards.length > 0) {
+        const oracleIds = [...new Set(cards.map((c) => c.oracle_id).filter(Boolean))];
+        tagCache.set(query, oracleIds);
+        tagCache.save();
+        if (process.send) {
+          process.send({ type: 'tag_cache_update', data: tagCache.serializeForIPC() });
+        }
+        debugLog(`[TagCache] Background refresh complete for "${query}": ${oracleIds.length} oracle IDs`);
+      }
+    } catch (err) {
+      debugLog(`[TagCache] Background refresh failed for "${query}": ${err.message}`);
+    }
+  });
+}
+
+async function resolveTaggerCacheUniverse(query, res = null) {
+  if (!USE_BULK_DATA || !bulkData.isLoaded()) {
+    return null;
+  }
+
+  const { positiveTerms, hasNegativeTerms } = extractPositiveTaggerTerms(query);
+  if (positiveTerms.length === 0 || hasNegativeTerms) {
+    return null;
+  }
+
+  let cacheStatus = 'warm';
+  const oracleIdLists = [];
+
+  for (const term of positiveTerms) {
+    const cacheEntry = tagCache.get(term);
+    const isStaleEntry = tagCache.isStale(term);
+
+    if (cacheEntry && Array.isArray(cacheEntry.oracle_ids)) {
+      oracleIdLists.push(cacheEntry.oracle_ids);
+      if (isStaleEntry) {
+        cacheStatus = mergeTagCacheStatus(cacheStatus, 'stale');
+        scheduleTagCacheRefresh(term);
+      }
+      continue;
+    }
+
+    cacheStatus = mergeTagCacheStatus(cacheStatus, 'cold');
+
+    try {
+      const cards = await scryfallLib.searchCards(
+        term,
+        Number.MAX_SAFE_INTEGER,
+        RANDOM_SEARCH_UNIQUE_CARDS,
+        'name'
+      );
+      const oracleIds = [...new Set((cards || []).map((card) => card.oracle_id).filter(Boolean))];
+      tagCache.set(term, oracleIds);
+      await tagCache.save();
+      if (process.send) {
+        process.send({ type: 'tag_cache_update', data: tagCache.serializeForIPC() });
+      }
+      oracleIdLists.push(oracleIds);
+    } catch (error) {
+      debugLog(`[TagCache] Failed to populate "${term}": ${error.message}`);
+      return null;
+    }
+  }
+
+  if (res) {
+    res.setHeader('X-Tag-Cache-Status', cacheStatus);
+  }
+
+  return {
+    oracleIds: intersectOracleIdLists(oracleIdLists),
+    remainingQuery: stripTaggerTerms(query),
+    cacheStatus,
+    tagTerms: positiveTerms
+  };
+}
+
+async function resolveTaggerSearchCards(query, limit, requestedUnique = 'cards', res = null) {
+  const taggerUniverse = await resolveTaggerCacheUniverse(query, res);
+  if (!taggerUniverse) {
+    return null;
+  }
+
+  const oracleIdSet = new Set(taggerUniverse.oracleIds);
+  let cards = [];
+
+  if (taggerUniverse.remainingQuery) {
+    const filteredCards = await bulkData.searchCards(taggerUniverse.remainingQuery, Number.MAX_SAFE_INTEGER, true);
+    if (!Array.isArray(filteredCards)) {
+      return null;
+    }
+    cards = filteredCards.filter((card) => oracleIdSet.has(card.oracle_id));
+  } else if (requestedUnique === 'prints') {
+    for (const oracleId of taggerUniverse.oracleIds) {
+      const printings = bulkData.getPrintingsByOracleId(oracleId);
+      if (Array.isArray(printings) && printings.length > 0) {
+        cards.push(...printings);
+      }
+    }
+  } else {
+    for (const oracleId of taggerUniverse.oracleIds) {
+      const printings = bulkData.getPrintingsByOracleId(oracleId);
+      if (Array.isArray(printings) && printings.length > 0) {
+        cards.push(printings[0]);
+      }
+    }
+  }
+
+  if (requestedUnique !== 'prints') {
+    const seenOracleIds = new Set();
+    cards = cards.filter((card) => {
+      if (!card || !card.oracle_id || seenOracleIds.has(card.oracle_id)) {
+        return false;
+      }
+      seenOracleIds.add(card.oracle_id);
+      return true;
+    });
+  }
+
+  return cards.slice(0, limit);
+}
+
+/**
+ * Fetch cards for a tagger (otag:/atag:/arttag:/function:) query.
+ *
+ * Cache strategy (stale-while-revalidate):
+*   warm  - cache hit, TTL fresh   -> hydrate from bulk, no API call
+*   stale - cache hit, TTL expired -> serve stale immediately + background refresh
+*   cold  - no cache entry         -> call Scryfall API, populate cache
+ *
+ * @param {string}                    query          Scryfall query string
+ * @param {number}                    requestedCount Number of cards to return
+ * @param {import('express').Response} [res]         Optional response object for X-Tag-Cache-Status header
+ */
+async function fetchApiTaggerBatch(query, requestedCount, res = null) {
   if (!query || requestedCount <= 0) {
     return [];
   }
 
-  const searchLimit = Math.max(
-    requestedCount,
-    Math.ceil(requestedCount * DUPLICATE_BUFFER_MULTIPLIER)
-  );
+  const taggerUniverse = await resolveTaggerCacheUniverse(query, res);
+  if (taggerUniverse) {
+    if (!taggerUniverse.remainingQuery) {
+      const hydrated = hydrateFromTagCache(taggerUniverse.oracleIds, requestedCount);
+      if (hydrated !== null) {
+        debugLog(`[TagCache] ${taggerUniverse.cacheStatus} hit for "${query}": ${hydrated.length} cards`);
+        return hydrated;
+      }
+    } else {
+      const cards = await resolveTaggerSearchCards(query, Number.MAX_SAFE_INTEGER, 'prints', res);
+      if (Array.isArray(cards)) {
+        const sampledCards = pickRandom(cards, requestedCount);
+        debugLog(`[TagCache] ${taggerUniverse.cacheStatus} filtered hit for "${query}": ${sampledCards.length} cards`);
+        return sampledCards;
+      }
+    }
+  }
+
+  // Cold cache (or bulk unavailable) - must call Scryfall API
+  if (res) res.setHeader('X-Tag-Cache-Status', 'cold');
+  debugLog(`[TagCache] cold miss for "${query}", fetching from Scryfall`);
 
   try {
     const cards = await scryfallLib.searchCards(
       query,
-      searchLimit,
+      Math.max(requestedCount, 500),
       RANDOM_SEARCH_UNIQUE_CARDS,
       RANDOM_SEARCH_ORDER
     );
-    return Array.isArray(cards) ? cards : [];
+    if (Array.isArray(cards) && cards.length > 0) {
+      const oracleIds = cards.map((c) => c.oracle_id).filter(Boolean);
+      tagCache.set(query, oracleIds);
+      tagCache.save();
+      if (process.send) {
+        process.send({ type: 'tag_cache_update', data: tagCache.serializeForIPC() });
+      }
+      // Return a random sample of the full pool
+      return pickRandom(cards, requestedCount);
+    }
+    return [];
   } catch (error) {
     debugLog(`[TaggerFallback] search batch failed for query "${query}": ${error.message}`);
     return [];
@@ -1206,7 +1487,8 @@ app.get('/metrics', (req, res) => {
   const uptime = Math.floor((Date.now() - metrics.startTime) / 1000);
   const memUsage = process.memoryUsage();
   const bulkStats = bulkData.getStats();
-  
+  const tagStats  = tagCache.getStats();
+
   res.json({
     uptime: uptime,
     requests: {
@@ -1225,6 +1507,11 @@ app.get('/metrics', (req, res) => {
       loaded: bulkStats.loaded,
       cardCount: bulkStats.cardCount,
       lastUpdate: bulkStats.lastUpdate
+    },
+    tagCache: {
+      entries:  tagStats.entries,
+      stale:    tagStats.stale,
+      totalIds: tagStats.totalIds
     },
     process: {
       pid: process.pid,
@@ -1614,6 +1901,9 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       hasApiOnlyFilter: apiOnlyFilterPresent,
       forceApi
     });
+    const canServeApiOnlyFromTagCache = apiOnlyFilterPresent
+      && USE_BULK_DATA
+      && bulkData.isLoaded();
     setQueryPlanHeader(res, executionPlan);
     if (explainRequested && executionPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
@@ -1663,6 +1953,16 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       }
 
       if (!scryfallCard) {
+        if (canServeApiOnlyFromTagCache) {
+          const taggerCards = await fetchApiTaggerBatch(randomQuery, 1, res);
+          if (taggerCards.length > 0) {
+            scryfallCard = taggerCards[0];
+          }
+        }
+
+      }
+
+      if (!scryfallCard) {
         const maxAttempts = MAX_RETRY_ATTEMPTS_MULTIPLIER;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
@@ -1671,7 +1971,7 @@ app.post('/random/build', randomLimiter, async (req, res) => {
             break;
           } catch (error) {
             if (apiOnlyFilterPresent) {
-              const taggerCards = await fetchApiTaggerBatch(randomQuery, 1);
+              const taggerCards = await fetchApiTaggerBatch(randomQuery, 1, res);
               if (taggerCards.length > 0) {
                 scryfallCard = taggerCards[0];
                 break;
@@ -1734,30 +2034,38 @@ app.post('/random/build', randomLimiter, async (req, res) => {
       const hasRandomQuery = typeof normalizedQuery === 'string' && normalizedQuery.trim() !== '';
       if (count > 1 && hasRandomQuery) {
         if (priceFilterPresent || apiOnlyFilterPresent || setFilterPresent) {
-          let apiAttempts = 0;
-          const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-          const apiLoopStart = Date.now();
-          while (randomCards.length < count && apiAttempts < maxApiAttempts) {
-            if ((Date.now() - apiLoopStart) >= RANDOM_API_TIME_BUDGET_MS) {
-              warningMessage = `Timed out after ${RANDOM_API_TIME_BUDGET_MS}ms while fetching random cards; returning partial results.`;
-              break;
+          if (canServeApiOnlyFromTagCache) {
+            const neededCards = Math.max(count - randomCards.length, 1);
+            const taggerCards = await fetchApiTaggerBatch(randomQuery, neededCards, res);
+            for (const fallbackCard of taggerCards) {
+              addRandomCard(fallbackCard);
             }
-            apiAttempts++;
-            try {
-              const card = await scryfallLib.getRandomCard(randomQuery, true);
-              addRandomCard(card);
-            } catch (error) {
-              if (apiOnlyFilterPresent) {
-                const neededCards = Math.max(count - randomCards.length, 1);
-                const taggerCards = await fetchApiTaggerBatch(randomQuery, neededCards);
-                for (const fallbackCard of taggerCards) {
-                  addRandomCard(fallbackCard);
-                }
-                if (taggerCards.length > 0) {
-                  continue;
-                }
+          } else {
+            let apiAttempts = 0;
+            const maxApiAttempts = count * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+            const apiLoopStart = Date.now();
+            while (randomCards.length < count && apiAttempts < maxApiAttempts) {
+              if ((Date.now() - apiLoopStart) >= RANDOM_API_TIME_BUDGET_MS) {
+                warningMessage = `Timed out after ${RANDOM_API_TIME_BUDGET_MS}ms while fetching random cards; returning partial results.`;
+                break;
               }
-              throw error;
+              apiAttempts++;
+              try {
+                const card = await scryfallLib.getRandomCard(randomQuery, true);
+                addRandomCard(card);
+              } catch (error) {
+                if (apiOnlyFilterPresent) {
+                  const neededCards = Math.max(count - randomCards.length, 1);
+                  const taggerCards = await fetchApiTaggerBatch(randomQuery, neededCards, res);
+                  for (const fallbackCard of taggerCards) {
+                    addRandomCard(fallbackCard);
+                  }
+                  if (taggerCards.length > 0) {
+                    continue;
+                  }
+                }
+                throw error;
+              }
             }
           }
         } else {
@@ -1954,6 +2262,9 @@ app.get('/random', randomLimiter, async (req, res) => {
       hasApiOnlyFilter: apiOnlyFilterPresent,
       forceApi
     });
+    const canServeApiOnlyFromTagCache = apiOnlyFilterPresent
+      && USE_BULK_DATA
+      && bulkData.isLoaded();
     setQueryPlanHeader(res, executionPlan);
     if (explainRequested && executionPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
@@ -1976,6 +2287,15 @@ app.get('/random', randomLimiter, async (req, res) => {
       
       // Fallback to API if bulk data not loaded or returned null
       if (!scryfallCard) {
+        if (canServeApiOnlyFromTagCache) {
+          const taggerCards = await fetchApiTaggerBatch(randomQuery, 1, res);
+          if (taggerCards.length > 0) {
+            scryfallCard = taggerCards[0];
+          }
+        }
+      }
+
+      if (!scryfallCard) {
         const maxAttempts = MAX_RETRY_ATTEMPTS_MULTIPLIER;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
@@ -1984,7 +2304,7 @@ app.get('/random', randomLimiter, async (req, res) => {
             break;
           } catch (error) {
             if (apiOnlyFilterPresent) {
-              const taggerCards = await fetchApiTaggerBatch(randomQuery, 1);
+              const taggerCards = await fetchApiTaggerBatch(randomQuery, 1, res);
               if (taggerCards.length > 0) {
                 scryfallCard = taggerCards[0];
                 break;
@@ -2081,31 +2401,39 @@ app.get('/random', randomLimiter, async (req, res) => {
         const hasRandomQuery = typeof q === 'string' && q.trim() !== '';
         if (numCards > 1 && hasRandomQuery) {
           if (priceFilterPresent || apiOnlyFilterPresent || setFilterPresent) {
-            let apiAttempts = 0;
-            const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
-            const apiLoopStart = Date.now();
-
-            while (cards.length < numCards && apiAttempts < maxApiAttempts) {
-              if ((Date.now() - apiLoopStart) >= RANDOM_API_TIME_BUDGET_MS) {
-                warningMessage = `Timed out after ${RANDOM_API_TIME_BUDGET_MS}ms while fetching random cards; returning partial results.`;
-                break;
+            if (canServeApiOnlyFromTagCache) {
+              const neededCards = Math.max(numCards - cards.length, 1);
+              const taggerCards = await fetchApiTaggerBatch(randomQuery, neededCards, res);
+              for (const fallbackCard of taggerCards) {
+                addCard(fallbackCard);
               }
-              apiAttempts++;
-              try {
-                const card = await scryfallLib.getRandomCard(randomQuery, true);
-                addCard(card);
-              } catch (error) {
-                if (apiOnlyFilterPresent) {
-                  const neededCards = Math.max(numCards - cards.length, 1);
-                  const taggerCards = await fetchApiTaggerBatch(randomQuery, neededCards);
-                  for (const fallbackCard of taggerCards) {
-                    addCard(fallbackCard);
-                  }
-                  if (taggerCards.length > 0) {
-                    continue;
-                  }
+            } else {
+              let apiAttempts = 0;
+              const maxApiAttempts = numCards * MAX_RETRY_ATTEMPTS_MULTIPLIER;
+              const apiLoopStart = Date.now();
+
+              while (cards.length < numCards && apiAttempts < maxApiAttempts) {
+                if ((Date.now() - apiLoopStart) >= RANDOM_API_TIME_BUDGET_MS) {
+                  warningMessage = `Timed out after ${RANDOM_API_TIME_BUDGET_MS}ms while fetching random cards; returning partial results.`;
+                  break;
                 }
-                throw error;
+                apiAttempts++;
+                try {
+                  const card = await scryfallLib.getRandomCard(randomQuery, true);
+                  addCard(card);
+                } catch (error) {
+                  if (apiOnlyFilterPresent) {
+                    const neededCards = Math.max(numCards - cards.length, 1);
+                    const taggerCards = await fetchApiTaggerBatch(randomQuery, neededCards, res);
+                    for (const fallbackCard of taggerCards) {
+                      addCard(fallbackCard);
+                    }
+                    if (taggerCards.length > 0) {
+                      continue;
+                    }
+                  }
+                  throw error;
+                }
               }
             }
           } else {
@@ -2270,7 +2598,12 @@ app.get('/search', async (req, res) => {
       setExplainHeader(res, bulkData.getQueryExplain(searchQuery, 'search'));
     }
     
-    if (searchPlan.primary === 'bulk') {
+    if (apiOnlyFilterPresent) {
+      scryfallCards = await resolveTaggerSearchCards(searchQuery, limitNum, requestedUnique, res);
+      if (!scryfallCards) {
+        scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
+      }
+    } else if (searchPlan.primary === 'bulk') {
       scryfallCards = await bulkData.searchCards(searchQuery, limitNum);
       
       // Fallback to API if bulk data returned null (no matches)
@@ -2649,7 +2982,12 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`Metrics: http://localhost:${PORT}/metrics`);
     console.log(`Readiness probe: http://localhost:${PORT}/ready`);
     console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
-    
+
+    // Load persisted tag cache (non-fatal, runs in all modes)
+    tagCache.load().catch((err) =>
+      console.error('[Init] Tag cache load failed:', err.message)
+    );
+
     if (USE_BULK_DATA) {
       console.log('[Init] Loading bulk data in background...');
       bulkData.loadBulkData()
@@ -2689,6 +3027,15 @@ if (process.env.NODE_ENV !== 'test') {
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+
+// Receive tag cache updates broadcast from the primary cluster process
+if (process.send) {
+  process.on('message', (msg) => {
+    if (msg && msg.type === 'tag_cache_update') {
+      tagCache.ingestUpdate(msg.data);
+    }
+  });
 }
 
 // Export app for testing

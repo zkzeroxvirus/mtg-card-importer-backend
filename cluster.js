@@ -63,6 +63,20 @@ if (cluster.isPrimary) {
     console.log(`[Cluster] Worker ${worker.id} (PID: ${worker.process.pid}) is online`);
   });
 
+  // Relay tag cache updates so all workers converge quickly
+  cluster.on('message', (worker, msg) => {
+    if (!msg || msg.type !== 'tag_cache_update') {
+      return;
+    }
+
+    for (const id in cluster.workers) {
+      const target = cluster.workers[id];
+      if (target && target.id !== worker.id) {
+        target.send(msg);
+      }
+    }
+  });
+
   // Handle worker exits and automatic restart
   cluster.on('exit', (worker, code, signal) => {
     const stats = workerStats.get(worker.id) || {

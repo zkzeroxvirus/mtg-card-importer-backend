@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.921'
+mod_name, version = 'Card Importer', '1.923'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -80,14 +80,18 @@ newText=setmetatable({
     o.TextTool.setFontSize(f or 50)
     return function(t)
       if t then
-        o.TextTool.setValue(t)
+        pcall(function()
+          o.TextTool.setValue(t)
+        end)
       else
         for i,oo in ipairs(textItems) do
           if oo==o then
             table.remove(textItems,i)
           end
         end
-        o.destruct()
+        pcall(function()
+          o.destruct()
+        end)
       end
     end
   end})
@@ -716,14 +720,26 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
   if qTbl and qTbl.text then
     stopProgressTicker = createFastProgressTicker(qTbl, count)
   end
+  qTbl.stopProgressTicker = stopProgressTicker
+
+  local function safeStopTicker(finalCount)
+    pcall(function()
+      stopProgressTicker(finalCount)
+    end)
+    if qTbl then
+      qTbl.stopProgressTicker = nil
+    end
+  end
 
   postNDJSON(BACKEND_URL .. '/random/build', payload, function(wr)
       if not wr.is_done then
         return
       end
 
+      applyTagCacheStatusHint(wr, qTbl)
+
       if wr.is_error or (wr.response_code and wr.response_code >= 400) or not wr.text or wr.text == '' then
-        stopProgressTicker(0)
+        safeStopTicker(0)
         if onFallback then
           onFallback()
         else
@@ -734,7 +750,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
 
       local deckDat, issues = firstSpawnPayloadFromNDJSON(wr.text)
       if not deckDat then
-        stopProgressTicker(0)
+        safeStopTicker(0)
         if onFallback then
           onFallback()
         else
@@ -749,7 +765,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
       end
 
       if not deckDat.ContainedObjects then
-        stopProgressTicker(0)
+        safeStopTicker(0)
         if onFallback then
           onFallback()
         else
@@ -764,13 +780,62 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
         position=qTbl.position or {0,2,0},
         rotation=Vector(0,Player[qTbl.color].getPointerRotation(),180)
       }
-      stopProgressTicker(#deckDat.ContainedObjects)
+      safeStopTicker(#deckDat.ContainedObjects)
       spawnObjectData(spawnDat)
       Player[qTbl.color].broadcast('All '..tostring(#deckDat.ContainedObjects)..' cards loaded!',{0.5,0.8,0.5})
       endLoop()
     end)
 
   return true
+end
+
+function tryGetResponseHeader(wr, headerName)
+  if not wr or not headerName then
+    return nil
+  end
+
+  local okGetter, getter = pcall(function()
+    return wr.getResponseHeader
+  end)
+  if okGetter and type(getter) == 'function' then
+    local ok, value = pcall(function()
+      return getter(wr, headerName)
+    end)
+    if ok and value and tostring(value) ~= '' then
+      return tostring(value)
+    end
+  end
+
+  return nil
+end
+
+function applyTagCacheStatusHint(wr, qTbl)
+  local status = tryGetResponseHeader(wr, 'X-Tag-Cache-Status')
+  if not status then
+    return
+  end
+
+  status = tostring(status):lower()
+  if status == 'cold' then
+    if qTbl and qTbl.text then
+      qTbl.text('Spawning here\nFetching tag data from Scryfall...')
+    end
+    if qTbl and qTbl.color and Player[qTbl.color] then
+      Player[qTbl.color].broadcast('Fetching tag data from Scryfall (first-time cache warmup)...',{0.95,0.8,0.2})
+    end
+  elseif status == 'stale' then
+    if qTbl and qTbl.text then
+      qTbl.text('Spawning here\nUsing cached tag data, refreshing...')
+    end
+  elseif status == 'warm' then
+    if qTbl and qTbl.text then
+      qTbl.text('Spawning here\nUsing cached tag data')
+    end
+  end
+end
+
+function queryUsesTaggerFilter(queryRaw)
+  return tostring(queryRaw or ''):lower():match('(^|[%s%(+%-])(otag|atag|arttag|function):') ~= nil
 end
 
 local function fallbackRandomListRequest(url, qTbl, count)
@@ -780,11 +845,16 @@ local function fallbackRandomListRequest(url, qTbl, count)
     singleRequestUrl = singleRequestUrl .. separator .. 'count=' .. tostring(count)
   end
   WebRequest.get(singleRequestUrl, function(wr)
+    applyTagCacheStatusHint(wr, qTbl)
     spawnList(wr, qTbl)
   end)
 end
 
 local function dispatchRandomRequest(url, qTbl, count, queryRaw)
+  if queryUsesTaggerFilter(queryRaw) and qTbl and qTbl.text then
+    qTbl.text('Spawning here\nChecking tag cache...')
+  end
+
   if count then
     qTbl.deck = count
 
@@ -802,6 +872,7 @@ local function dispatchRandomRequest(url, qTbl, count, queryRaw)
   end
 
   WebRequest.get(url, function(wr)
+    applyTagCacheStatusHint(wr, qTbl)
     setCard(wr, qTbl)
   end)
 end
@@ -1355,19 +1426,20 @@ Importer=setmetatable({
   Random=function(qTbl)
     local url,q1=BACKEND_URL..'/random?compact=spawn','&q=is:hires'
     local directQueryRaw = nil
+    local decodedName = urlDecode(qTbl.name or '')
 
     local count = tonumber((qTbl.full or ''):match('%s(%d+)%s*$'))
     if not count then
-      count = tonumber((qTbl.name or ''):match('^(%d+)%s*$'))
+      count = tonumber(decodedName:match('^(%d+)%s*$'))
     end
     if count and count > 100 then
       count = 100
     end
 
-    if looksLikeStructuredRandomQuery(qTbl.name) then
+    if looksLikeStructuredRandomQuery(decodedName) then
       directQueryRaw = extractRandomQueryFromInput(qTbl.full)
       if not directQueryRaw or directQueryRaw == '' then
-        directQueryRaw = trimString(qTbl.name):gsub('%s+%d+%s*$', '')
+        directQueryRaw = trimString(decodedName):gsub('%s+%d+%s*$', '')
       end
 
       if directQueryRaw == '' then
@@ -1387,7 +1459,7 @@ Importer=setmetatable({
       {i='t%3Ainstant',s='t%3Asorcery',e='t%3Aenchantment',c='t%3Acreature',a='t%3Aartifact',l='t%3Aland',p='t%3Aplaneswalker',o='t%3Acontraption'}})do
       local t,q2=0,''
       for k,m in pairs(tbl) do
-        if string.match(qTbl.name:lower(),k)then
+        if string.match(decodedName:lower(),k)then
           if t==1 then q2='('..q2 end
           if t>0 then q2=q2..'or+'end
           t,q2=t+1,q2..m..'+'end end
@@ -1556,8 +1628,16 @@ function checkRequestTimeout()
       end
       
       -- Clear the hung request and move to next
+      if failedRequest.stopProgressTicker and type(failedRequest.stopProgressTicker) == 'function' then
+        pcall(function()
+          failedRequest.stopProgressTicker(0)
+        end)
+        failedRequest.stopProgressTicker = nil
+      end
       if failedRequest.text and type(failedRequest.text) == 'function' then
-        failedRequest.text()  -- Clean up the text indicator
+        pcall(function()
+          failedRequest.text()
+        end)  -- Clean up the text indicator
       end
       table.remove(Importer.request, 1)
       requestStartTime = nil
@@ -1598,8 +1678,16 @@ end
 
 function endLoop()
   if Importer.request[1] then 
+    if Importer.request[1].stopProgressTicker and type(Importer.request[1].stopProgressTicker) == 'function' then
+      pcall(function()
+        Importer.request[1].stopProgressTicker(0)
+      end)
+      Importer.request[1].stopProgressTicker = nil
+    end
     if Importer.request[1].text and type(Importer.request[1].text) == 'function' then
-      Importer.request[1].text()
+      pcall(function()
+        Importer.request[1].text()
+      end)
     end
     table.remove(Importer.request,1)
   end 

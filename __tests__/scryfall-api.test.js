@@ -99,6 +99,57 @@ describe('Scryfall API - Error Handling', () => {
     expect(result).toEqual([]);
   });
 
+  test('searchCards should follow next_page links until the requested limit is satisfied', async () => {
+    const getMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          data: [{ id: 'card-1' }, { id: 'card-2' }],
+          has_more: true,
+          next_page: 'https://api.scryfall.com/cards/search?page=2&q=test'
+        }
+      })
+      .mockResolvedValueOnce({
+        data: {
+          data: [{ id: 'card-3' }, { id: 'card-4' }],
+          has_more: false,
+          next_page: null
+        }
+      });
+
+    const localScryfall = loadScryfallWithGet(getMock);
+    localScryfall.globalQueue.delay = 0;
+    localScryfall.globalQueue.lastRequest = 0;
+
+    const result = await localScryfall.searchCards('test', 3);
+
+    expect(getMock).toHaveBeenCalledTimes(2);
+    expect(getMock).toHaveBeenNthCalledWith(1, '/cards/search?q=test&unique=cards');
+    expect(getMock).toHaveBeenNthCalledWith(2, '/cards/search?page=2&q=test');
+    expect(result).toEqual([{ id: 'card-1' }, { id: 'card-2' }, { id: 'card-3' }]);
+  });
+
+  test('searchCards should stop paging once the requested limit is reached', async () => {
+    const getMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          data: [{ id: 'card-1' }, { id: 'card-2' }, { id: 'card-3' }],
+          has_more: true,
+          next_page: 'https://api.scryfall.com/cards/search?page=2&q=test'
+        }
+      });
+
+    const localScryfall = loadScryfallWithGet(getMock);
+    localScryfall.globalQueue.delay = 0;
+    localScryfall.globalQueue.lastRequest = 0;
+
+    const result = await localScryfall.searchCards('test', 2);
+
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([{ id: 'card-1' }, { id: 'card-2' }]);
+  });
+
   test('withRetry should respect HTTP-date Retry-After values', async () => {
     const setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((fn, _ms) => {
       fn();
