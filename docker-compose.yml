@@ -9,6 +9,7 @@ services:
 
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=4096
       USE_BULK_DATA: "true"
       BULK_DATA_PATH: /app/data
       BULK_DATA_TYPE: default_cards

@@ -10,6 +10,7 @@ services:
 
     environment:
       NODE_ENV: development
+      NODE_OPTIONS: --max-old-space-size=4096
       PORT: 3000
       USE_BULK_DATA: "true"
       BULK_DATA_PATH: /app/data

@@ -17,6 +17,7 @@ RUN mkdir -p /app/data && chown -R node:node /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV NODE_OPTIONS=--max-old-space-size=4096
 ENV USE_BULK_DATA=true
 ENV BULK_DATA_TYPE=default_cards
 ENV BULK_DATA_PATH=/app/data
