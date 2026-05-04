@@ -241,4 +241,73 @@ describe('Bulk Data - Commander Filter', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test('should apply -c lockout against commander color identity', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-commander-lockout-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const cards = [
+      {
+        id: 'red-identity-empty-colors',
+        oracle_id: 'oracle-red-identity-empty-colors',
+        name: 'Red Identity Commander',
+        type_line: 'Legendary Creature — Human Warrior',
+        oracle_text: '',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'tst',
+        set_type: 'expansion',
+        lang: 'en',
+        colors: [],
+        color_identity: ['R']
+      },
+      {
+        id: 'mono-black-commander',
+        oracle_id: 'oracle-mono-black-commander',
+        name: 'Mono Black Commander',
+        type_line: 'Legendary Creature — Zombie Wizard',
+        oracle_text: '',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'tst',
+        set_type: 'expansion',
+        lang: 'en',
+        colors: ['B'],
+        color_identity: ['B']
+      }
+    ];
+
+    fs.writeFileSync(cardFile, zlib.gzipSync(JSON.stringify(cards)));
+
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      jest.resetModules();
+      let bulkData;
+      jest.isolateModules(() => {
+        bulkData = require('../lib/bulk-data');
+      });
+
+      await bulkData.loadBulkData();
+
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+      const card = await bulkData.getRandomCard('is:commander game:paper -c:w -c:r -c:g -c:u');
+      randomSpy.mockRestore();
+
+      expect(card).toBeTruthy();
+      expect(card.id).toBe('mono-black-commander');
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
