@@ -20,23 +20,49 @@ isSpawning = false
 spawnIndicatorText = nil
 cardsSpawned = 0
 totalCardsToSpawn = 0
-NUMBER_BUTTON_COUNT = 22
+RANDOM_CARD_SPAWN_COUNT = 100
 scriptActive = true
+
+-- Commander color filter variables (separate from card color filters)
+CommanderWhite = false
+CommanderBlue = false
+CommanderBlack = false
+CommanderRed = false
+CommanderGreen = false
+CommanderColorless = false
+CommanderLockoutMode = false  -- false = Color Combo Mode, true = Lockout Mode
+COMMANDER_SPAWN_MIN = 1
+COMMANDER_SPAWN_MAX = 20
+commanderSpawnCount = 5
+
+-- Dynamic button index cache keyed by click_function
+buttonIndexesByClick = {}
+
+local function refreshButtonIndexes()
+    buttonIndexesByClick = {}
+    local buttons = self.getButtons() or {}
+    for i, btn in ipairs(buttons) do
+        if btn and btn.click_function then
+            buttonIndexesByClick[btn.click_function] = i - 1
+        end
+    end
+end
+
+local function getButtonIndex(clickFunctionName)
+    refreshButtonIndexes()
+    return buttonIndexesByClick[clickFunctionName]
+end
+
+local function setButtonToggleColor(clickFunctionName, color)
+    local idx = getButtonIndex(clickFunctionName)
+    if idx ~= nil then
+        self.editButton({ index = idx, color = color })
+    end
+end
 --------------------------------------------------------------------------
 function onLoad()
     scriptActive = true
-    local item = self
-    item.createButton({
-        label = "Spawn Commanders",  -- Button text
-        click_function = "spawnRandomCommanders",  -- Function to call when clicked
-        function_owner = self,  -- The owner of this button
-        position = {4.2, 0, -3.9},  -- Position of the button relative to the item (adjust as needed)
-        rotation = {0, 0, 0},  -- Rotation (if necessary)
-        width = 2000,  -- Width of the button (adjust based on item size)
-        height = 450,  -- Height of the button (adjust based on item size)
-        font_size = 225,  -- Font size for the button label
-        scale = {1, 1, 1}  -- Scale of the button (optional)
-    })
+    createSpawnButton()
 end
 
 -----------------------------------------------------------------------
@@ -145,18 +171,8 @@ end
 
 local spawnNDJSONQueue
 
-local function buildDeckFromTTSObjects(spawnLines, spawnPos)
-    local cards = {}
-
-    for _, line in ipairs(spawnLines) do
-        local parsed = decodeNDJSONLine(line)
-        if not parsed or parsed.Name ~= 'Card' or not parsed.CardID or not parsed.CustomDeck then
-            return nil
-        end
-        cards[#cards + 1] = parsed
-    end
-
-    if #cards <= 1 then
+local function buildDeckFromTTSObjects(cards, spawnPos)
+    if not cards or #cards <= 1 then
         return nil
     end
 
@@ -217,7 +233,7 @@ local function finishSpawnFromNDJSON(respText, spawnPos, onComplete)
             endSpawning()
             if onComplete then onComplete(spawnedCount > 0) end
         end, 0.25)
-    end, 2)
+    end)
 end
 
 local function handleNDJSONBuildResponse(resp, spawnPos, onComplete, onFallback, context)
@@ -245,7 +261,9 @@ end
 
 spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
     local lines = splitLines(respText)
-    local spawnLines = {}
+    local fallbackSpawnLines = {}
+    local cardObjects = {}
+    local directDeck = nil
     local issues = {}
 
     for _, line in ipairs(lines) do
@@ -254,8 +272,14 @@ spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
             issues[#issues + 1] = parsed.warning or ((parsed.card_name or 'Card') .. ' was skipped')
         elseif parsed and parsed.object == 'error' then
             issues[#issues + 1] = parsed.error or parsed.details or 'Spawn error'
+        elseif parsed and parsed.Name == 'DeckCustom' and parsed.ContainedObjects and #parsed.ContainedObjects > 0 then
+            directDeck = parsed
+        elseif parsed and parsed.Name == 'Card' and parsed.CardID and parsed.CustomDeck then
+            cardObjects[#cardObjects + 1] = parsed
         else
-            table.insert(spawnLines, line)
+            if line and line ~= '' then
+                fallbackSpawnLines[#fallbackSpawnLines + 1] = line
+            end
         end
     end
 
@@ -265,33 +289,79 @@ spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
         printToAll('Spawn warnings: ' .. tostring(#issues) .. ' cards were skipped.', Color.Orange)
     end
 
-    local compactDeck = buildDeckFromTTSObjects(spawnLines, spawnPos)
+    if directDeck then
+        local selfRot = self.getRotation()
+        if not directDeck.Transform then
+            directDeck.Transform = {}
+        end
+        directDeck.Transform.posX = spawnPos and spawnPos.x or directDeck.Transform.posX or 0
+        directDeck.Transform.posY = spawnPos and spawnPos.y or directDeck.Transform.posY or 2
+        directDeck.Transform.posZ = spawnPos and spawnPos.z or directDeck.Transform.posZ or 0
+        directDeck.Transform.rotX = selfRot.x
+        directDeck.Transform.rotY = selfRot.y
+        directDeck.Transform.rotZ = 180
+        directDeck.Transform.scaleX = directDeck.Transform.scaleX or 1
+        directDeck.Transform.scaleY = directDeck.Transform.scaleY or 1
+        directDeck.Transform.scaleZ = directDeck.Transform.scaleZ or 1
+
+        spawnObjectData({
+            data = directDeck,
+            position = { directDeck.Transform.posX, directDeck.Transform.posY, directDeck.Transform.posZ },
+            rotation = { directDeck.Transform.rotX, directDeck.Transform.rotY, directDeck.Transform.rotZ }
+        })
+        cardsSpawned = #(directDeck.ContainedObjects or {})
+        updateSpawningIndicator()
+        if onDone then
+            onDone(cardsSpawned)
+        end
+        return
+    end
+
+    local compactDeck = buildDeckFromTTSObjects(cardObjects, spawnPos)
     if compactDeck then
         spawnObjectData({
             data = compactDeck,
             position = { compactDeck.Transform.posX, compactDeck.Transform.posY, compactDeck.Transform.posZ },
             rotation = { compactDeck.Transform.rotX, compactDeck.Transform.rotY, compactDeck.Transform.rotZ }
         })
-        cardsSpawned = #spawnLines
+        cardsSpawned = #cardObjects
         updateSpawningIndicator()
         if onDone then
-            onDone(#spawnLines)
+            onDone(#cardObjects)
+        end
+        return
+    end
+
+    if #cardObjects == 1 and #fallbackSpawnLines == 0 then
+        local selfRot = self.getRotation()
+        spawnObjectData({
+            data = cardObjects[1],
+            position = { spawnPos.x, spawnPos.y, spawnPos.z },
+            rotation = { selfRot.x, selfRot.y, 180 }
+        })
+        cardsSpawned = 1
+        updateSpawningIndicator()
+        if onDone then
+            onDone(1)
         end
         return
     end
 
     local index = 1
-    local total = #spawnLines
-    local totalSpawnLines = #spawnLines
-    local adaptiveBatch = 2
+    local total = #fallbackSpawnLines
+    local totalSpawnLines = #fallbackSpawnLines
+    local adaptiveBatch = 4
     if totalSpawnLines >= 40 then
-        adaptiveBatch = 4
+        adaptiveBatch = 8
     end
     if totalSpawnLines >= 80 then
-        adaptiveBatch = 6
+        adaptiveBatch = 12
+    end
+    if totalSpawnLines >= 140 then
+        adaptiveBatch = 16
     end
     local batch = batchSize or adaptiveBatch
-    local indicatorUpdateStep = math.max(4, math.floor(totalSpawnLines / 12))
+    local indicatorUpdateStep = math.max(8, math.floor(totalSpawnLines / 10))
 
     local function processBatch()
         if not scriptActive then
@@ -300,7 +370,7 @@ spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
 
         local processed = 0
         while index <= total and processed < batch do
-            spawnObjectJSON({ json = spawnLines[index] })
+            spawnObjectJSON({ json = fallbackSpawnLines[index] })
             cardsSpawned = cardsSpawned + 1
             if cardsSpawned == totalCardsToSpawn or (cardsSpawned % indicatorUpdateStep) == 0 then
                 updateSpawningIndicator()
@@ -320,14 +390,24 @@ spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
 end
 
 -- START TOKEN random spawning is intentionally routed only through /random/build.
-local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onFallback)
-    local enforceCommander = true
+local function getCommanderEnforcementSetting(defaultValue)
+    local enforceCommander = defaultValue
+    if enforceCommander == nil then
+        enforceCommander = true
+    end
+
     if Global and Global.getVar then
         local globalSetting = Global.getVar('MTG_ENFORCE_COMMANDER_FORMAT')
         if globalSetting ~= nil then
             enforceCommander = globalSetting ~= false
         end
     end
+
+    return enforceCommander
+end
+
+local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onFallback, enforceCommanderOverride)
+    local enforceCommander = getCommanderEnforcementSetting(enforceCommanderOverride)
 
     local rot = self.getRotation()
     local payload = {
@@ -353,14 +433,141 @@ local function spawnRandomDeckViaBackend(query, count, spawnPos, onComplete, onF
     end)
 end
 
-local function makeSpawnRandomCardsHandler(count)
-    return function()
-        spawnRandomCardsByNumber(count)
+local function spawnSingleRandomCardViaBackend(query, spawnPos, onComplete, onFallback, enforceCommanderOverride)
+    local enforceCommander = getCommanderEnforcementSetting(enforceCommanderOverride)
+    local encodedQuery = URLencode(query or '')
+    local url = BACKEND_URL .. '/random?compact=spawn&q=' .. encodedQuery .. '&enforceCommander=' .. tostring(enforceCommander)
+
+    WebRequest.get(url, function(resp)
+        if not resp.is_done then
+            return
+        end
+
+        if resp.is_error or (resp.response_code and resp.response_code >= 400) or not resp.text or resp.text == '' then
+            local details = resp.error or ('HTTP ' .. tostring(resp.response_code or 'unknown'))
+            if resp.text and resp.text ~= '' then
+                details = details .. ' | ' .. tostring(resp.text)
+            end
+            print('Single random card request failed: ' .. tostring(details))
+            if onFallback then
+                onFallback(resp)
+                return
+            end
+            endSpawning()
+            if onComplete then onComplete(false) end
+            return
+        end
+
+        local ok, parsed = pcall(function()
+            return JSON.decode(resp.text)
+        end)
+
+        if not ok or not parsed then
+            print('Single random card response was not valid JSON')
+            if onFallback then
+                onFallback(resp)
+                return
+            end
+            endSpawning()
+            if onComplete then onComplete(false) end
+            return
+        end
+
+        if parsed.object == 'error' then
+            print('Single random card request returned error: ' .. tostring(parsed.details or parsed.error or 'unknown'))
+            if onFallback then
+                onFallback(resp)
+                return
+            end
+            endSpawning()
+            if onComplete then onComplete(false) end
+            return
+        end
+
+        spawnSingleCardFromData(parsed, { spawnPos.x, spawnPos.y, spawnPos.z }, 1)
+        if onComplete then onComplete(true) end
+    end)
+end
+
+function spawnRandomCards100()
+    -- Spawn 100 cards, then replace this button with a small "1" button
+    if isSpawning then
+        printToAll("Cards are still spawning! Please wait...", Color.Red)
+        return
+    end
+    
+    isSpawning = true
+    totalCardsToSpawn = RANDOM_CARD_SPAWN_COUNT
+    cardsSpawned = 0
+    
+    local spawnPos = getSpawnAnchor()
+    createSpawningIndicator(spawnPos)
+    
+    local id = ""
+    local selectedColorCount = 0
+    if White then id = id .. "W" end
+    if White then selectedColorCount = selectedColorCount + 1 end
+    if Blue  then id = id .. "U" end
+    if Blue then selectedColorCount = selectedColorCount + 1 end
+    if Black then id = id .. "B" end
+    if Black then selectedColorCount = selectedColorCount + 1 end
+    if Red   then id = id .. "R" end
+    if Red then selectedColorCount = selectedColorCount + 1 end
+    if Green then id = id .. "G" end
+    if Green then selectedColorCount = selectedColorCount + 1 end
+    if id == "" then id = "C" end
+    local baseQuery = "id:" .. id
+
+    local function spawnRandomWithQuery(query, countToSpawn)
+        if countToSpawn <= 1 then
+            spawnSingleRandomCardViaBackend(query, spawnPos, function()
+                -- After 100 cards spawn, replace "Spawn 100" button with small "1" button
+                replaceSpawn100WithButton1()
+            end, function()
+                print('Single random spawn failed via /random?compact=spawn')
+                endSpawning()
+            end, false)
+            return
+        end
+
+        spawnRandomDeckViaBackend(query, countToSpawn, spawnPos, function()
+            -- After 100 cards spawn, replace "Spawn 100" button with small "1" button
+            replaceSpawn100WithButton1()
+        end, function()
+            print('Random spawn failed via /random/build')
+            endSpawning()
+        end, false)
+    end
+
+    if selectedColorCount == 0 or selectedColorCount == 5 then
+        spawnRandomWithQuery(baseQuery, RANDOM_CARD_SPAWN_COUNT)
+    else
+        spawnRandomWithQuery(baseQuery, RANDOM_CARD_SPAWN_COUNT)
     end
 end
 
-for i = 1, NUMBER_BUTTON_COUNT do
-    _G["spawnRandomCards" .. i] = makeSpawnRandomCardsHandler(i)
+function replaceSpawn100WithButton1()
+    -- Remove the "Spawn 100" button and create small "1" button
+    local spawn100Index = getButtonIndex("spawnRandomCards100")
+    if spawn100Index ~= nil then
+        self.removeButton(spawn100Index)
+    end
+    self.createButton({
+        click_function = "spawnSingleCard",
+        function_owner = self,
+        label = "Spawn 1",
+        position = {4.2, 0, -0.4},
+        rotation = {0, 0, 0},
+        scale = {1, 1, 1},
+        width = 2600,
+        height = 325,
+        font_size = 175,
+        color = Color.Grey
+    })
+end
+
+function spawnSingleCard()
+    spawnRandomCardsByNumber(1)
 end
 
 function buildDeckFromList(list, nickname, description, idOffset)
@@ -466,20 +673,19 @@ end
 -- All cards are spawned at the same position (startPos) to form a pile.
 ---------------------------------------------------------------------------
 function spawnRandomCommanders()
-    self.removeButton(0)  -- removes the button with index 0
-    spawnRandomCommandersWO(true)
+    spawnRandomCommandersWO(false)
 end
 
 function spawnRandomCommandersWO(shouldCreateButton)
-    if shouldCreateButton == nil then
-        shouldCreateButton = true
+    if type(shouldCreateButton) ~= "boolean" then
+        shouldCreateButton = false
     end
     if isSpawning then
         printToAll("Cards are still spawning! Please wait...", Color.Red)
         return
     end
 
-    local commanderCount = 5
+    local commanderCount = commanderSpawnCount
     local spawnPos = getSpawnAnchor()
 
     isSpawning = true
@@ -487,7 +693,43 @@ function spawnRandomCommandersWO(shouldCreateButton)
     cardsSpawned = 0
     createSpawningIndicator(spawnPos)
 
+    -- Build query based on commander color filters and current mode.
     local query = "is:commander game:paper"
+    if CommanderLockoutMode then
+        -- Lockout Mode: exclude selected colors from results
+        if CommanderWhite then query = query .. " -c:w" end
+        if CommanderBlue  then query = query .. " -c:u" end
+        if CommanderBlack then query = query .. " -c:b" end
+        if CommanderRed   then query = query .. " -c:r" end
+        if CommanderGreen then query = query .. " -c:g" end
+    else
+        -- Color Combo Mode: match exact color identity
+        local id = ""
+        if CommanderWhite then id = id .. "w" end
+        if CommanderBlue  then id = id .. "u" end
+        if CommanderBlack then id = id .. "b" end
+        if CommanderRed   then id = id .. "r" end
+        if CommanderGreen then id = id .. "g" end
+        if CommanderColorless then id = id .. "c" end
+        if id ~= "" then
+            query = query .. " id=" .. id
+        end
+    end
+
+    if commanderCount <= 1 then
+        spawnSingleRandomCardViaBackend(query, spawnPos, function()
+            if shouldCreateButton then
+                createSpawnButton()
+            end
+        end, function()
+            print('Single commander spawn failed via /random?compact=spawn')
+            endSpawning()
+            if shouldCreateButton then
+                createSpawnButton()
+            end
+        end)
+        return
+    end
 
     spawnRandomDeckViaBackend(query, commanderCount, spawnPos, function()
         if shouldCreateButton then
@@ -501,12 +743,38 @@ function spawnRandomCommandersWO(shouldCreateButton)
         end
     end)
 end
+
+local function getCommanderCountLabel()
+    return tostring(commanderSpawnCount)
+end
+
+local function updateCommanderCountButton()
+    local idx = getButtonIndex("commanderCountDisplay")
+    if idx ~= nil then
+        self.editButton({ index = idx, label = getCommanderCountLabel() })
+    end
+end
+
+function commanderCountDisplay()
+    -- Intentionally empty: this is a label-like button for display only.
+end
+
+function commanderCountMinus()
+    commanderSpawnCount = math.max(COMMANDER_SPAWN_MIN, commanderSpawnCount - 1)
+    updateCommanderCountButton()
+end
+
+function commanderCountPlus()
+    commanderSpawnCount = math.min(COMMANDER_SPAWN_MAX, commanderSpawnCount + 1)
+    updateCommanderCountButton()
+end
+
 function createSpawnButton()
-    -- Clear any existing buttons to avoid duplicates after mulligans
+    -- Clear all buttons and recreate them fresh
     self.clearButtons()
 
     self.createButton({
-        label="Mulligan/50 Essence",
+        label="Spawn Commanders",
         click_function="spawnRandomCommandersWO",
         function_owner=self,
         position={.9, 0, -1.9},
@@ -590,32 +858,146 @@ function createSpawnButton()
         font_size      = 150,
         color          = Color.Grey
     })
-    -- Create 22 numbered buttons arranged in two rows under the Random Cards button.
-    local buttonWidth = 325   -- button width in pixels
-    local buttonHeight = 325  -- button height in pixels
-    local numPerRow = 11      -- two rows of 11 buttons each
-    local startX = 1.65      -- adjust to center the row (for 11 buttons)
-    local startZ = -0.1        -- first row directly under Random Cards button
-    local spacingX = 0.65      -- horizontal spacing so buttons are touching
-    local spacingZ = -0.65     -- vertical spacing for second row
-    for i = 1, NUMBER_BUTTON_COUNT do
-        local row = math.floor((i - 1) / numPerRow)
-        local col = (i - 1) % numPerRow
-        local posX = startX + col * spacingX
-        local posZ = startZ + row * spacingZ
-        self.createButton({
-            click_function = "spawnRandomCards" .. i,
-            function_owner = self,
-            label = tostring(i),
-            position = { posX, 0, posZ },
-            rotation = {0, 0, 0},
-            scale = {1, 1, 1},
-            width = buttonWidth,
-            height = buttonHeight,
-            font_size = 150,
-            color = Color.Grey
-        })
-    end
+    -- Single random card-count button for the variant: always spawn 100 cards.
+    -- After spawn, this will be replaced by a small "1" button via replaceSpawn100WithButton1()
+    self.createButton({
+        click_function = "spawnRandomCards100",
+        function_owner = self,
+        label = "Spawn 100",
+        position = {4.2, 0, -0.4},
+        rotation = {0, 0, 0},
+        scale = {1, 1, 1},
+        width = 2600,
+        height = 325,
+        font_size = 175,
+        color = Color.Grey
+    })
+
+    -- Commander count controls for Spawn Commanders.
+    self.createButton({
+        click_function = "commanderCountMinus",
+        function_owner = self,
+        label          = "-",
+        position       = {2.45, 0, -1.9},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 180,
+        height         = 180,
+        font_size      = 140,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "commanderCountDisplay",
+        function_owner = self,
+        label          = getCommanderCountLabel(),
+        position       = {2.8, 0, -1.9},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 220,
+        height         = 180,
+        font_size      = 120,
+        color          = Color.Black
+    })
+    self.createButton({
+        click_function = "commanderCountPlus",
+        function_owner = self,
+        label          = "+",
+        position       = {3.15, 0, -1.9},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 180,
+        height         = 180,
+        font_size      = 140,
+        color          = Color.Grey
+    })
+    
+    -- Commander color toggles: positioned below Spawn Commanders button.
+    self.createButton({
+        click_function = "tCmdB",
+        function_owner = self,
+        label          = "B",
+        position       = {1.775, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 150,
+        height         = 100,
+        font_size      = 75,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tCmdW",
+        function_owner = self,
+        label          = "W",
+        position       = {1.425, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 150,
+        height         = 100,
+        font_size      = 75,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tCmdU",
+        function_owner = self,
+        label          = "U",
+        position       = {1.075, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 150,
+        height         = 100,
+        font_size      = 75,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tCmdG",
+        function_owner = self,
+        label          = "G",
+        position       = {0.725, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 150,
+        height         = 100,
+        font_size      = 75,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tCmdR",
+        function_owner = self,
+        label          = "R",
+        position       = {0.375, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 150,
+        height         = 100,
+        font_size      = 75,
+        color          = Color.Grey
+    })
+    self.createButton({
+        click_function = "tCmdC",
+        function_owner = self,
+        label          = "C",
+        position       = {0.025, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 150,
+        height         = 100,
+        font_size      = 75,
+        color          = Color.Grey
+    })
+    -- Commander filter mode toggle: switches between Color Combo and Lockout mode.
+    -- Resets all color selections on switch to prevent invalid state.
+    self.createButton({
+        click_function = "toggleCommanderMode",
+        function_owner = self,
+        label          = "Mode:\nCombo",
+        position       = {2.45, 0, -2.3},
+        rotation       = {0, 0, 0},
+        scale          = {1, 1, 1},
+        width          = 400,
+        height         = 200,
+        font_size      = 60,
+        color          = Color.Grey
+    })
 end
 
 
@@ -761,42 +1143,139 @@ end
 function tB()
     Black = not Black
     local newColor = Black and Color.Black or Color.Grey
-    self.editButton({ index = 2, color = newColor })
+    setButtonToggleColor("tB", newColor)
     printToAll("Black is now " .. tostring(Black))
 end
 
 function tW()
     White = not White
     local newColor = White and Color.White or Color.Grey
-    self.editButton({ index = 3, color = newColor })
+    setButtonToggleColor("tW", newColor)
     printToAll("White is now " .. tostring(White))
 end
 
 function tU()
     Blue = not Blue
     local newColor = Blue and Color.Blue or Color.Grey
-    self.editButton({ index = 4, color = newColor })
+    setButtonToggleColor("tU", newColor)
     printToAll("Blue is now " .. tostring(Blue))
 end
 
 function tG()
     Green = not Green
     local newColor = Green and Color.Green or Color.Grey
-    self.editButton({ index = 5, color = newColor })
+    setButtonToggleColor("tG", newColor)
     printToAll("Green is now " .. tostring(Green))
 end
 
 function tR()
     Red = not Red
     local newColor = Red and Color.Red or Color.Grey
-    self.editButton({ index = 6, color = newColor })
+    setButtonToggleColor("tR", newColor)
     printToAll("Red is now " .. tostring(Red))
 end
 
--- spawnRandomCards spawns 22 random cards (default) using the active color identity filters.
+-- Commander color toggle helpers
+---------------------------------------------------------------------------
+local function getCommanderToggleColor(isActive, colorName)
+    if not isActive then return Color.Grey end
+    if CommanderLockoutMode then
+        return Color.new(1, 0.5, 0)  -- orange = locked out
+    end
+    -- Combo mode: use the card color
+    if colorName == "B" then return Color.Black end
+    if colorName == "W" then return Color.White end
+    if colorName == "U" then return Color.Blue end
+    if colorName == "G" then return Color.Green end
+    if colorName == "R" then return Color.Red end
+    if colorName == "C" then return Color.Brown end
+    return Color.Grey
+end
+
+local function updateAllCommanderColorButtons()
+    setButtonToggleColor("tCmdB", getCommanderToggleColor(CommanderBlack, "B"))
+    setButtonToggleColor("tCmdW", getCommanderToggleColor(CommanderWhite, "W"))
+    setButtonToggleColor("tCmdU", getCommanderToggleColor(CommanderBlue, "U"))
+    setButtonToggleColor("tCmdG", getCommanderToggleColor(CommanderGreen, "G"))
+    setButtonToggleColor("tCmdR", getCommanderToggleColor(CommanderRed, "R"))
+    setButtonToggleColor("tCmdC", getCommanderToggleColor(CommanderColorless, "C"))
+end
+
+-- Commander mode toggle
+---------------------------------------------------------------------------
+function toggleCommanderMode()
+    CommanderLockoutMode = not CommanderLockoutMode
+    -- Safety: reset all color selections when switching modes
+    CommanderWhite    = false
+    CommanderBlue     = false
+    CommanderBlack    = false
+    CommanderRed      = false
+    CommanderGreen    = false
+    CommanderColorless = false
+    -- Update the mode button appearance
+    local modeLabel = CommanderLockoutMode and "Mode:\nLockout" or "Mode:\nCombo"
+    local modeColor = CommanderLockoutMode and Color.new(1, 0.5, 0) or Color.Grey
+    local idx = getButtonIndex("toggleCommanderMode")
+    if idx ~= nil then
+        self.editButton({ index = idx, label = modeLabel, color = modeColor })
+    end
+    -- Refresh all color toggle buttons to reflect cleared state
+    updateAllCommanderColorButtons()
+    local modeName = CommanderLockoutMode and "Lockout" or "Color Combo"
+    printToAll("Commander filter mode: " .. modeName, Color.White)
+end
+
+-- Commander color toggle functions
+---------------------------------------------------------------------------
+function tCmdB()
+    CommanderBlack = not CommanderBlack
+    setButtonToggleColor("tCmdB", getCommanderToggleColor(CommanderBlack, "B"))
+    local suffix = CommanderLockoutMode and " locked out" or ""
+    printToAll("Commander Black" .. suffix .. ": " .. tostring(CommanderBlack))
+end
+
+function tCmdW()
+    CommanderWhite = not CommanderWhite
+    setButtonToggleColor("tCmdW", getCommanderToggleColor(CommanderWhite, "W"))
+    local suffix = CommanderLockoutMode and " locked out" or ""
+    printToAll("Commander White" .. suffix .. ": " .. tostring(CommanderWhite))
+end
+
+function tCmdU()
+    CommanderBlue = not CommanderBlue
+    setButtonToggleColor("tCmdU", getCommanderToggleColor(CommanderBlue, "U"))
+    local suffix = CommanderLockoutMode and " locked out" or ""
+    printToAll("Commander Blue" .. suffix .. ": " .. tostring(CommanderBlue))
+end
+
+function tCmdG()
+    CommanderGreen = not CommanderGreen
+    setButtonToggleColor("tCmdG", getCommanderToggleColor(CommanderGreen, "G"))
+    local suffix = CommanderLockoutMode and " locked out" or ""
+    printToAll("Commander Green" .. suffix .. ": " .. tostring(CommanderGreen))
+end
+
+function tCmdR()
+    CommanderRed = not CommanderRed
+    setButtonToggleColor("tCmdR", getCommanderToggleColor(CommanderRed, "R"))
+    local suffix = CommanderLockoutMode and " locked out" or ""
+    printToAll("Commander Red" .. suffix .. ": " .. tostring(CommanderRed))
+end
+
+function tCmdC()
+    if CommanderLockoutMode then
+        printToAll("Colorless lockout is not supported. Switch to Combo mode.", Color.Orange)
+        return
+    end
+    CommanderColorless = not CommanderColorless
+    setButtonToggleColor("tCmdC", getCommanderToggleColor(CommanderColorless, "C"))
+    printToAll("Commander Colorless: " .. tostring(CommanderColorless))
+end
+
+-- spawnRandomCards spawns 100 random cards (default) using the active color identity filters.
 ---------------------------------------------------------------------------
 function spawnRandomCards()
-    spawnRandomCardsByNumber(22)
+    spawnRandomCardsByNumber(RANDOM_CARD_SPAWN_COUNT)
 end
 
 ---------------------------------------------------------------------------
@@ -836,10 +1315,18 @@ function spawnRandomCardsByNumber(n)
     local baseQuery = "id:" .. id
 
     local function spawnRandomWithQuery(query, countToSpawn)
+        if countToSpawn <= 1 then
+            spawnSingleRandomCardViaBackend(query, spawnPos, nil, function()
+                print('Single random spawn failed via /random?compact=spawn')
+                endSpawning()
+            end, false)
+            return
+        end
+
         spawnRandomDeckViaBackend(query, countToSpawn, spawnPos, nil, function()
             print('Random spawn failed via /random/build')
             endSpawning()
-        end)
+        end, false)
     end
 
     spawnRandomWithQuery(baseQuery, n)

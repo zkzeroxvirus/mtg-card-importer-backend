@@ -49,7 +49,9 @@ local CRYPT_REWARDS = {
     { name = "Respited Gift", desc = "+1 Cashout per fight.\nUnlock: Beat Kibo, Uktabi Prince." },
     { name = "Might of Okaun", desc = "During your upkeep flip a coin. If you win the flip, draw a card. If you lose the flip, lose 1 life.\nUnlock: Beat Okaun and Zndrsplt." },
     { name = "Shapeshifter", desc = "All creatures you own in all zones gain a creature type your commander has. Pick this after deckbuilding.\nUnlock: Beat Morophon, the Boundless." },
-    { name = "Unearthly Reach", desc = "+2 ticket slots.\nUnlock: Beat Tormod and Ravos." },
+    { name = "Unearthly Reach", desc = "It gives either an additional Upkeep or End Step.\nUnlock: Beat Tormod and Ravos." },
+    { name = "Momentum Engine", desc = "Until end of turn, you don't lose unspent mana as steps and phases end.\nUnlock: Beat Yurlok of Scorch Thrash." },
+    { name = "Eternal Servitude", desc = "Once each turn, whenever a creature you control becomes the target of a spell, it phases out.\n\nWhenever a creature you control phases in, create a tapped 1/1 white Spirit creature token.\nUnlock: Beat King of the Oathbreakers." },
 }
 
 -- Achievements (effects + unlock conditions)
@@ -61,35 +63,71 @@ local ACHIEVEMENTS_LIST = {
     { name = "Simic Identity Buff - Adaptive Pattern", desc = "If your commander is Blue: Once per turn, when you draw your second card this turn, you may put a +1/+1 counter on a creature you control. \nIf your commander is Green: Once per turn, when a +1/+1 counter is placed on a creature you control, you may draw a card.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, Blue, or Simic." },
     { name = "Azorius Identity Buff - Law of Efficiency", desc = "If your commander is White: Once per turn, when you cast a spell during another player's turn, you may gain 1 life. \nIf your commander is Blue: Once per turn, when you counter a spell or ability, you may draw a card.\nUnlock: Beat a crypt fight where all players' commander identities were either White, Blue, or Azorius." },
     { name = "Boros Identity Buff - Charge of Conviction", desc = "If your commander is White: Once per turn, when one or more creatures you control attacks, you may untap one creature you control. \nIf your commander is Red: Once per turn, when a creature you control attacks alone, you may give it +2/+0 until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, White, or Boros." },
-    { name = "Changeling's Land Form", desc = "At the beginning of the game start with a random basic land on the battlefield.\nUnlock: Beat a crypt fight with a Changeling commander." },
+    { name = "Changeling's Land Form", desc = "After you draw your opening hand and finish mulligans, you may put a Random Basic Land card from outside the game into your hand.\n(Beat a crypt fight with a Changeling Commander)" },
     { name = "Golgari Identity Buff - Cycle of Rot", desc = "If your commander is Black: Once per turn, when a permanent enters your graveyard from the battlefield, you may put a -1/-1 counter on target creature. \nIf your commander is Green: Once per turn, when a creature dies, you may create a Food token.\nUnlock: Beat a crypt fight where all players' commander identities were either Black, Green, or Golgari." },
     { name = "Izzet Identity Buff - Experimental Sparks", desc = "If your commander is Blue: Once per turn, when you cast an instant, you may scry 1, then draw 1. \nIf your commander is Red: Once per turn, when you cast a sorcery, you may deal 1 damage to any target.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Red, or Izzet." },
     { name = "Dimir Identity Buff - Whisper Network", desc = "If your commander is Blue: Once per turn, when you cast a spell on an opponent's turn, you may untap target nonland permanent. \nIf your commander is Black: Once per turn, when you target a permanent you don't control, you may exile target card in any graveyard.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Black, or Dimir." },
     { name = "Selesnya Identity Buff - Harmony's Bloom", desc = "If your commander is White: Once per turn, when you gain life, you may put a +1/+1 counter on a creature you control. \nIf your commander is Green: Once per turn, when you cast a creature spell, you may gain 1 life.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, White, or Selesnya." },
-    { name = "Raccoon's Rage", desc = "At the beginning of the game start with a Mountain on the battlefield.\nUnlock: Beat a crypt fight with a Raccoon commander." },
+    { name = "Raccoon's Rage", desc = "After you draw your opening hand and finish mulligans, you may put a Mountain card from outside the game into your hand.\n(Beat a crypt fight with a Raccoon Commander)" },
     { name = "Gamblers never quit", desc = "Once per town, when you pick your first town action that costs XP, you flip a coin. You may not use this buff if you cannot pay double the XP cost. If you win the coin flip, the town action is free. If you lose the coin flip, the town action costs double XP.\nUnlock: Win a coin flip 6 times in a row." },
     { name = "Stick it To Me", desc = "At the beginning of the game, spawn 5 random sticker sheets to create your sticker deck.\nUnlock: Beat a crypt fight with stickers." },
     { name = "Gruul Identity Buff - Primal Fury", desc = "If your commander is Red: Once per turn, when a creature you control becomes modified, you may give it haste until end of turn. \nIf your commander is Green: Once per turn, when a creature you control attacks, you may give it trample until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, Green, or Gruul." },
     { name = "Chaos", desc = "Once per game, reroll an event.\nUnlock: Open 5 events in a row before an encounter." },
-    { name = "Horse's Gallop", desc = "At the beginning of the game start with a Forest on the battlefield.\nUnlock: Beat a crypt fight with a Horse commander." },
-    { name = "Victory lap", desc = "Your buff maximum increases by 3 (from 4 to 7).\nUnlock: Beat 3 crypt bosses in a single session." },
-    { name = "Dawn of Crabs", desc = "At the beginning of the game start with a Plains on the battlefield.\nUnlock: Beat a crypt fight with a Crab commander." },
+    { name = "Horse's Gallop", desc = "After you draw your opening hand and finish mulligans, you may put a Forest card from outside the game into your hand.\n(Beat a crypt fight with a Horse Commander)" },
+    { name = "Victory lap", desc = "You have two additional free mulligans.\nUnlock: Beat 3 crypt bosses in a single session." },
+    { name = "Dawn of Crabs", desc = "After you draw your opening hand and finish mulligans, you may put a Plains card from outside the game into your hand.\n(Beat a crypt fight with a Crab Commander)" },
     { name = "Rakdos Identity Buff - Showstopper's Encore", desc = "If your commander is Black: Once per turn, when a creature dies, you may draw a card and lose 1 life. \nIf your commander is Red: Once per turn, when you deal combat damage to an opponent, you may create a Treasure token.\nUnlock: Beat a crypt fight where all players' commander identities were either Black, Red, or Rakdos." },
     { name = "One with death", desc = "Gain a second free card during deck creation. One of those free cards can be a Game Changer.\nUnlock: Beat a crypt fight on turn one." },
     { name = "Compelling Madness", desc = "Once per encounter, target player gains 5 life. This can be done at instant speed.\nUnlock: Only if you indirectly kill one non-host player in a session." },
-    { name = "Fish Pond", desc = "At the beginning of the game start with an Island on the battlefield.\nUnlock: Beat a crypt fight with a Fish commander." },
-    { name = "Construct's Salvation", desc = "At the beginning of the game start with a Wastes on the battlefield.\nUnlock: Beat a crypt fight with a Construct commander." },
-    { name = "Scorpion's Nest", desc = "At the beginning of the game start with a Swamp on the battlefield.\nUnlock: Beat a crypt fight with a Scorpion commander." },
+    { name = "Fish Pond", desc = "After you draw your opening hand and finish mulligans, you may put an Island card from outside the game into your hand.\n(Beat a crypt fight with a Fish Commander)" },
+    { name = "Construct's Salvation", desc = "After you draw your opening hand and finish mulligans, you may put a Wastes card from outside the game into your hand.\n(Beat a crypt fight with a Construct Commander)" },
+    { name = "Scorpion's Nest", desc = "After you draw your opening hand and finish mulligans, you may put a Swamp card from outside the game into your hand.\n(Beat a crypt fight with a Scorpion Commander)" },
+}
+
+-- Brands (purchasable meta-progression, repeatable)
+local BRANDS_LIST = {
+    {
+        name = "Brand of the Cartographer",
+        repeatable = true,
+        desc = "Base Cost: 500 Essence.\nWhen drafting, you may replace 2 basic lands with dual lands or triomes.\nRepeat purchases increase the cost by the base price for each copy you already own.",
+    },
+    {
+        name = "Brand of the Conclave",
+        repeatable = true,
+        desc = "Base Cost: 1000 Essence.\nDuring deckbuilding and when using The Guild, you get 1 additional Commander choice whenever Commanders are generated for you.\nRepeat purchases increase the cost by the base price for each copy you already own.",
+    },
+    {
+        name = "Brand of Recurrence",
+        repeatable = true,
+        desc = "Base Cost: 1250 Essence.\nDuring deckbuilding and when using The Guild, you may reroll Commanders 1 additional time for free. This only applies to Commander generation and does not reroll the 100-card nonland draft pile.\nRepeat purchases increase the cost by the base price for each copy you already own.",
+    },
+    {
+        name = "Brand of the Open Hand",
+        repeatable = true,
+        desc = "Base Cost: 1750 Essence.\nDuring the game, whenever you open a pack, that pack contains 1 additional card to choose from.\nRepeat purchases increase the cost by the base price for each copy you already own.",
+    },
+    {
+        name = "Brand of the Blinded Eye",
+        repeatable = true,
+        desc = "Base Cost: 2000 Essence.\nDuring deckbuilding, you may choose one color to not appear when rolling Commanders.\nRepeat purchases increase the cost by the base price for each copy you already own.",
+    },
+    {
+        name = "Brand of the Infinite Void",
+        repeatable = true,
+        desc = "Base Cost: 500 Essence.\nYour deck size minimum is reduced by 1 per Rank.\nRepeat purchases increase the cost by the base price for each copy you already own.",
+    },
 }
 
 -- Tickets (effects + timing)
 local TICKETS_LIST = {
-    { name = "Vanguard Ticket", desc = "You may begin the game with a vanguard of your choice between three random choices." },
+    { name = "Vanguard Ticket", desc = "You may begin the game with a vanguard of your choice between three random choices.\n(Takes up 2 Buff Slots)" },
     { name = "Color Combo Ticket", desc = "At the beginning of the game, before deckbuilding, pick your color identity to play with." },
-    { name = "Emblem Ticket", desc = "You may begin the game with an emblem of your choice between three random choices." },
+    { name = "Emblem Ticket", desc = "You may begin the game with an emblem of your choice between three random choices.\n(Takes up 3 Buff Slots)" },
+    { name = "Arcane Signet Ticket", desc = "You get a Arcane Signet Ticket. This allows you to have a free Arcane Signet in your deck without it counting towards your 39." },
     { name = "Sol Ring Ticket", desc = "You get a Sol Ring Ticket. This allows you to have a free Sol Ring in your deck without it counting towards your 39." },
     { name = "Conspiracy Ticket", desc = "You may begin the game with a conspiracy of your choice between three random choices before picking your commander." },
     { name = "Trinket Ticket", desc = "You may begin the game with a trinket of your choice between three random choices." },
+    { name = "Leyline Ticket", desc = "You get a Leyline Ticket. This allows you to have a free Leyline in your deck without it counting towards your 39." },
 }
 
 local lastValue = 0
@@ -98,6 +136,7 @@ local lastDescription = ""
 local lastAchievements = ""
 local lastCrypt = ""
 local lastTickets = ""
+local lastBrands = ""
 local lastCaptures = ""
 local localPlayerKey = nil
 local isSyncEnabled = false
@@ -113,7 +152,7 @@ local watcherHandle = nil
 local saveBlobCache = nil
 local saveBlobDirty = true
 
-local state = { value = 0, achievements = {}, crypt = {}, tickets = {}, captures = {} }
+local state = { value = 0, achievements = {}, crypt = {}, tickets = {}, brands = {}, captures = {} }
 local plusSteps = { 5, 10, 50 }
 local minusSteps = { -5, -10, -50 }
 
@@ -252,6 +291,309 @@ local CAPTURE_CARD_TEMPLATE = {
     CustomDeck = {}
 }
 
+local TREASURE_PIRATE_BAG_TEMPLATE = {
+    Name = "Custom_Model_Infinite_Bag",
+    Transform = {
+        posX = 0, posY = 0, posZ = 0,
+        rotX = 0, rotY = 0, rotZ = 0,
+        scaleX = 0.7, scaleY = 0.7, scaleZ = 0.7,
+    },
+    Nickname = "Treasure Pirate",
+    Description = "At the beginning of every encounter, start with a Treasure token.\nUnlock: Beat Olivia, Opulent Outlaw.",
+    GMNotes = "",
+    AltLookAngle = { x = 0, y = 0, z = 0 },
+    ColorDiffuse = { r = 1, g = 1, b = 1 },
+    LayoutGroupSortIndex = 0,
+    Value = 0,
+    Locked = false,
+    Grid = false,
+    Snap = false,
+    IgnoreFoW = false,
+    MeasureMovement = false,
+    DragSelectable = true,
+    Autoraise = true,
+    Sticky = false,
+    Tooltip = true,
+    GridProjection = false,
+    HideWhenFaceDown = false,
+    Hands = false,
+    MaterialIndex = -1,
+    MeshIndex = -1,
+    CustomMesh = {
+        MeshURL = MESH_URL,
+        DiffuseURL = "https://cards.scryfall.io/large/front/8/6/861b5889-0183-4bee-afeb-a4b2aa700a8e.jpg?1689996018",
+        NormalURL = "",
+        ColliderURL = MESH_URL,
+        Convex = true,
+        MaterialIndex = 3,
+        TypeIndex = 7,
+        CustomShader = {
+            SpecularColor = { r = 0, g = 0, b = 0 },
+            SpecularIntensity = 0,
+            SpecularSharpness = 2,
+            FresnelStrength = 0,
+        },
+        CastShadows = true,
+    },
+    LuaScript = "",
+    LuaScriptState = "",
+    XmlUI = "",
+    Rigidbody = {
+        Mass = 0.5,
+        Drag = 0.1,
+        AngularDrag = 0.1,
+        UseGravity = true,
+    },
+    ContainedObjects = {
+        {
+            Name = "Card",
+            Transform = {
+                posX = 0, posY = 0, posZ = 0,
+                rotX = 0, rotY = 0, rotZ = 0,
+                scaleX = 1, scaleY = 1, scaleZ = 1,
+            },
+            Nickname = "Treasure\nToken Artifact - Treasure\n0CMC",
+            Description = "{T}, Sacrifice this token: Add one mana of any color.",
+            GMNotes = "",
+            Memo = "3c549374-6c37-42e0-8d88-a8555d46732d",
+            AltLookAngle = { x = 0, y = 0, z = 0 },
+            ColorDiffuse = { r = 0.713235259, g = 0.713235259, b = 0.713235259 },
+            LayoutGroupSortIndex = 0,
+            Value = 0,
+            Locked = false,
+            Grid = true,
+            Snap = true,
+            IgnoreFoW = false,
+            MeasureMovement = false,
+            DragSelectable = true,
+            Autoraise = true,
+            Sticky = true,
+            Tooltip = true,
+            GridProjection = false,
+            HideWhenFaceDown = true,
+            Hands = true,
+            CardID = 7400,
+            SidewaysCard = false,
+            LuaScript = "",
+            LuaScriptState = "",
+            XmlUI = "",
+            CustomDeck = {
+                ["74"] = {
+                    FaceURL = "https://cards.scryfall.io/normal/front/b/2/b29d7556-9051-4451-812e-91513ef10e62.jpg?432026",
+                    BackURL = CAPTURE_DEFAULT_BACK_URL,
+                    NumWidth = 1,
+                    NumHeight = 1,
+                    BackIsHidden = true,
+                    UniqueBack = false,
+                    Type = 0,
+                }
+            }
+        }
+    }
+}
+
+local SOL_RING_TICKET_BAG_TEMPLATE = {
+    Name = "Custom_Model_Infinite_Bag",
+    Transform = {
+        posX = 0, posY = 0, posZ = 0,
+        rotX = 0, rotY = 0, rotZ = 0,
+        scaleX = 0.7, scaleY = 0.7, scaleZ = 0.7,
+    },
+    Nickname = "Sol Ring Ticket",
+    Description = "You get a Sol Ring Ticket. This allows you to have a free Sol Ring in your deck without it counting towards your 39.",
+    GMNotes = "",
+    AltLookAngle = { x = 0, y = 0, z = 0 },
+    ColorDiffuse = { r = 1, g = 1, b = 1 },
+    LayoutGroupSortIndex = 0,
+    Value = 0,
+    Locked = false,
+    Grid = false,
+    Snap = false,
+    IgnoreFoW = false,
+    MeasureMovement = false,
+    DragSelectable = true,
+    Autoraise = true,
+    Sticky = false,
+    Tooltip = true,
+    GridProjection = false,
+    HideWhenFaceDown = false,
+    Hands = false,
+    MaterialIndex = -1,
+    MeshIndex = -1,
+    CustomMesh = {
+        MeshURL = MESH_URL,
+        DiffuseURL = "https://cards.scryfall.io/normal/front/8/5/858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg",
+        NormalURL = "",
+        ColliderURL = MESH_URL,
+        Convex = true,
+        MaterialIndex = 3,
+        TypeIndex = 7,
+        CustomShader = {
+            SpecularColor = { r = 0, g = 0, b = 0 },
+            SpecularIntensity = 0,
+            SpecularSharpness = 2,
+            FresnelStrength = 0,
+        },
+        CastShadows = true,
+    },
+    LuaScript = "",
+    LuaScriptState = "",
+    XmlUI = "",
+    Rigidbody = {
+        Mass = 0.5,
+        Drag = 0.1,
+        AngularDrag = 0.1,
+        UseGravity = true,
+    },
+    ContainedObjects = {
+        {
+            Name = "Card",
+            Transform = {
+                posX = 0, posY = 0, posZ = 0,
+                rotX = 0, rotY = 0, rotZ = 0,
+                scaleX = 1, scaleY = 1, scaleZ = 1,
+            },
+            Nickname = "Sol Ring\nArtifact\n1CMC",
+            Description = "{T}: Add {C}{C}.",
+            GMNotes = "",
+            Memo = "6ad8011d-3471-4369-9d68-b264cc027487",
+            AltLookAngle = { x = 0, y = 0, z = 0 },
+            ColorDiffuse = { r = 0.713235259, g = 0.713235259, b = 0.713235259 },
+            LayoutGroupSortIndex = 0,
+            Value = 0,
+            Locked = false,
+            Grid = true,
+            Snap = true,
+            IgnoreFoW = false,
+            MeasureMovement = false,
+            DragSelectable = true,
+            Autoraise = true,
+            Sticky = true,
+            Tooltip = true,
+            GridProjection = false,
+            HideWhenFaceDown = true,
+            Hands = true,
+            CardID = 55854500,
+            SidewaysCard = false,
+            LuaScript = "",
+            LuaScriptState = "",
+            XmlUI = "",
+            CustomDeck = {
+                ["558545"] = {
+                    FaceURL = "https://cards.scryfall.io/normal/front/8/5/858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg",
+                    BackURL = CAPTURE_DEFAULT_BACK_URL,
+                    NumWidth = 1,
+                    NumHeight = 1,
+                    BackIsHidden = true,
+                    UniqueBack = false,
+                    Type = 0,
+                }
+            }
+        }
+    }
+}
+
+local ARCANE_SIGNET_TICKET_BAG_TEMPLATE = {
+    Name = "Custom_Model_Infinite_Bag",
+    Transform = {
+        posX = 0, posY = 0, posZ = 0,
+        rotX = 0, rotY = 0, rotZ = 0,
+        scaleX = 0.7, scaleY = 0.7, scaleZ = 0.7,
+    },
+    Nickname = "Arcane Signet Ticket",
+    Description = "You get a Arcane Signet Ticket. This allows you to have a free Arcane Signet in your deck without it counting towards your 39.",
+    GMNotes = "",
+    AltLookAngle = { x = 0, y = 0, z = 0 },
+    ColorDiffuse = { r = 1, g = 1, b = 1 },
+    LayoutGroupSortIndex = 0,
+    Value = 0,
+    Locked = false,
+    Grid = false,
+    Snap = false,
+    IgnoreFoW = false,
+    MeasureMovement = false,
+    DragSelectable = true,
+    Autoraise = true,
+    Sticky = false,
+    Tooltip = true,
+    GridProjection = false,
+    HideWhenFaceDown = false,
+    Hands = false,
+    MaterialIndex = -1,
+    MeshIndex = -1,
+    CustomMesh = {
+        MeshURL = MESH_URL,
+        DiffuseURL = "https://cards.scryfall.io/normal/front/1/f/1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg",
+        NormalURL = "",
+        ColliderURL = MESH_URL,
+        Convex = true,
+        MaterialIndex = 3,
+        TypeIndex = 7,
+        CustomShader = {
+            SpecularColor = { r = 0, g = 0, b = 0 },
+            SpecularIntensity = 0,
+            SpecularSharpness = 2,
+            FresnelStrength = 0,
+        },
+        CastShadows = true,
+    },
+    LuaScript = "",
+    LuaScriptState = "",
+    XmlUI = "",
+    Rigidbody = {
+        Mass = 0.5,
+        Drag = 0.1,
+        AngularDrag = 0.1,
+        UseGravity = true,
+    },
+    ContainedObjects = {
+        {
+            Name = "Card",
+            Transform = {
+                posX = 0, posY = 0, posZ = 0,
+                rotX = 0, rotY = 0, rotZ = 0,
+                scaleX = 1, scaleY = 1, scaleZ = 1,
+            },
+            Nickname = "Arcane Signet\nArtifact\n2CMC",
+            Description = "{T}: Add one mana of any color in your commander's color identity.",
+            GMNotes = "",
+            Memo = "0bc7f093-bef0-4f1a-852c-4b75ebf54838",
+            AltLookAngle = { x = 0, y = 0, z = 0 },
+            ColorDiffuse = { r = 0.713235259, g = 0.713235259, b = 0.713235259 },
+            LayoutGroupSortIndex = 0,
+            Value = 0,
+            Locked = false,
+            Grid = true,
+            Snap = true,
+            IgnoreFoW = false,
+            MeasureMovement = false,
+            DragSelectable = true,
+            Autoraise = true,
+            Sticky = true,
+            Tooltip = true,
+            GridProjection = false,
+            HideWhenFaceDown = true,
+            Hands = true,
+            CardID = 15900,
+            SidewaysCard = false,
+            LuaScript = "",
+            LuaScriptState = "",
+            XmlUI = "",
+            CustomDeck = {
+                ["159"] = {
+                    FaceURL = "https://cards.scryfall.io/normal/front/1/f/1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg",
+                    BackURL = CAPTURE_DEFAULT_BACK_URL,
+                    NumWidth = 1,
+                    NumHeight = 1,
+                    BackIsHidden = true,
+                    UniqueBack = false,
+                    Type = 0,
+                }
+            }
+        }
+    }
+}
+
 local extractCaptureFaceUrlFromPayload
 local buildCaptureBagSpawnData
 
@@ -270,6 +612,8 @@ local SPAWN_IMAGES = {
     ["Might of Okaun"] = "https://cards.scryfall.io/large/front/9/4/94eea6e3-20bc-4dab-90ba-3113c120fb90.jpg",
     ["Shapeshifter"] = "https://cards.scryfall.io/large/front/d/7/d79f7ecc-c43b-48de-9d90-1085cf2bce5d.jpg?1738928117",
     ["Unearthly Reach"] = "https://cards.scryfall.io/large/front/3/c/3caa9c55-5e3b-436b-84a9-b7ccebf63799.jpg",
+    ["Momentum Engine"] = "https://cards.scryfall.io/normal/front/6/a/6affd9c6-f7ab-488e-85fa-2a3a48383414.jpg",
+    ["Eternal Servitude"] = "https://cards.scryfall.io/normal/front/2/9/29bf245f-e8e0-4d32-8cd7-06d832609910.jpg",
 
     -- Achievements
     ["Happy Fun Land"] = "https://cards.scryfall.io/large/front/c/5/c52057f7-a78a-4edc-8e95-edaea6376e76.jpg",
@@ -303,9 +647,11 @@ local SPAWN_IMAGES = {
     ["Vanguard Ticket"] = "https://cards.scryfall.io/large/front/8/f/8fb54be2-b9c5-4433-a198-4b935979718a.jpg",
     ["Color Combo Ticket"] = "https://cards.scryfall.io/large/front/8/4/84238335-e08c-421c-b9b9-70a679ff2967.jpg",
     ["Emblem Ticket"] = "https://cards.scryfall.io/large/front/3/2/327ddaaf-b6a7-4c80-9b38-5ab68181b3d6.jpg",
+    ["Arcane Signet Ticket"] = "https://cards.scryfall.io/normal/front/1/f/1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg",
     ["Sol Ring Ticket"] = "https://cards.scryfall.io/large/front/e/e/ee6e5a35-fe21-4dee-b0ef-a8f2841511ad.jpg",
     ["Conspiracy Ticket"] = "https://cards.scryfall.io/large/front/1/6/167c6740-0625-4987-8fac-516aab564ca1.jpg",
     ["Trinket Ticket"] = "https://cards.scryfall.io/large/front/a/5/a53baf25-1782-427b-a9dd-fc9b8dc6444f.jpg",
+    ["Leyline Ticket"] = "https://cards.scryfall.io/normal/front/b/6/b6dc1f5a-a6cc-4ab4-8bb9-e216e24ca735.jpg",
 }
 
 local function findRewardDescByName(reward_name)
@@ -323,6 +669,53 @@ end
 
 -- Spawn a reward token near this checker (requires image URL to be set)
 local function spawnRewardToken(reward_name)
+    if reward_name == "Treasure Pirate" then
+        local spawnData = JSON.decode(JSON.encode(TREASURE_PIRATE_BAG_TEMPLATE))
+        local spawnPos = getSpawnAnchor()
+        local counterRot = self.getRotation()
+        spawnData.Transform.posX = spawnPos.x
+        spawnData.Transform.posY = spawnPos.y
+        spawnData.Transform.posZ = spawnPos.z
+        spawnData.Transform.rotX = counterRot.x
+        spawnData.Transform.rotY = counterRot.y + 180
+        spawnData.Transform.rotZ = counterRot.z
+
+        local spawned = spawnObjectData({ data = spawnData })
+        if spawned then
+            spawned.setName(reward_name)
+            local desc = findRewardDescByName(reward_name)
+            if desc and desc ~= "" then
+                spawned.setDescription(desc)
+            end
+            spawned.setLock(false)
+        end
+        return spawned
+    end
+
+    if reward_name == "Sol Ring Ticket" or reward_name == "Arcane Signet Ticket" then
+        local ticketTemplate = (reward_name == "Arcane Signet Ticket") and ARCANE_SIGNET_TICKET_BAG_TEMPLATE or SOL_RING_TICKET_BAG_TEMPLATE
+        local spawnData = JSON.decode(JSON.encode(ticketTemplate))
+        local spawnPos = getSpawnAnchor()
+        local counterRot = self.getRotation()
+        spawnData.Transform.posX = spawnPos.x
+        spawnData.Transform.posY = spawnPos.y
+        spawnData.Transform.posZ = spawnPos.z
+        spawnData.Transform.rotX = counterRot.x
+        spawnData.Transform.rotY = counterRot.y + 180
+        spawnData.Transform.rotZ = counterRot.z
+
+        local spawned = spawnObjectData({ data = spawnData })
+        if spawned then
+            spawned.setName(reward_name)
+            local desc = findRewardDescByName(reward_name)
+            if desc and desc ~= "" then
+                spawned.setDescription(desc)
+            end
+            spawned.setLock(false)
+        end
+        return spawned
+    end
+
     local imageUrl = SPAWN_IMAGES[reward_name]
     if not imageUrl then
         return nil
@@ -417,16 +810,17 @@ end
 
 -- Rewards UI state
 local uiVisible = false
-local uiTab = "crypt" -- crypt | achievements | tickets | captures
+local uiTab = "crypt" -- crypt | achievements | tickets | brands | captures
 local uiSelectedTab = nil
 local uiSelectedId = nil
 local PAGE_SIZE = 26
 
-local uiSlotMap = { crypt = {}, achievements = {}, tickets = {}, captures = {} }
+local uiSlotMap = { crypt = {}, achievements = {}, tickets = {}, brands = {}, captures = {} }
 
 local function slotPrefixForTab(tabKey)
     if tabKey == "achievements" then return "ach_slot_" end
     if tabKey == "tickets" then return "ticket_slot_" end
+    if tabKey == "brands" then return "brand_slot_" end
     if tabKey == "captures" then return "capture_slot_" end
     return "crypt_slot_"
 end
@@ -533,6 +927,38 @@ end
 local function entryDesc(entry)
     if type(entry) == "table" then return entry.desc end
     return nil
+end
+
+local function entryIsRepeatable(entry)
+    return type(entry) == "table" and entry.repeatable == true
+end
+
+local function getItemCount(item)
+    if type(item) ~= "table" then return 0 end
+    local count = tonumber(item.count)
+    if count == nil then
+        count = item.unlocked and 1 or 0
+    end
+    return math.max(0, math.floor(count))
+end
+
+local function isItemUnlocked(item)
+    return getItemCount(item) > 0
+end
+
+local function incrementItemUnlock(item)
+    if type(item) ~= "table" then return 0 end
+    local count = getItemCount(item)
+    if item.repeatable then
+        count = count + 1
+    elseif count == 0 then
+        count = 1
+    end
+    item.count = count
+    item.unlocked = count > 0
+    item.unlock_time = item.unlock_time or os.date("!%Y-%m-%dT%H:%M:%SZ")
+    item.last_unlock_time = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    return count
 end
 
 -- Normalize names for robust matching (handles curly quotes/dashes and spacing)
@@ -1120,7 +1546,7 @@ initCategoryFromList = function(list)
         if name and name ~= "" then
             local id = toId(name)
             local desc = entryDesc(entry) or PLACEHOLDER_DESC
-            t[id] = { id = id, name = name, unlocked = false, unlock_time = nil, desc = desc }
+            t[id] = { id = id, name = name, unlocked = false, count = 0, repeatable = entryIsRepeatable(entry), unlock_time = nil, last_unlock_time = nil, desc = desc }
         end
     end
     return t
@@ -1131,7 +1557,7 @@ end
 local function serializeCategory(cat)
     local parts = {}
     for id, item in pairs(cat or {}) do
-        table.insert(parts, id .. ":" .. (item.unlocked and "1" or "0"))
+        table.insert(parts, id .. ":" .. tostring(getItemCount(item)))
     end
     return table.concat(parts, "|")
 end
@@ -1140,10 +1566,11 @@ local function deserializeCategory(serialized, template)
     local out = template and initCategoryFromList(template) or {}
     if not serialized or serialized == "" then return out end
     for pair in string.gmatch(serialized, "[^|]+") do
-        local id, status = string.match(pair, "([^:]+):(%d)")
+        local id, status = string.match(pair, "([^:]+):(%d+)")
         if id then
             if not out[id] then out[id] = { id = id, name = id, desc = PLACEHOLDER_DESC } end
-            out[id].unlocked = (status == "1")
+            out[id].count = math.max(0, math.floor(tonumber(status) or 0))
+            out[id].unlocked = out[id].count > 0
         end
     end
     ensurePlaceholderDescriptions(out)
@@ -1159,9 +1586,17 @@ local function mergeSavedCategory(savedTable, templateList)
     end
     for id, savedItem in pairs(savedTable) do
         if out[id] and type(savedItem) == "table" then
-            out[id].unlocked = (savedItem.unlocked == true)
+            local savedCount = tonumber(savedItem.count)
+            if savedCount == nil then
+                savedCount = savedItem.unlocked and 1 or 0
+            end
+            out[id].count = math.max(0, math.floor(savedCount))
+            out[id].unlocked = out[id].count > 0
             out[id].unlock_time = savedItem.unlock_time or out[id].unlock_time
-            if not isPlaceholderDesc(savedItem.desc, savedItem) then
+            out[id].last_unlock_time = savedItem.last_unlock_time or out[id].last_unlock_time
+            -- Prefer current template descriptions so UI text updates propagate
+            -- even when older saves contain outdated text.
+            if isPlaceholderDesc(out[id].desc, out[id]) and not isPlaceholderDesc(savedItem.desc, savedItem) then
                 out[id].desc = savedItem.desc
             end
         end
@@ -1210,6 +1645,15 @@ local function queueSyncSend(delaySeconds)
         pendingHandle = nil
         sendData()
     end, delay)
+end
+
+local function markSyncFailed()
+    lastSyncSignature = ""
+    syncDirty = true
+    if syncQueued then
+        syncQueued = false
+        queueSyncSend(DEBOUNCE_SECONDS)
+    end
 end
 
 local function requestSync(delaySeconds)
@@ -1272,6 +1716,7 @@ end
 local function getCurrentCategoryTable()
     if uiTab == "achievements" then return state.achievements end
     if uiTab == "tickets" then return state.tickets end
+    if uiTab == "brands" then return state.brands end
     if uiTab == "captures" then return state.captures end
     return state.crypt
 end
@@ -1286,6 +1731,7 @@ local function getOrderedIds(catTable)
     local sourceList = CRYPT_REWARDS
     if uiTab == "achievements" then sourceList = ACHIEVEMENTS_LIST end
     if uiTab == "tickets" then sourceList = TICKETS_LIST end
+    if uiTab == "brands" then sourceList = BRANDS_LIST end
 
     -- First, add in the explicit list order
     for _, entry in ipairs(sourceList or {}) do
@@ -1341,6 +1787,7 @@ uiRefresh = function()
     uiSetActive("Crypt Buffs", uiTab == "crypt")
     uiSetActive("Achievements", uiTab == "achievements")
     uiSetActive("Tickets", uiTab == "tickets")
+    uiSetActive("Brands", uiTab == "brands")
     uiSetActive("Captures", uiTab == "captures")
 
     local activeBtn = "#66CC66|#66CC66|#66CC66|#66CC66"
@@ -1348,6 +1795,7 @@ uiRefresh = function()
     uiSetAttr("page_btn_crypt_buffs", "colors", uiTab == "crypt" and activeBtn or inactiveBtn)
     uiSetAttr("page_btn_achievements", "colors", uiTab == "achievements" and activeBtn or inactiveBtn)
     uiSetAttr("page_btn_tickets", "colors", uiTab == "tickets" and activeBtn or inactiveBtn)
+    uiSetAttr("page_btn_brands", "colors", uiTab == "brands" and activeBtn or inactiveBtn)
     uiSetAttr("page_btn_captures", "colors", uiTab == "captures" and activeBtn or inactiveBtn)
 
     -- Slot population (per-tab panel slots)
@@ -1376,8 +1824,10 @@ uiRefresh = function()
                 if slot > PAGE_SIZE then break end
                 uiSlotMap[uiTab][slot] = item.id
 
-                local locked = (not item.unlocked)
+                local unlocked = isItemUnlocked(item)
+                local locked = not unlocked
                 local isSelected = (uiSelectedTab == uiTab and uiSelectedId == item.id)
+                local itemCount = getItemCount(item)
 
                 -- State colors:
                 -- - locked: subdued gray
@@ -1391,8 +1841,12 @@ uiRefresh = function()
                 end
                 local tooltipRaw
                 local descText = item.desc and ("\n" .. formatIdentityDesc(item.name, item.desc)) or ""
-                if item.unlocked then
-                    tooltipRaw = (item.name or "") .. " [Unlocked]" .. descText
+                if unlocked then
+                    if item.repeatable then
+                        tooltipRaw = (item.name or "") .. " [Rank " .. tostring(itemCount) .. "]" .. descText
+                    else
+                        tooltipRaw = (item.name or "") .. " [Unlocked]" .. descText
+                    end
                 else
                     tooltipRaw = (item.name or "") .. " [Locked]" .. descText
                 end
@@ -1400,7 +1854,11 @@ uiRefresh = function()
 
                 local slotId = prefix .. tostring(slot)
                 uiSetActive(slotId, true)
-                uiSetText(slotId, item.name or "")
+                if item.repeatable and itemCount > 0 then
+                    uiSetText(slotId, (item.name or "") .. " — Rank " .. tostring(itemCount))
+                else
+                    uiSetText(slotId, item.name or "")
+                end
                 uiSetAttr(slotId, "fontSize", "18")
                 uiSetAttr(slotId, "alignment", "MiddleLeft")
                 uiSetAttr(slotId, "textColor", "#FFFFFF")
@@ -1418,8 +1876,11 @@ uiRefresh = function()
     local selectedText = "Select an item to view its description."
     if uiSelectedTab == uiTab and uiSelectedId and catTable[uiSelectedId] then
         local item = catTable[uiSelectedId]
-        if item.unlocked then
+        if isItemUnlocked(item) then
             selectedText = item.desc or item.name
+            if item.repeatable then
+                selectedText = selectedText .. "\n\nRank: " .. tostring(getItemCount(item))
+            end
         else
             selectedText = (item.name or "") .. " (Locked)"
         end
@@ -1474,6 +1935,7 @@ function onLoad(saved)
             state.achievements = mergeSavedCategory(data.achievements, ACHIEVEMENTS_LIST)
             state.crypt = mergeSavedCategory(data.crypt, CRYPT_REWARDS)
             state.tickets = mergeSavedCategory(data.tickets, TICKETS_LIST)
+            state.brands = mergeSavedCategory(data.brands, BRANDS_LIST)
             state.captures = decodeCaptures(data.captures)
             if data.playerKey and data.playerKey ~= "" then
                 localPlayerKey = data.playerKey
@@ -1483,6 +1945,7 @@ function onLoad(saved)
         state.achievements = initCategoryFromList(ACHIEVEMENTS_LIST)
         state.crypt = initCategoryFromList(CRYPT_REWARDS)
         state.tickets = initCategoryFromList(TICKETS_LIST)
+        state.brands = initCategoryFromList(BRANDS_LIST)
         state.captures = {}
     end
 
@@ -1523,6 +1986,7 @@ function onSave()
         achievements = state.achievements,
         crypt = state.crypt,
         tickets = state.tickets,
+        brands = state.brands,
         captures = state.captures,
         playerKey = localPlayerKey
     })
@@ -1637,6 +2101,10 @@ function fetchSavedValue()
             state.tickets = deserializeCategory(data.tickets, TICKETS_LIST)
             lastTickets = data.tickets
         end
+        if data.brands then
+            state.brands = deserializeCategory(data.brands, BRANDS_LIST)
+            lastBrands = data.brands
+        end
         if data.captures then
             state.captures = decodeCaptures(data.captures)
             lastCaptures = serializeCaptures(state.captures)
@@ -1649,6 +2117,7 @@ function fetchSavedValue()
         ensurePlaceholderDescriptions(state.achievements)
         ensurePlaceholderDescriptions(state.crypt)
         ensurePlaceholderDescriptions(state.tickets)
+        ensurePlaceholderDescriptions(state.brands)
 
         uiRefreshWhenReady()
         
@@ -1680,6 +2149,7 @@ function sendData(force)
         achievements = serializeCategory(state.achievements),
         crypt = serializeCategory(state.crypt),
         tickets = serializeCategory(state.tickets),
+        brands = serializeCategory(state.brands),
         captures = serializeCaptures(state.captures)
     }
 
@@ -1691,6 +2161,7 @@ function sendData(force)
         tostring(payload.achievements or ""),
         tostring(payload.crypt or ""),
         tostring(payload.tickets or ""),
+        tostring(payload.brands or ""),
         tostring(payload.captures or "")
     }, "\30")
 
@@ -1711,6 +2182,7 @@ function sendData(force)
     lastAchievements = payload.achievements
     lastCrypt = payload.crypt
     lastTickets = payload.tickets
+    lastBrands = payload.brands
     lastCaptures = payload.captures
     lastSyncSignature = signature
     lastSyncSentAt = now
@@ -1719,14 +2191,35 @@ function sendData(force)
     WebRequest.post(WEB_URL, JSON.encode(payload), function(req)
         syncInFlight = false
         if req.is_error then
-            lastSyncSignature = ""
-            syncDirty = true
-            if syncQueued then
-                syncQueued = false
-                queueSyncSend(DEBOUNCE_SECONDS)
-            end
+            print("[" .. self.getName() .. "] Sync request failed")
+            markSyncFailed()
             return
         end
+
+        local responseText = tostring(req.text or "")
+        if responseText ~= "" then
+            local ok, responseData = pcall(JSON.decode, responseText)
+            if ok and type(responseData) == "table" then
+                if responseData.error then
+                    print("[" .. self.getName() .. "] Sync failed: " .. tostring(responseData.error))
+                    if responseData.err then
+                        print("[" .. self.getName() .. "] Sync detail: " .. tostring(responseData.err))
+                    end
+                    markSyncFailed()
+                    return
+                end
+                if responseData.status and tostring(responseData.status) ~= "OK" then
+                    print("[" .. self.getName() .. "] Sync returned unexpected status: " .. tostring(responseData.status))
+                    markSyncFailed()
+                    return
+                end
+            else
+                print("[" .. self.getName() .. "] Sync returned non-JSON response")
+                markSyncFailed()
+                return
+            end
+        end
+
         syncDirty = false
         if syncQueued then
             syncQueued = false
@@ -1748,9 +2241,9 @@ function onObjectEnterScriptingZone(zone, object)
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
-            if state.crypt[id] and not state.crypt[id].unlocked then
+            if state.crypt[id] and not isItemUnlocked(state.crypt[id]) then
                 if markHandledObjectOnce(object) then return end
-                state.crypt[id].unlocked = true
+                incrementItemUnlock(state.crypt[id])
                 print("[" .. self.getName() .. "] Unlocked Crypt: " .. name)
                 safeDestructObject(object)
                 uiVisible = true
@@ -1770,9 +2263,9 @@ function onObjectEnterScriptingZone(zone, object)
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
-            if state.achievements[id] and not state.achievements[id].unlocked then
+            if state.achievements[id] and not isItemUnlocked(state.achievements[id]) then
                 if markHandledObjectOnce(object) then return end
-                state.achievements[id].unlocked = true
+                incrementItemUnlock(state.achievements[id])
                 print("[" .. self.getName() .. "] Unlocked Achievement: " .. name)
                 safeDestructObject(object)
                 uiVisible = true
@@ -1791,14 +2284,35 @@ function onObjectEnterScriptingZone(zone, object)
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
-            if state.tickets[id] and not state.tickets[id].unlocked then
+            if state.tickets[id] and not isItemUnlocked(state.tickets[id]) then
                 if markHandledObjectOnce(object) then return end
-                state.tickets[id].unlocked = true
+                incrementItemUnlock(state.tickets[id])
                 print("[" .. self.getName() .. "] Unlocked Ticket: " .. name)
                 safeDestructObject(object)
                 uiVisible = true
                 uiTab = "tickets"
                 uiSelectedTab = "tickets"
+                uiSelectedId = id
+                if uiRefresh then uiRefresh() end
+                requestSync(DEBOUNCE_SECONDS)
+            end
+            return
+        end
+    end
+
+    -- Brands: exact name match, each drop increments count
+    for _, entry in ipairs(BRANDS_LIST) do
+        local name = entryName(entry)
+        if name and obj_norm == normalizeName(name) then
+            local id = toId(name)
+            if state.brands[id] then
+                if markHandledObjectOnce(object) then return end
+                incrementItemUnlock(state.brands[id])
+                print("[" .. self.getName() .. "] Added Brand: " .. name .. " (" .. tostring(getItemCount(state.brands[id])) .. ")")
+                safeDestructObject(object)
+                uiVisible = true
+                uiTab = "brands"
+                uiSelectedTab = "brands"
                 uiSelectedId = id
                 if uiRefresh then uiRefresh() end
                 requestSync(DEBOUNCE_SECONDS)
@@ -1850,9 +2364,9 @@ function onObjectDropped(player_color, dropped_object)
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
-            if state.crypt[id] and not state.crypt[id].unlocked then
+            if state.crypt[id] and not isItemUnlocked(state.crypt[id]) then
                 if markHandledObjectOnce(dropped_object) then return end
-                state.crypt[id].unlocked = true
+                incrementItemUnlock(state.crypt[id])
                 safeDestructObject(dropped_object)
                 uiVisible = true
                 uiTab = "crypt"
@@ -1870,9 +2384,9 @@ function onObjectDropped(player_color, dropped_object)
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
-            if state.achievements[id] and not state.achievements[id].unlocked then
+            if state.achievements[id] and not isItemUnlocked(state.achievements[id]) then
                 if markHandledObjectOnce(dropped_object) then return end
-                state.achievements[id].unlocked = true
+                incrementItemUnlock(state.achievements[id])
                 safeDestructObject(dropped_object)
                 uiVisible = true
                 uiTab = "achievements"
@@ -1890,13 +2404,33 @@ function onObjectDropped(player_color, dropped_object)
         local name = entryName(entry)
         if name and obj_norm == normalizeName(name) then
             local id = toId(name)
-            if state.tickets[id] and not state.tickets[id].unlocked then
+            if state.tickets[id] and not isItemUnlocked(state.tickets[id]) then
                 if markHandledObjectOnce(dropped_object) then return end
-                state.tickets[id].unlocked = true
+                incrementItemUnlock(state.tickets[id])
                 safeDestructObject(dropped_object)
                 uiVisible = true
                 uiTab = "tickets"
                 uiSelectedTab = "tickets"
+                uiSelectedId = id
+                uiRefreshWhenReady()
+                requestSync(DEBOUNCE_SECONDS)
+            end
+            return
+        end
+    end
+
+    -- Brands exact match, each drop increments count
+    for _, entry in ipairs(BRANDS_LIST) do
+        local name = entryName(entry)
+        if name and obj_norm == normalizeName(name) then
+            local id = toId(name)
+            if state.brands[id] then
+                if markHandledObjectOnce(dropped_object) then return end
+                incrementItemUnlock(state.brands[id])
+                safeDestructObject(dropped_object)
+                uiVisible = true
+                uiTab = "brands"
+                uiSelectedTab = "brands"
                 uiSelectedId = id
                 uiRefreshWhenReady()
                 requestSync(DEBOUNCE_SECONDS)
@@ -1971,8 +2505,15 @@ function ui_tab_captures(_, _)
     uiRefreshWhenReady()
 end
 
+function ui_tab_brands(_, _)
+    uiTab = "brands"
+    uiSelectedTab = uiTab
+    uiSelectedId = nil
+    uiRefreshWhenReady()
+end
+
 local function set_rewards_tab_internal(tabKey)
-    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" and tabKey ~= "captures" then return end
+    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" and tabKey ~= "brands" and tabKey ~= "captures" then return end
     uiTab = tabKey
     uiSelectedTab = uiTab
     uiSelectedId = nil
@@ -1981,7 +2522,7 @@ end
 function ui_nav_rewards_tab(_, _, id)
     -- Host Helper pattern: infer target from element id
     local tabKey = tostring(id or ""):match("^tab_(%w+)$")
-    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" and tabKey ~= "captures" then return end
+    if tabKey ~= "crypt" and tabKey ~= "achievements" and tabKey ~= "tickets" and tabKey ~= "brands" and tabKey ~= "captures" then return end
     set_rewards_tab_internal(tabKey)
     uiRefreshWhenReady()
 end
@@ -2008,20 +2549,22 @@ function ui_select_reward(_, _, id)
     rawId = rawId:gsub("^%s+", ""):gsub("%s+$", "")
 
     -- Accept matches even if there are stray characters around
-    local tid, slotNumStr = string.match(rawId, "(crypt|ach|ticket|capture)_slot_(%d+)")
+    local tid, slotNumStr = string.match(rawId, "(crypt|ach|ticket|brand|capture)_slot_(%d+)")
     local slotNum = tonumber(slotNumStr)
 
     -- Fallback parsing if pattern failed (handles unexpected characters/format)
     if not tid or not slotNum then
         local fallbackTid
         local fallbackSlot
-        fallbackSlot = tonumber(string.match(rawId, "ticket_slot_(%d+)") or string.match(rawId, "ach_slot_(%d+)") or string.match(rawId, "crypt_slot_(%d+)") or string.match(rawId, "capture_slot_(%d+)"))
+        fallbackSlot = tonumber(string.match(rawId, "ticket_slot_(%d+)") or string.match(rawId, "ach_slot_(%d+)") or string.match(rawId, "crypt_slot_(%d+)") or string.match(rawId, "brand_slot_(%d+)") or string.match(rawId, "capture_slot_(%d+)"))
         if rawId:find("ticket_slot_", 1, true) then
             fallbackTid = "ticket"
         elseif rawId:find("ach_slot_", 1, true) then
             fallbackTid = "ach"
         elseif rawId:find("crypt_slot_", 1, true) then
             fallbackTid = "crypt"
+        elseif rawId:find("brand_slot_", 1, true) then
+            fallbackTid = "brand"
         elseif rawId:find("capture_slot_", 1, true) then
             fallbackTid = "capture"
         end
@@ -2035,7 +2578,7 @@ function ui_select_reward(_, _, id)
         end
     end
 
-    local tabKey = (tid == "crypt" and "crypt") or (tid == "ach" and "achievements") or (tid == "capture" and "captures") or "tickets"
+    local tabKey = (tid == "crypt" and "crypt") or (tid == "ach" and "achievements") or (tid == "brand" and "brands") or (tid == "capture" and "captures") or "tickets"
     local rewardId
     if tabKey == "captures" then
         local captureIds = getCaptureIds(state.captures or {})
@@ -2055,6 +2598,7 @@ function ui_select_reward(_, _, id)
         else
             local sourceList = (tabKey == "crypt" and CRYPT_REWARDS)
                 or (tabKey == "achievements" and ACHIEVEMENTS_LIST)
+                or (tabKey == "brands" and BRANDS_LIST)
                 or TICKETS_LIST
             local entry = sourceList and sourceList[slotNum] or nil
             if entry and entry.name then
@@ -2062,6 +2606,7 @@ function ui_select_reward(_, _, id)
                 -- Ensure the table exists and has the item so downstream logic works
                 local targetTable = (tabKey == "crypt" and state.crypt)
                     or (tabKey == "achievements" and state.achievements)
+                    or (tabKey == "brands" and state.brands)
                     or state.tickets
                 if targetTable and not targetTable[rewardId] then
                     targetTable[rewardId] = { id = rewardId, name = entry.name, unlocked = false, desc = entry.desc or PLACEHOLDER_DESC }
@@ -2077,6 +2622,7 @@ function ui_select_reward(_, _, id)
 
     local catTable = (tabKey == "crypt" and state.crypt)
         or (tabKey == "achievements" and state.achievements)
+        or (tabKey == "brands" and state.brands)
         or (tabKey == "captures" and state.captures)
         or state.tickets
     local item = catTable and catTable[rewardId] or nil
@@ -2086,7 +2632,7 @@ function ui_select_reward(_, _, id)
     end
 
     -- Spawn only if unlocked
-    if item.unlocked then
+    if isItemUnlocked(item) then
         if tabKey == "captures" then
             local okSpawn, spawned = pcall(function()
                 return spawnCaptureToken(item)
@@ -2115,6 +2661,8 @@ function ui_nav_page(_, _, id)
         uiTab = "achievements"
     elseif page == "tickets" then
         uiTab = "tickets"
+    elseif page == "brands" then
+        uiTab = "brands"
     elseif page == "captures" then
         uiTab = "captures"
     else

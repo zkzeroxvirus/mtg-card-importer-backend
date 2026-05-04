@@ -1,0 +1,205 @@
+<Panel id="UIRoot" rectAlignment="MiddleCenter" position="0 0 0" width="2000" height="2000" color="none">
+  <Panel id="Main" rectAlignment="MiddleCenter" position="0 -250 -4" width="900" height="300" color="none">
+  <VerticalLayout spacing="2" padding="10 10 10 10">
+    <Panel id="ess_panel" width="800" height="100" color="black">
+      <VerticalLayout spacing="5" padding="10 10 10 10">
+        <HorizontalLayout preferredHeight="10">
+          <Text alignment="UpperLeft" fontSize="18" color="#FFFFFF" text="Essence" preferredHeight="10" />
+        </HorizontalLayout>
+
+        <VerticalLayout color="#404040ff" padding="10 10 10 10" spacing="5">
+          <InputField id="ess_value" alignment="MiddleCenter" textAlignment="MiddleCenter" fontSize="50" text="0" onEndEdit="ui_set_essence" preferredWidth="110" preferredHeight="50" />
+
+          <HorizontalLayout spacing="6" childAlignment="MiddleCenter" childForceExpandWidth="False" childForceExpandHeight="False">
+            <Button id="ess_delta_50" text="+50" textColor="#FFFFFF" colors="#4CAF50|#6AD16E|#3B8E41|#6AD16E" onClick="ui_ess_delta" preferredWidth="88" preferredHeight="44" />
+            <Button id="ess_delta_10" text="+10" textColor="#FFFFFF" colors="#4CAF50|#6AD16E|#3B8E41|#6AD16E" onClick="ui_ess_delta" preferredWidth="88" preferredHeight="44" />
+            <Button id="ess_delta_5" text="+5" textColor="#FFFFFF" colors="#4CAF50|#6AD16E|#3B8E41|#6AD16E" onClick="ui_ess_delta" preferredWidth="88" preferredHeight="44" />
+            <Button id="ess_delta_1" text="+1" textColor="#FFFFFF" colors="#4CAF50|#6AD16E|#3B8E41|#6AD16E" onClick="ui_ess_delta" preferredWidth="70" preferredHeight="44" />
+            <Button id="ess_delta_-1" text="-1" textColor="#FFFFFF" colors="#D65C5C|#E67C7C|#B94A4A|#E67C7C" onClick="ui_ess_delta" preferredWidth="70" preferredHeight="44" />
+            <Button id="ess_delta_-5" text="-5" textColor="#FFFFFF" colors="#D65C5C|#E67C7C|#B94A4A|#E67C7C" onClick="ui_ess_delta" preferredWidth="88" preferredHeight="44" />
+            <Button id="ess_delta_-10" text="-10" textColor="#FFFFFF" colors="#D65C5C|#E67C7C|#B94A4A|#E67C7C" onClick="ui_ess_delta" preferredWidth="88" preferredHeight="44" />
+            <Button id="ess_delta_-50" text="-50" textColor="#FFFFFF" colors="#D65C5C|#E67C7C|#B94A4A|#E67C7C" onClick="ui_ess_delta" preferredWidth="88" preferredHeight="44" />
+          </HorizontalLayout>
+
+          <Button id="btn_show_rewards" text="Show Rewards" textColor="#FFFFFF" onClick="ui_toggle_rewards" preferredWidth="50" preferredHeight="20" />
+        </VerticalLayout>
+      </VerticalLayout>
+    </Panel>
+  </VerticalLayout>
+</Panel>
+
+<!-- NAVIGATION (Main Nav Panel) -->
+<Panel id="Navigation" rectAlignment="MiddleCenter" position="0 -620 -4" width="895" height="430" color="black" active="true">
+  <!-- Header: anchored to top (approx 40px) -->
+  <Panel id="Nav_Header" rectAlignment="UpperCenter" position="0 0 " width="895" height="40">
+    <HorizontalLayout spacing="6" padding="10 6 10 6" childAlignment="MiddleCenter" childForceExpandHeight="False" childForceExpandWidth="False">
+        <HorizontalLayout spacing="6" padding="0 0 0 0" childForceExpandWidth="False" childForceExpandHeight="False" childAlignment="MiddleCenter">
+        <Text alignment="MiddleLeft" fontSize="18" color="#FFFFFF" text="Rewards" preferredWidth="160" preferredHeight="50" />
+          <Button id="page_btn_crypt_buffs" text="Crypt Buffs" textColor="#FFFFFF" onClick="ui_tab_crypt" preferredWidth="140" preferredHeight="30" />
+          <Button id="page_btn_achievements" text="Achievements" textColor="#FFFFFF" onClick="ui_tab_achievements" preferredWidth="140" preferredHeight="30" />
+          <Button id="page_btn_tickets" text="Tickets" textColor="#FFFFFF" onClick="ui_tab_tickets" preferredWidth="140" preferredHeight="30" />
+          <Button id="page_btn_brands" text="Brands" textColor="#FFFFFF" onClick="ui_tab_brands" preferredWidth="140" preferredHeight="30" />
+          <Button id="page_btn_captures" text="Captures" textColor="#FFFFFF" onClick="ui_tab_captures" preferredWidth="140" preferredHeight="30" />
+        </HorizontalLayout>
+    </HorizontalLayout>
+  </Panel>
+
+  <!-- UNLOCKABLE PANELS: anchored under header -->
+    <Panel id="Unlockables" rectAlignment="UpperCenter" position="0 -40 0" width="895" height="380" color="none" active="true">
+      <Panel id="Crypt Buffs" rectAlignment="UpperCenter" position="0 0 0" width="880" height="380" color="black" active="true">
+        <VerticalLayout spacing="4" padding="8 8 8 8" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+          <HorizontalLayout spacing="10" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="crypt_slot_1" text="Flame of Progress" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_2" text="Spiritual Guidance" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_3" text="Fickle Duplicant" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_4" text="Undying Legionary" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_5" text="Treasure Pirate" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_6" text="Finders Keepers" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="crypt_slot_7" text="Quick Spell" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_8" text="The God Trees Blessing" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_9" text="Respited Gift" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_10" text="Might of Okaun" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_11" text="Shapeshifter" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_12" text="Unearthly Reach" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_13" text="Momentum Engine" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="crypt_slot_14" text="Eternal Servitude" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+          </HorizontalLayout>
+        </VerticalLayout>
+      </Panel>
+
+      <Panel id="Achievements" rectAlignment="UpperCenter" position="0 0 0" width="880" height="380" color="black" active="false">
+        <VerticalLayout spacing="4" padding="8 8 8 8" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+          <HorizontalLayout spacing="10" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="ach_slot_1" text="Scorpion's Nest" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_2" text="Construct's Salvation" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_3" text="Fish Pond" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_4" text="Compelling Madness" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_5" text="One with death" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_6" text="Rakdos Identity Buff – “Showstopper’s Encore”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_7" text="Dawn of Crabs" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_8" text="Victory lap" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_9" text="Horse's Gallop" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_10" text="Chaos" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_11" text="Gruul Identity Buff – “Primal Fury”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_12" text="Stick it To Me" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_13" text="Gamblers never quit" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="ach_slot_14" text="Raccoon's Rage" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_15" text="Selesnya Identity Buff – “Harmony’s Bloom”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_16" text="Dimir Identity Buff – “Whisper Network”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_17" text="Izzet Identity Buff – “Experimental Sparks”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_18" text="Golgari Identity Buff – “Cycle of Rot”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_19" text="Changeling's Land Form" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_20" text="Boros Identity Buff – “Charge of Conviction”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_21" text="Azorius Identity Buff – “Law of Efficiency”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_22" text="Simic Identity Buff – “Adaptive Pattern”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_23" text="Orzhov Identity Buff – “Tithe and Toil”" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_24" text="Dog's Best Friend" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_25" text="Happy Fun Land" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ach_slot_26" text="Nature's Blessing" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+          </HorizontalLayout>
+        </VerticalLayout>
+      </Panel>
+
+      <Panel id="Tickets" rectAlignment="UpperCenter" position="0 0 0" width="880" height="380" color="black" active="false">
+        <VerticalLayout spacing="4" padding="8 8 8 8" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+          <HorizontalLayout spacing="10" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="ticket_slot_1" text="Vanguard Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ticket_slot_2" text="Color Combo Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ticket_slot_3" text="Emblem Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="ticket_slot_4" text="Arcane Signet Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ticket_slot_5" text="Sol Ring Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ticket_slot_6" text="Conspiracy Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ticket_slot_7" text="Trinket Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="ticket_slot_8" text="Leyline Ticket" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+          </HorizontalLayout>
+        </VerticalLayout>
+      </Panel>
+
+      <Panel id="Brands" rectAlignment="UpperCenter" position="0 0 0" width="880" height="380" color="black" active="false">
+        <VerticalLayout spacing="4" padding="8 8 8 8" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+          <HorizontalLayout spacing="10" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="brand_slot_1" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_2" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_3" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_4" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_5" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_6" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_7" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_8" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_9" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_10" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_11" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_12" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_13" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="brand_slot_14" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_15" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_16" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_17" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_18" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_19" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_20" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_21" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_22" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_23" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_24" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_25" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="brand_slot_26" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+          </HorizontalLayout>
+        </VerticalLayout>
+      </Panel>
+
+      <Panel id="Captures" rectAlignment="UpperCenter" position="0 0 0" width="880" height="380" color="black" active="false">
+        <VerticalLayout spacing="4" padding="8 8 8 8" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+          <HorizontalLayout spacing="10" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="True">
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="capture_slot_1" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_2" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_3" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_4" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_5" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_6" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_7" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_8" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_9" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_10" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_11" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_12" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_13" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+            <VerticalLayout spacing="4" padding="0 0 0 0" color="#303030" childForceExpandWidth="True" childForceExpandHeight="False">
+              <Button id="capture_slot_14" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_15" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_16" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_17" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_18" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_19" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_20" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_21" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_22" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_23" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_24" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_25" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+              <Button id="capture_slot_26" text="" textColor="#FFFFFF" colors="#505050|#606060|#404040|#606060" preferredHeight="26" onClick="ui_select_reward" />
+            </VerticalLayout>
+          </HorizontalLayout>
+        </VerticalLayout>
+      </Panel>
+    </Panel>
+</Panel>
+</Panel>
