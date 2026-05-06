@@ -1029,7 +1029,9 @@ function hydrateFromTagCache(oracleIds, requestedCount) {
   for (const oracleId of sampled) {
     const printings = bulkData.getPrintingsByOracleId(oracleId);
     if (printings && printings.length > 0) {
-      cards.push(printings[Math.floor(Math.random() * printings.length)]);
+      const playable = printings.filter((p) => !bulkData.isNonPlayableCard(p));
+      const pool = playable.length > 0 ? playable : printings;
+      cards.push(pool[Math.floor(Math.random() * pool.length)]);
     }
   }
   return cards;
