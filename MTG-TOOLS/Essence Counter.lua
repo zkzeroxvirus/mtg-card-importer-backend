@@ -52,6 +52,9 @@ local CRYPT_REWARDS = {
     { name = "Unearthly Reach", desc = "It gives either an additional Upkeep or End Step.\nUnlock: Beat Tormod and Ravos." },
     { name = "Momentum Engine", desc = "Until end of turn, you don't lose unspent mana as steps and phases end.\nUnlock: Beat Yurlok of Scorch Thrash." },
     { name = "Eternal Servitude", desc = "Once each turn, whenever a creature you control becomes the target of a spell, it phases out.\n\nWhenever a creature you control phases in, create a tapped 1/1 white Spirit creature token.\nUnlock: Beat King of the Oathbreakers." },
+    { name = "Dark Beginnings", desc = "Your commander is augmented after deck creation.\nUnlock: Beat Maha, Its Feathers Night." },
+    { name = "The Chosen Path", desc = "Once per encounter, choose one:\n\n- {2}: Search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.\n- Look at the top six cards of your library. You may reveal a creature card from among them and put it into your hand. Put the rest on the bottom of your library in any order.\n\nUnlock: Beat Loot, Exuberant Explorer." },
+    { name = "Paragon Adornments", desc = "Equipment costs {1} less to cast.\nEquipment costs {1} less to equip.\nUnlock: Beat Reyav, Master Smith." },
 }
 
 -- Achievements (effects + unlock conditions)
@@ -614,6 +617,9 @@ local SPAWN_IMAGES = {
     ["Unearthly Reach"] = "https://cards.scryfall.io/large/front/3/c/3caa9c55-5e3b-436b-84a9-b7ccebf63799.jpg",
     ["Momentum Engine"] = "https://cards.scryfall.io/normal/front/6/a/6affd9c6-f7ab-488e-85fa-2a3a48383414.jpg",
     ["Eternal Servitude"] = "https://cards.scryfall.io/normal/front/2/9/29bf245f-e8e0-4d32-8cd7-06d832609910.jpg",
+    ["Dark Beginnings"] = "https://cards.scryfall.io/large/front/b/f/bf4708e8-2149-4990-987c-2ea55fc6c508.jpg",
+    ["The Chosen Path"] = "https://cards.scryfall.io/normal/front/e/7/e7b44893-e6d1-48d0-ba69-06b9569e1e38.jpg",
+    ["Paragon Adornments"] = "https://cards.scryfall.io/normal/front/2/b/2b432c64-e083-4386-86c1-49d746e7a8ea.jpg",
 
     -- Achievements
     ["Happy Fun Land"] = "https://cards.scryfall.io/large/front/c/5/c52057f7-a78a-4edc-8e95-edaea6376e76.jpg",
