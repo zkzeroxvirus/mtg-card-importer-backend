@@ -2672,8 +2672,9 @@ app.get('/rulings/:name', async (req, res) => {
       }
     }
 
-    const rulings = await scryfallLib.getCardRulings(name);
-    
+    const card = await scryfallLib.getCard(name);
+    const rulings = await scryfallLib.getCardRulings(card.id);
+
     // Return Scryfall rulings format
     res.json({
       object: 'list',
