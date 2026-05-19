@@ -3,14 +3,10 @@ function onLoad()
   backURL='https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
 
   -- Backend URL - default to local dev server (docker-compose.local.yml maps 3000:3000)
-  backendURL='http://localhost:3000'
-  --backendURL='http://api.mtginfo.org'
-  setCode='Mystery'
-  -- setCode='KLM'
-  -- setCode='STX'
-  -- setCode='ZNR'
+  --backendURL='http://localhost:3000'
+  backendURL='http://api.mtginfo.org'
 
-  cardStackName=setCode.." Booster"
+  cardStackName='Mystery Booster'
   cardStackDescription=""
 
   -------------- don't change these
@@ -25,148 +21,30 @@ end
 
 local BOOSTER_BUILD_TIMEOUT = 25
 local BOOSTER_REST_TIMEOUT = 8
-local RANDOM_ENDPOINT_PATH = '/random'
 local RANDOM_BUILD_ENDPOINT_PATH = '/random/build'
 
---------------------------------------------------------------------------------
----- Booster Set Lookup Function
----- should be correct for all sets?
----- if not add special cases e.g. using the set:lower()=='mystery' example
---------------------------------------------------------------------------------
-local function apiSet(set)
-  return backendURL..RANDOM_ENDPOINT_PATH..'?q=is:booster+s:'..set..'++-is:alchemy+'
-end
-function rarity(m,r,u)
-  if math.random(1,m or 36)==1 then return'r:mythic'
-  elseif math.random(1,r or 8)==1 then return'r:rare'
-  elseif math.random(1,u or 4)==1 then return'r:uncommon'
-  else return'r:common'end end
-function typeCo(p,t)local n=math.random(#p-1,#p)for i=13,#p do if n==i then p[i]=p[i]..'+'..t else p[i]=p[i]..'+-'..t end end return p end
-
-local Booster=setmetatable({
-  dom=function(p)return typeCo(p,'t:legendary')end,
-  war=function(p)return typeCo(p,'t:planeswalker')end,
-  znr=function(p)return typeCo(p,'t:pathway')end,
-  tsp='tsb',mb1='fmb1',mh2='h1r',bfz='exp',ogw='exp',kld='mps',aer='mps',akh='mp2',hou='mp2',stx='sta'
-},{__call=function(t,set,n)
-  local pack,u={},apiSet(set)
-  u=u:gsub('%+s:%(','+(')
-  if not n and t[set]and type(t[set])=='function'then
-    return t[set](t(set,true))
-  else
-    for c in('wubrg'):gmatch('.')do table.insert(pack,u..'r:common+c>='..c)end
-    for i=1,6 do table.insert(pack,u..'r:common+-t:basic')end
-    --masterpiece math
-    if not n and((t[set]and math.random(1,144)==1)or('tsp mb1 mh2'):find(set))then
-      pack[#pack]=backendURL..'/random?q=is:booster+s:'..t[set]end
-    for i=1,3 do table.insert(pack,u..'r:uncommon')end
-    table.insert(pack,u..rarity(8,1))
-    return pack
-  end
-end})
-
---ReplacementSlot
-function rSlot(p,s,a,b)for i,v in pairs(p)do if i~=6 then p[i]=v..a else p[i]=backendURL..'/random?q=is:booster+s:'..s..'+'..rarity()..b end end return p end
-
---Weird Boosters
-Booster['mystery']=function()
-  urlTable={}
-  -- MYSTERY BOOSTER
-  -- Keep slots broad for bulk compatibility; only the playtest slot is set-locked.
-  urlPrefix=backendURL..'/random?q='
-  -- slot 1-10: each Convention pack has 2 commons/uncommons of each color
+local function getMysteryPackQueries()
+  local urlPrefix = backendURL..'/random?q='
+  local slots = {}
+  -- slots 1-12: 2 commons/uncommons of each color (W, U, B, R, G, C)
   for _,c in pairs({'w','u','b','r','g'}) do
-    table.insert(urlTable,urlPrefix..'r<rare+c='..c)
-    table.insert(urlTable,urlPrefix..'r<rare+c='..c)
+    table.insert(slots, urlPrefix..'r<rare+c='..c)
+    table.insert(slots, urlPrefix..'r<rare+c='..c)
   end
-  -- slot 11: 1 multicolored common/uncommon
-  table.insert(urlTable,urlPrefix..'c:m+r<rare')
-  -- slot 12: 1 common/uncommon artifact/land
-  table.insert(urlTable,urlPrefix..'id=c+r<rare')
-  -- slot 13: 1 rare/mythic rare with the M15 card frame
-  table.insert(urlTable,urlPrefix..'r>=rare+frame:2015')
-  -- slot 14: one pre-M15 card in its original frame
-  table.insert(urlTable,urlPrefix..'r>=rare+-frame:2015')
-  -- slot 15: bonus uncommon/rare+
-  table.insert(urlTable,urlPrefix..'r>=uncommon')
-  return urlTable
+  -- colorless identity (artifacts, lands, etc.)
+  table.insert(slots, urlPrefix..'id=c+r<rare')
+  table.insert(slots, urlPrefix..'id=c+r<rare')
+  -- slot 13: 1 multicolored common/uncommon
+  table.insert(slots, urlPrefix..'c:m+r<rare')
+  -- slot 14: 1 rare/mythic with the M15 card frame
+  table.insert(slots, urlPrefix..'r>=rare+frame:2015')
+  -- slot 15: 1 rare or mythic (any frame)
+  table.insert(slots, urlPrefix..'r>=rare')
+  return slots
 end
-
-Booster['stx']=function()
-  local pack,u={},apiSet('stx')
-  -- 1 mystical archive card  (Uncommon, Rare, or Mythic Rare, 50% chance japanese)
-  if math.random(2)==1 then table.insert(pack,backendURL..'/random?q=set:sta+r>common+lang:en')
-  else table.insert(pack,backendURL..'/random?q=set:sta+r>common+lang:ja') end
-  table.insert(pack,u..'t:lesson+-r:u')             -- 1 lesson card (Common, Rare, or Mythic Rare)
-  table.insert(pack,u..rarity(8,1))                 -- 1 rare (7/8 chance) or mythic rare (1/8 chance)
-  for i=1,3 do table.insert(pack,u..'r:u') end      -- 3 uncommons
-  for _,c in pairs({'w','u','b','r','g'}) do table.insert(pack,u..'r:c+c:'..c) end              -- 8 commons
-  for i=1,3 do table.insert(pack,u..'r:c+-t:basic') end
-  if math.random(3)==1 then table.insert(pack,u) else table.insert(pack,u..'r:c+-t:basic') end  -- 33% chance foil of any rarity (66% chance another common)
-  return pack
-end
-
-Booster['2xm']=function(p)p[11]=p[#p]for i=9,10 do p[i]=backendURL..'/random?q=is:booster+s:2xm'..'+'..rarity()end return p end
-for s in('isd dka soi emn'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-is:transform','+is:transform')end end
-for s in('mid'):gmatch('%S+')do--Crimson Moon
-  Booster[s]=function(p)local n=math.random(#p-1,#p)for i,v in pairs(p)do if i==6 or i==n then p[i]=p[i]..'+is:transform'else p[i]=p[i]..'+-is:transform'end end return p end end
-for s in('cns cn2'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-wm:conspiracy','+wm:conspiracy')end end
-for s in('rav gpt dis rtr gtc dgm grn rna'):gmatch('%S+')do
-  Booster[s]=function(p)return rSlot(p,s,'+-t:land','+t:land+-t:basic')end end
-for s in('ice all csp mh1 khm'):gmatch('%S+')do
-  Booster[s]=function(p)p[6]=backendURL..'/random?q=is:booster+s:'..s..'+t:basic+t:snow'return p end end
-
---Custom Booster Packs
-Booster.standard=function(qTbl)
-  local pack,u={},backendURL..'/random?q=f:standard+'
-  for c in ('wubrg'):gmatch('.')do
-    table.insert(pack,u..'r:common+c:'..c)end
-  for i=1,5 do table.insert(pack,u..'r:common+-t:basic')end
-  for i=1,3 do table.insert(pack,u..'r:uncommon')end
-  table.insert(pack,u..rarity(8,1))
-  table.insert(pack,u..'t:basic')
-  table.insert(pack,backendURL..'/random?q=(set:tafr+or+set:tstx+or+set:tkhm+or+set:tznr+or+set:sznr+or+set:tm21+or+set:tiko+or+set:tthb+or+set:teld)')
-  local specials={'frameeffect:showcase','frameeffect:extendedart','border:borderless','s:plist','s:sta+r>common'}
-  for i=#pack-1,#pack do
-    if math.random(1,2)==1 then
-      pack[i]=u..specials[math.random(#specials)]
-    end end
-  return pack end
-Booster.conspiracy=function(qTbl)--wubrgCCCCCTUUURT
-  local p=Booster('(s:cns+or+s:cn2)')
-  local z=p[#p]:gsub('r:%S+',rarity(9,6,3))
-  table.insert(p,z)
-  p[6]=p[math.random(11,12)]
-  for i,s in pairs(p)do
-    if i==6 or i==#p then
-      p[i]=p[i]..'+wm:conspiracy'
-    else p[i]=p[i]..'+-wm:conspiracy'end end
-  return p end
-Booster.innistrad=function(qTbl)--wubrgDCCCCUUUDRD
-  local p=Booster('(s:isd+or+s:dka+or+s:avr+or+s:soi+or+s:emn+or+s:mid)')
-  local z=p[#p]:gsub('r:%S+',rarity(8,1))
-  table.insert(p,z)
-  p[11]=p[12]
-  for i,s in pairs(p)do
-    if i==6 or i==#p or i==#p-2 then
-      p[i]=p[i]..'+is:transform'
-    else p[i]=p[i]..'+-is:transform'end end
-  return p end
-Booster.ravnica=function(qTbl)--wubrgLmmmCCUUURL
-  local l,p='t:land+-t:basic',Booster('(s:rav+or+s:gpt+or+s:dis+or+s:rtr+or+s:gtc+or+s:dgm+or+s:grn+or+s:rna)')
-  table.insert(p,p[#p])
-  for i=7,9 do p[i]=p[6]..'+id>=2'end
-  for i,s in pairs(p)do
-    if i==6 or i==#p then
-      p[i]=p[i]:gsub('r:%S+',rarity(9,6,3))..'+'..l
-    else p[i]=p[i]..'+-'..l end end
-  return p end
 
 function getScryfallQueryTable()
-  urlTable=Booster(setCode:lower())
-  return urlTable
+  return getMysteryPackQueries()
 end
 
 --------------------------------------------------------------------------------
@@ -464,6 +342,19 @@ function getDeckDat(urlTable,boosterN)
         namesSeen[cardName]=true
       end
     end
+
+    -- compact arrays: remove nil gaps so TTS ipairs doesn't stop early
+    local newObjects = {}
+    local newIDs = {}
+    for i = 1, #urlTable do
+      if deckDat.ContainedObjects[i] then
+        table.insert(newObjects, deckDat.ContainedObjects[i])
+        table.insert(newIDs, deckDat.DeckIDs[i])
+      end
+    end
+    deckDat.ContainedObjects = newObjects
+    deckDat.DeckIDs = newIDs
+    -- CustomDeck stays keyed by original slot numbers (matches each card's CardID)
 
     if doubles then   -- just redo the search
       getDeckDat(urlTable,boosterN)
