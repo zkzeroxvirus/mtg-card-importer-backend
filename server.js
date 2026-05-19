@@ -1217,14 +1217,17 @@ async function fetchApiTaggerBatch(query, requestedCount, res = null) {
       RANDOM_SEARCH_ORDER
     );
     if (Array.isArray(cards) && cards.length > 0) {
-      const oracleIds = cards.map((c) => c.oracle_id).filter(Boolean);
+      // Filter out non-playable cards (un-sets, tokens, emblems, etc.)
+      // to match the bulk data behavior
+      const playableCards = cards.filter((card) => !bulkData.isNonPlayableCard(card));
+      const oracleIds = playableCards.map((c) => c.oracle_id).filter(Boolean);
       tagCache.set(query, oracleIds);
       tagCache.save();
       if (process.send) {
         process.send({ type: 'tag_cache_update', data: tagCache.serializeForIPC() });
       }
       // Return a random sample of the full pool
-      return pickRandom(cards, requestedCount);
+      return pickRandom(playableCards, requestedCount);
     }
     return [];
   } catch (error) {

@@ -87,8 +87,8 @@ Booster['mystery']=function()
   table.insert(urlTable,urlPrefix..'r>=rare+frame:2015')
   -- slot 14: one pre-M15 card in its original frame
   table.insert(urlTable,urlPrefix..'r>=rare+-frame:2015')
-  -- slot 15: playtest card slot (CMB1), force API for this specific query path
-  table.insert(urlTable,backendURL..'/random?q=set:cmb1')
+  -- slot 15: bonus uncommon/rare+
+  table.insert(urlTable,urlPrefix..'r>=uncommon')
   return urlTable
 end
 
@@ -418,64 +418,28 @@ function getDeckDat(urlTable,boosterN)
 
     local randomQuery = extractQueryFromRandomUrl(url)
     if randomQuery then
-      local triedApiFallback = false
+      local payload = {
+        q = randomQuery,
+        count = 1,
+        enforceCommander = false,
+        forceApi = false,
+        back = backURL
+      }
 
-      local function requestSlotCard(forceApiFlag)
-        local payload = {
-          q = randomQuery,
-          count = 1,
-          enforceCommander = false,
-          forceApi = forceApiFlag,
-          back = backURL
-        }
+      postBuildNDJSON(payload, function(wr)
+        if not wr.is_done then
+          return
+        end
 
-        postBuildNDJSON(payload, function(wr)
-          if not wr.is_done then
-            return
-          end
+        local hasError = wr.is_error or (wr.response_code and wr.response_code >= 400)
+        if hasError or not wr.text or wr.text == '' then
+          assignCardDat(nil)
+          return
+        end
 
-          local shouldRetryWithApi = (not forceApiFlag) and (not triedApiFallback)
-          local hasError = wr.is_error or (wr.response_code and wr.response_code >= 400)
-
-          if hasError then
-            if shouldRetryWithApi then
-              triedApiFallback = true
-              requestSlotCard(true)
-              return
-            end
-            assignCardDat(nil)
-            return
-          end
-
-          if not wr.text or wr.text == '' then
-            if shouldRetryWithApi then
-              triedApiFallback = true
-              requestSlotCard(true)
-              return
-            end
-            assignCardDat(nil)
-            return
-          end
-
-          local cardDat = cardDatFromBuildResponse(wr.text, n)
-          if cardDat then
-            assignCardDat(cardDat)
-            return
-          end
-
-          if shouldRetryWithApi then
-            triedApiFallback = true
-            requestSlotCard(true)
-          else
-            assignCardDat(nil)
-          end
-        end)
-      end
-
-      local forceApiByDefault = randomQuery:find('set:cmb1', 1, true) ~= nil
-        or randomQuery:find('s:cmb1', 1, true) ~= nil
-
-      requestSlotCard(forceApiByDefault)
+        local cardDat = cardDatFromBuildResponse(wr.text, n)
+        assignCardDat(cardDat)
+      end)
     else
       assignCardDat(nil)
     end
