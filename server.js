@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config();
 
 const scryfallLib = require('./lib/scryfall');
@@ -15,6 +16,7 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const VERBOSE_REQUEST_LOGS = process.env.VERBOSE_REQUEST_LOGS === 'true';
+const requestContext = new AsyncLocalStorage();
 
 function debugLog(...args) {
   if (VERBOSE_REQUEST_LOGS) {
@@ -78,6 +80,35 @@ function parseBooleanLike(value) {
   }
 
   return null;
+}
+
+const strictBulkEnvValue = parseBooleanLike(process.env.STRICT_BULK_MODE);
+const STRICT_BULK_MODE = strictBulkEnvValue === null ? USE_BULK_DATA : strictBulkEnvValue;
+
+function isStrictBulkModeEnabled() {
+  return STRICT_BULK_MODE && USE_BULK_DATA;
+}
+
+function isLiveApiAllowedByContext() {
+  if (!isStrictBulkModeEnabled()) {
+    return true;
+  }
+  const context = requestContext.getStore();
+  return context?.allowLiveApi === true;
+}
+
+function markCurrentRequestLiveApiAllowed() {
+  const context = requestContext.getStore();
+  if (context) {
+    context.allowLiveApi = true;
+  }
+}
+
+function createStrictBulkUnavailableError() {
+  const error = new Error('Bulk data is still loading and strict bulk mode is enabled. Retry shortly or pass forceApi=true for an explicit live fallback.');
+  error.code = 'LIVE_API_DISABLED';
+  error.status = 503;
+  return error;
 }
 
 function extractTrailingCount(rawQuery) {
@@ -414,13 +445,20 @@ function shouldRateLimitRandomRequest(req) {
     : normalizeCommanderFormatAliases(languageEnforcedQuery);
 
   const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
-  const forceApi = parseBooleanLike(String(forceApiInput)) === true;
+    const forceApi = parseBooleanLike(String(forceApiInput)) === true || apiOnlyFilterPresent;
   const executionPlan = buildRandomExecutionPlan({
     useBulkLoaded: USE_BULK_DATA && bulkData.isLoaded(),
     hasApiOnlyFilter: apiOnlyFilterPresent,
     forceApi
   });
   return executionPlan.primary === 'api';
+}
+
+if (typeof scryfallLib.setRequestSignalProvider === 'function') {
+  scryfallLib.setRequestSignalProvider(() => requestContext.getStore()?.signal || null);
+}
+if (typeof scryfallLib.setLiveApiGuard === 'function') {
+  scryfallLib.setLiveApiGuard(() => isLiveApiAllowedByContext());
 }
 
 // Validate the default card back URL on startup
@@ -463,6 +501,30 @@ app.use((req, res, next) => {
   return rawBodyParser(req, res, next);
 });  // Parse raw body only for methods that can carry payloads
 
+app.use((req, res, next) => {
+  const controller = new globalThis.AbortController();
+  const context = {
+    signal: controller.signal,
+    allowLiveApi: parseBooleanLike(String(req.query?.forceApi)) === true
+  };
+
+  const abortRequest = () => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  req.once('aborted', abortRequest);
+  req.once('close', abortRequest);
+  res.once('close', () => {
+    if (!res.writableEnded) {
+      abortRequest();
+    }
+  });
+
+  requestContext.run(context, next);
+});
+
 // Performance metrics tracking
 const metrics = {
   requests: 0,
@@ -496,7 +558,11 @@ app.use((req, res, next) => {
 function normalizeError(error, defaultStatus = 502) {
   let status = error?.response?.status;
   if (!status) {
-    if (error?.code === 'ECONNABORTED') {
+    if (error?.code === 'LIVE_API_DISABLED') {
+      status = error?.status || 503;
+    } else if (error?.code === 'ERR_CANCELED' || error?.name === 'AbortError') {
+      status = 499; // Client Closed Request
+    } else if (error?.code === 'ECONNABORTED') {
       status = 504; // Gateway Timeout
     } else if (error?.message && /not found/i.test(error.message)) {
       status = 404;
@@ -514,9 +580,15 @@ function normalizeError(error, defaultStatus = 502) {
   // Provide user-friendly messages for known upstream (Scryfall) failure modes.
   // After withRetry exhausts its attempts, these codes bubble up here.
   if (status === 503) {
-    details = 'Scryfall is temporarily unavailable. Please try again in a moment.';
+    if (error?.code === 'LIVE_API_DISABLED') {
+      details = error.message;
+    } else {
+      details = 'Scryfall is temporarily unavailable. Please try again in a moment.';
+    }
   } else if (status === 429) {
     details = 'Scryfall rate limit reached. Please wait a moment before retrying.';
+  } else if (status === 499) {
+    details = 'Request canceled because the client disconnected.';
   }
 
   return { status, details };
@@ -770,6 +842,10 @@ async function hydrateCardForTts(card) {
     return card;
   }
 
+  if (isStrictBulkModeEnabled() && !isLiveApiAllowedByContext()) {
+    return card;
+  }
+
   try {
     if (card.id) {
       return await scryfallLib.getCardById(card.id);
@@ -967,6 +1043,12 @@ function buildRandomExecutionPlan({
   }
   if (hasApiOnlyFilter) {
     return { primary: 'api', reason: 'api_only_filter' };
+  }
+  if (isStrictBulkModeEnabled()) {
+    if (useBulkLoaded) {
+      return { primary: 'bulk', reason: 'strict_bulk_mode' };
+    }
+    return { primary: 'bulk', reason: 'strict_bulk_waiting_for_bulk' };
   }
   if (useBulkLoaded) {
     return { primary: 'bulk', reason: 'bulk_loaded' };
@@ -1898,6 +1980,9 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
     const setFilterPresent = hasPositiveSetFilter(randomQuery);
     const forceApi = parseBooleanLike(String(payload.forceApi)) === true;
+    if (forceApi || apiOnlyFilterPresent) {
+      markCurrentRequestLiveApiAllowed();
+    }
     if (apiOnlyFilterPresent) {
       res.setHeader('Cache-Control', 'no-store');
     }
@@ -1909,6 +1994,11 @@ app.post('/random/build', randomLimiter, async (req, res) => {
     const canServeApiOnlyFromTagCache = apiOnlyFilterPresent
       && USE_BULK_DATA
       && bulkData.isLoaded();
+
+    if (isStrictBulkModeEnabled() && executionPlan.primary === 'bulk' && !bulkData.isLoaded()) {
+      throw createStrictBulkUnavailableError();
+    }
+
     setQueryPlanHeader(res, executionPlan);
     if (explainRequested && executionPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
@@ -1953,6 +2043,12 @@ app.post('/random/build', randomLimiter, async (req, res) => {
           return res.status(404).json({
             object: 'error',
             details: `No eligible random cards found for the given query: "${normalizedQuery}"`
+          });
+        }
+        if (!scryfallCard && isStrictBulkModeEnabled() && !forceApi) {
+          return res.status(404).json({
+            object: 'error',
+            details: 'No eligible random cards found in bulk data for the given query.'
           });
         }
       }
@@ -2259,6 +2355,9 @@ app.get('/random', randomLimiter, async (req, res) => {
     const priceFilterPresent = hasPriceFilter(randomQuery);
     const apiOnlyFilterPresent = hasApiOnlyFilter(randomQuery);
     const setFilterPresent = hasPositiveSetFilter(randomQuery);
+    if (forceApi || apiOnlyFilterPresent) {
+      markCurrentRequestLiveApiAllowed();
+    }
     if (apiOnlyFilterPresent) {
       res.setHeader('Cache-Control', 'no-store');
     }
@@ -2270,6 +2369,11 @@ app.get('/random', randomLimiter, async (req, res) => {
     const canServeApiOnlyFromTagCache = apiOnlyFilterPresent
       && USE_BULK_DATA
       && bulkData.isLoaded();
+
+    if (isStrictBulkModeEnabled() && executionPlan.primary === 'bulk' && !bulkData.isLoaded()) {
+      throw createStrictBulkUnavailableError();
+    }
+
     setQueryPlanHeader(res, executionPlan);
     if (explainRequested && executionPlan.primary === 'bulk') {
       setExplainHeader(res, bulkData.getQueryExplain(randomQuery, 'random'));
@@ -2286,6 +2390,12 @@ app.get('/random', randomLimiter, async (req, res) => {
           return res.status(404).json({
             object: 'error',
             details: `No eligible random cards found for the given query: "${q}"`
+          });
+        }
+        if (!scryfallCard && isStrictBulkModeEnabled() && !forceApi) {
+          return res.status(404).json({
+            object: 'error',
+            details: 'No eligible random cards found in bulk data for the given query.'
           });
         }
       }
@@ -2588,13 +2698,22 @@ app.get('/search', async (req, res) => {
     }
 
     const requestedUnique = unique || (q && q.toLowerCase().includes('oracleid:') ? 'prints' : 'cards');
+    const forceApi = parseBooleanLike(String(req.query.forceApi)) === true;
     // Security: Enforce maximum limit to prevent memory exhaustion
     const limitNum = Math.min(parseInt(limit) || 100, MAX_SEARCH_LIMIT);
     
     let scryfallCards = null;
     
     const apiOnlyFilterPresent = hasApiOnlyFilter(searchQuery);
+    if (forceApi || apiOnlyFilterPresent) {
+      markCurrentRequestLiveApiAllowed();
+    }
     const canUseBulkSearch = USE_BULK_DATA && bulkData.isLoaded();
+
+    if (isStrictBulkModeEnabled() && !canUseBulkSearch && !forceApi && !apiOnlyFilterPresent) {
+      throw createStrictBulkUnavailableError();
+    }
+
     const searchPlan = apiOnlyFilterPresent
       ? { primary: 'api', reason: 'api_only_filter' }
       : (canUseBulkSearch ? { primary: 'bulk', reason: 'bulk_loaded' } : { primary: 'api', reason: 'bulk_unavailable' });
@@ -2613,6 +2732,13 @@ app.get('/search', async (req, res) => {
       
       // Fallback to API if bulk data returned null (no matches)
       if (!scryfallCards) {
+        if (isStrictBulkModeEnabled() && !forceApi) {
+          return res.json({
+            object: 'list',
+            total_cards: 0,
+            data: []
+          });
+        }
         debugLog(`[Fallback] Bulk data returned no results for "${searchQuery}", using API`);
         res.setHeader('X-Bulk-Fallback', 'bulk_no_results');
         scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
@@ -2907,6 +3033,7 @@ app.post('/bulk/reload', async (req, res) => {
  */
 app.get('/proxy', async (req, res) => {
   try {
+    markCurrentRequestLiveApiAllowed();
     const { uri } = req.query;
     
     if (!uri) {
