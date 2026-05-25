@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.923'
+mod_name, version = 'Card Importer', '1.924'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -1294,7 +1294,7 @@ Importer=setmetatable({
   end,
 
   Print=function(qTbl)
-    local url,n=BACKEND_URL..'/search?compact=spawn&q=',qTbl.name:lower():gsub('%s',''):gsub('%%20','')    -- pieHere, making search with spaces possible
+    local n=(qTbl.name or ''):lower():gsub('%%20',' '):gsub('%s','')
     if('plains island swamp mountain forest'):find(n)then
       --url=url:gsub('prints','art')end
       broadcastToAll('[b][FFAA00]⚠️ Basic Lands Not Printed[/b]\n' ..
@@ -1304,9 +1304,19 @@ Importer=setmetatable({
       endLoop()
     else
       if qTbl.oracleid~=nil then
-        WebRequest.get(url..qTbl.oracleid,function(wr)spawnList(wr,qTbl)end)
+        local oracleQuery = qTbl.oracleid
+        if not oracleQuery:find('%%') then
+          oracleQuery = urlEncode(oracleQuery)
+        end
+        local url = BACKEND_URL..'/search?compact=spawn&unique=prints&forceApi=true&q='
+        WebRequest.get(url..oracleQuery,function(wr)spawnList(wr,qTbl)end)
       else
-        WebRequest.get(url..qTbl.name,function(wr)spawnList(wr,qTbl)end)
+        local encodedName = qTbl.name
+        if not encodedName:find('%%') then
+          encodedName = urlEncode(encodedName)
+        end
+        local url = BACKEND_URL..'/printings/'..encodedName..'?forceApi=true'
+        WebRequest.get(url,function(wr)spawnList(wr,qTbl)end)
       end
     end
   end,

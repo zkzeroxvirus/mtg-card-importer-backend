@@ -104,6 +104,13 @@ function markCurrentRequestLiveApiAllowed() {
   }
 }
 
+function setStrictBulkHeader(res) {
+  if (!res || typeof res.setHeader !== 'function') {
+    return;
+  }
+  res.setHeader('X-Bulk-Strict', 'true');
+}
+
 function createStrictBulkUnavailableError() {
   const error = new Error('Bulk data is still loading and strict bulk mode is enabled. Retry shortly or pass forceApi=true for an explicit live fallback.');
   error.code = 'LIVE_API_DISABLED';
@@ -1638,6 +1645,7 @@ app.get('/ready', (req, res) => {
 app.get('/card/:name', async (req, res) => {
   const { name } = req.params;
   const { set } = req.query;
+  const forceApi = parseBooleanLike(String(req.query.forceApi)) === true;
   const compactMode = String(req.query.compact || '').toLowerCase();
   const useSpawnCompact = compactMode === 'spawn';
   const requestEnforceCommander = req.query.enforceCommander === undefined
@@ -1734,6 +1742,14 @@ app.get('/card/:name', async (req, res) => {
     }
 
     if (!scryfallCard) {
+      if (isStrictBulkModeEnabled() && !forceApi) {
+        setStrictBulkHeader(res);
+        return res.status(404).json({
+          object: 'error',
+          details: `Card not found in bulk data: ${name}. Use forceApi=true to allow a live Scryfall lookup.`
+        });
+      }
+
       // Fall back to API for fuzzy matching
       scryfallCard = await scryfallLib.getCard(name, set);
     }
@@ -1754,10 +1770,13 @@ app.get('/card/:name', async (req, res) => {
     res.json(useSpawnCompact ? sanitizeCardForSpawn(scryfallCard) : sanitizeCardForResponse(scryfallCard));
   } catch (error) {
     console.error('Error fetching card:', error.message);
+    if (error?.code === 'LIVE_API_DISABLED') {
+      setStrictBulkHeader(res);
+    }
     const { status, details } = normalizeError(error, 502);
 
     // Fuzzy recovery: if card not found, try autocomplete and fetch best suggestion
-    if (status === 404) {
+    if (status === 404 && !(isStrictBulkModeEnabled() && !forceApi)) {
       try {
         const suggestions = await scryfallLib.autocompleteCardName(name);
         if (suggestions && suggestions.length > 0) {
@@ -2834,6 +2853,7 @@ app.get('/related', async (req, res) => {
     const rawName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
     const rawOracleId = typeof req.query.oracleId === 'string' ? req.query.oracleId.trim() : '';
     const set = typeof req.query.set === 'string' ? req.query.set.trim().toLowerCase() : '';
+    const forceApi = parseBooleanLike(String(req.query.forceApi)) === true;
     const resolveMode = String(req.query.resolve || '').trim().toLowerCase();
     const resolveCards = resolveMode === 'cards';
     const compactMode = String(req.query.compact || '').toLowerCase();
@@ -2859,7 +2879,7 @@ app.get('/related', async (req, res) => {
       }
     }
 
-    if (!sourceCard) {
+    if (!sourceCard && (forceApi || !isStrictBulkModeEnabled())) {
       if (normalizedOracleId) {
         const oracleMatches = await scryfallLib.searchCards(`oracleid:${normalizedOracleId}`, 1, 'prints');
         sourceCard = oracleMatches[0] || null;
@@ -2870,6 +2890,9 @@ app.get('/related', async (req, res) => {
     }
 
     if (!sourceCard) {
+      if (isStrictBulkModeEnabled() && !forceApi) {
+        setStrictBulkHeader(res);
+      }
       return res.status(404).json({ object: 'error', details: 'Source card not found' });
     }
 
@@ -2909,13 +2932,17 @@ app.get('/related', async (req, res) => {
       if (!resolvedCard) {
         resolvedCard = getBulkCardFromUri(part.uri);
       }
-      if (!resolvedCard) {
+      if (!resolvedCard && (forceApi || !isStrictBulkModeEnabled())) {
         try {
           resolvedCard = await scryfallLib.proxyUri(part.uri);
         } catch (resolveError) {
           console.warn(`[Related] Failed to resolve part URI ${part.uri}: ${resolveError.message}`);
           continue;
         }
+      }
+
+      if (!resolvedCard) {
+        continue;
       }
 
       related.push(useSpawnCompact ? sanitizeCardForSpawn(resolvedCard) : sanitizeCardForResponse(resolvedCard));
@@ -2929,6 +2956,9 @@ app.get('/related', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching related token/emblem parts:', error.message);
+    if (error?.code === 'LIVE_API_DISABLED') {
+      setStrictBulkHeader(res);
+    }
     const { status, details } = normalizeError(error, 502);
     return res.status(status).json({ object: 'error', details });
   }
