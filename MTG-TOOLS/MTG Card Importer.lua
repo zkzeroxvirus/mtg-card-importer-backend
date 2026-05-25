@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.925'
+mod_name, version = 'Card Importer', '1.926'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -951,9 +951,45 @@ Importer=setmetatable({
     if not encodedName:find('%%') then
       encodedName = urlEncode(encodedName)
     end
+    local function requestNameFallback()
+      WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
+        spawnList(wr,qTbl)
+      end)
+    end
     local cardUrl = applyCommanderPreferenceToUrl(BACKEND_URL..'/card/'..encodedName..'?compact=spawn')
     WebRequest.get(cardUrl,function(wr)
-        if handleWebError(wr, qTbl, 'Card lookup failed') then
+        if wr and wr.is_error then
+          local msg = 'Card lookup failed: ' .. tostring(wr.error or 'Network error')
+          if wr.response_code then
+            msg = msg .. ' (HTTP ' .. tostring(wr.response_code) .. ')'
+          end
+          Player[qTbl.color].broadcast(msg,{1,0,0})
+          endLoop()
+          return
+        end
+        local parsedObj = nil
+        if wr and wr.text and wr.text ~= '' and not wr.text:match('^%s*<') then
+          local ok, decoded = pcall(function() return JSON.decode(wr.text) end)
+          if ok and decoded then
+            parsedObj = decoded
+          end
+        end
+        local details = ''
+        if parsedObj and parsedObj.object == 'error' then
+          details = tostring(parsedObj.details or '')
+        end
+        local strictBulkNotFound = details:lower():find('card not found in bulk data', 1, true) ~= nil
+        if wr and wr.response_code and wr.response_code >= 400 then
+          if strictBulkNotFound then
+            requestNameFallback()
+            return false
+          end
+          if details ~= '' then
+            Player[qTbl.color].broadcast(details,{1,0,0})
+          else
+            Player[qTbl.color].broadcast('Card lookup failed (HTTP '..tostring(wr.response_code)..')',{1,0,0})
+          end
+          endLoop()
           return
         end
         if wr.text:match('^%s*<') or wr.text:match('<!DOCTYPE') then
@@ -972,8 +1008,7 @@ Importer=setmetatable({
             Player[qTbl.color].broadcast(details,{1,0,0})
           end
           -- Card not found, fall back to generic name search
-            WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
-              spawnList(wr,qTbl)end)
+            requestNameFallback()
           return false
         else setCard(wr,qTbl)end end)end,
 
