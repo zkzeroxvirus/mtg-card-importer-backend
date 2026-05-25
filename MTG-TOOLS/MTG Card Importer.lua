@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.924'
+mod_name, version = 'Card Importer', '1.925'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -966,11 +966,13 @@ Importer=setmetatable({
           spawnList(wr,qTbl)
           return
         elseif obj.object=='error' then
-          if obj.details then
-            Player[qTbl.color].broadcast(obj.details,{1,0,0})
+          local details = tostring(obj.details or '')
+          local strictBulkNotFound = details:lower():find('card not found in bulk data', 1, true) ~= nil
+          if details ~= '' and not strictBulkNotFound then
+            Player[qTbl.color].broadcast(details,{1,0,0})
           end
           -- Card not found, fall back to generic name search
-            WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&q='..encodedName,function(wr)
+            WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
               spawnList(wr,qTbl)end)
           return false
         else setCard(wr,qTbl)end end)end,
