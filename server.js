@@ -1640,7 +1640,7 @@ app.get('/ready', (req, res) => {
 /**
  * GET /card/:name
  * Get a single card - returns raw Scryfall JSON
- * Uses bulk data if available (exact name match only), falls back to API for fuzzy search
+ * Uses bulk data if available (exact + partial-name fallback), then falls back to API fuzzy search
  */
 app.get('/card/:name', async (req, res) => {
   const { name } = req.params;
@@ -1736,9 +1736,12 @@ app.get('/card/:name', async (req, res) => {
       }
     }
     
-    // Bulk data only supports exact name matching, API supports fuzzy matching
+    // Bulk data supports exact name matching plus a local partial-name fallback.
     if (!scryfallCard && USE_BULK_DATA && bulkData.isLoaded()) {
       scryfallCard = bulkData.getCardByName(name, set || null);
+      if (!scryfallCard && typeof bulkData.getCardByPartialName === 'function') {
+        scryfallCard = bulkData.getCardByPartialName(name, set || null);
+      }
     }
 
     if (!scryfallCard) {

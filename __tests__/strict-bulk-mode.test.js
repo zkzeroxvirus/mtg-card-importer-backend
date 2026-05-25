@@ -39,6 +39,7 @@ describe('Strict bulk mode live API fallback behavior', () => {
       getStats: jest.fn(() => ({ loaded: true, cardCount: 0, lastUpdate: null })),
       getExactTokensByName: jest.fn(() => []),
       getCardByName: jest.fn(() => null),
+      getCardByPartialName: jest.fn(() => null),
       getCardByOracleId: jest.fn(() => null),
       getAllPartsById: jest.fn(() => []),
       getCardById: jest.fn(() => null),
@@ -76,6 +77,19 @@ describe('Strict bulk mode live API fallback behavior', () => {
     expect(response.status).toBe(404);
     expect(String(response.body.details || '')).toContain('Use forceApi=true');
     expect(response.headers['x-bulk-strict']).toBe('true');
+    expect(scryfallLib.getCard).not.toHaveBeenCalled();
+    expect(scryfallLib.autocompleteCardName).not.toHaveBeenCalled();
+  });
+
+  test('GET /card/:name should resolve partial names from bulk in strict mode without forceApi', async () => {
+    bulkData.getExactTokensByName.mockReturnValueOnce([]);
+    bulkData.getCardByName.mockReturnValueOnce(null);
+    bulkData.getCardByPartialName.mockReturnValueOnce(createCard('Lightning Bolt'));
+
+    const response = await request(app).get('/card/bolt');
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('Lightning Bolt');
     expect(scryfallLib.getCard).not.toHaveBeenCalled();
     expect(scryfallLib.autocompleteCardName).not.toHaveBeenCalled();
   });
