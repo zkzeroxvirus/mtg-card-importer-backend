@@ -94,6 +94,20 @@ describe('Strict bulk mode live API fallback behavior', () => {
     expect(scryfallLib.autocompleteCardName).not.toHaveBeenCalled();
   });
 
+  test('GET /card/:name should normalize leading scryfall prefix before strict bulk lookup', async () => {
+    bulkData.getExactTokensByName.mockReturnValueOnce([]);
+    bulkData.getCardByName.mockReturnValueOnce(null);
+    bulkData.getCardByPartialName.mockReturnValueOnce(createCard('Ragavan, Nimble Pilferer'));
+
+    const response = await request(app).get('/card/scryfall%20ragavan%20nimble');
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('Ragavan, Nimble Pilferer');
+    expect(bulkData.getCardByName).toHaveBeenCalledWith('ragavan nimble', null);
+    expect(bulkData.getCardByPartialName).toHaveBeenCalledWith('ragavan nimble', null);
+    expect(scryfallLib.getCard).not.toHaveBeenCalled();
+  });
+
   test('GET /card/:name should allow live API in strict bulk mode when forceApi=true', async () => {
     bulkData.getExactTokensByName.mockReturnValueOnce([]);
     bulkData.getCardByName.mockReturnValueOnce(null);
@@ -163,5 +177,21 @@ describe('Strict bulk mode live API fallback behavior', () => {
 
     expect(response.status).toBe(200);
     expect(scryfallLib.getCard).toHaveBeenCalledWith('API Source', null);
+  });
+
+  test('GET /search should use live API as last resort when strict bulk has no results', async () => {
+    bulkData.searchCards.mockReturnValueOnce(null);
+    scryfallLib.searchCards.mockResolvedValueOnce([createCard('Ragavan, Nimble Pilferer')]);
+
+    const response = await request(app)
+      .get('/search')
+      .query({ q: 'ragavan nimble' });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-bulk-fallback']).toBe('bulk_no_results_live_api');
+    expect(response.body.object).toBe('list');
+    expect(response.body.total_cards).toBe(1);
+    expect(response.body.data[0].name).toBe('Ragavan, Nimble Pilferer');
+    expect(scryfallLib.searchCards).toHaveBeenCalledWith('ragavan nimble', 100, 'cards');
   });
 });

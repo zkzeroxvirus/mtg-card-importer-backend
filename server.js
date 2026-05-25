@@ -1653,17 +1653,20 @@ app.get('/card/:name', async (req, res) => {
     : parseBooleanLike(String(req.query.enforceCommander)) !== false;
   
   try {
+    const lookupName = String(name || '')
+      .replace(/^scryfall\s+/i, '')
+      .trim();
 
-    if (!name) {
+    if (!lookupName) {
       return res.status(400).json({ object: 'error', details: 'Card name required' });
     }
 
-    if (isDirectImageUrl(name)) {
-      return res.json(createSingleImageSpawnCard(name));
+    if (isDirectImageUrl(lookupName)) {
+      return res.json(createSingleImageSpawnCard(lookupName));
     }
 
     // Security: Validate input length to prevent DoS
-    if (name.length > MAX_INPUT_LENGTH) {
+    if (lookupName.length > MAX_INPUT_LENGTH) {
       return res.status(400).json({ 
         object: 'error', 
         details: `Card name too long (max ${MAX_INPUT_LENGTH} characters)` 
@@ -1678,7 +1681,7 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Validate input: detect if query string is being passed as card name
-    if (name.includes('?q=')) {
+    if (lookupName.includes('?q=')) {
       return res.status(400).json({ 
         object: 'error',
         details: 'Invalid card name. Did you mean to use /search or /random endpoint? Card name should not contain query parameters.'
@@ -1688,7 +1691,7 @@ app.get('/card/:name', async (req, res) => {
     // Detect common search syntax in card name (indicates wrong endpoint usage)
     // Check for known search operators at word boundaries (colon, equals, comparison)
     // Valid Scryfall syntax uses these operators, so we detect them in card names
-    const hasSearchOperator = /\b(id|c|t|type|s|set|r|rarity|cmc|mv|pow|power|tou|toughness)[:=<>]/i.test(name);
+    const hasSearchOperator = /\b(id|c|t|type|s|set|r|rarity|cmc|mv|pow|power|tou|toughness)[:=<>]/i.test(lookupName);
     if (hasSearchOperator) {
       return res.status(400).json({ 
         object: 'error',
@@ -1697,11 +1700,11 @@ app.get('/card/:name', async (req, res) => {
     }
 
     let scryfallCard;
-    const tokenLookupQuery = buildExactTokenLookupQuery(name, set || null);
+    const tokenLookupQuery = buildExactTokenLookupQuery(lookupName, set || null);
     let bulkSingleTokenCandidate = false;
 
     if (!scryfallCard && USE_BULK_DATA && bulkData.isLoaded()) {
-      const tokenMatches = bulkData.getExactTokensByName(name, set || null);
+      const tokenMatches = bulkData.getExactTokensByName(lookupName, set || null);
       if (tokenMatches.length > 1) {
         return res.json({
           object: 'list',
@@ -1738,9 +1741,9 @@ app.get('/card/:name', async (req, res) => {
     
     // Bulk data supports exact name matching plus a local partial-name fallback.
     if (!scryfallCard && USE_BULK_DATA && bulkData.isLoaded()) {
-      scryfallCard = bulkData.getCardByName(name, set || null);
+      scryfallCard = bulkData.getCardByName(lookupName, set || null);
       if (!scryfallCard && typeof bulkData.getCardByPartialName === 'function') {
-        scryfallCard = bulkData.getCardByPartialName(name, set || null);
+        scryfallCard = bulkData.getCardByPartialName(lookupName, set || null);
       }
     }
 
@@ -1749,12 +1752,12 @@ app.get('/card/:name', async (req, res) => {
         setStrictBulkHeader(res);
         return res.status(404).json({
           object: 'error',
-          details: `Card not found in bulk data: ${name}. Use forceApi=true to allow a live Scryfall lookup.`
+          details: `Card not found in bulk data: ${lookupName}. Use forceApi=true to allow a live Scryfall lookup.`
         });
       }
 
       // Fall back to API for fuzzy matching
-      scryfallCard = await scryfallLib.getCard(name, set);
+      scryfallCard = await scryfallLib.getCard(lookupName, set);
     }
 
     // Preserve full all_parts to match Scryfall API behavior
@@ -1764,7 +1767,7 @@ app.get('/card/:name', async (req, res) => {
       if (commanderLegality && commanderLegality !== 'legal') {
         return res.status(400).json({
           object: 'error',
-          details: `Card is not legal in Commander: ${scryfallCard.name || name}`
+          details: `Card is not legal in Commander: ${scryfallCard.name || lookupName}`
         });
       }
     }
@@ -1781,13 +1784,13 @@ app.get('/card/:name', async (req, res) => {
     // Fuzzy recovery: if card not found, try autocomplete and fetch best suggestion
     if (status === 404 && !(isStrictBulkModeEnabled() && !forceApi)) {
       try {
-        const suggestions = await scryfallLib.autocompleteCardName(name);
+        const suggestions = await scryfallLib.autocompleteCardName(lookupName);
         if (suggestions && suggestions.length > 0) {
           const suggestion = suggestions[0];
           try {
             const corrected = await scryfallLib.getCard(suggestion, set || null);
             corrected._corrected_name = suggestion;
-            corrected._original_name = name;
+            corrected._original_name = lookupName;
             return res.json(useSpawnCompact ? sanitizeCardForSpawn(corrected) : sanitizeCardForResponse(corrected));
           } catch (fallbackError) {
             // If set-specific lookup failed, try without set
@@ -1796,7 +1799,7 @@ app.get('/card/:name', async (req, res) => {
               try {
                 const corrected = await scryfallLib.getCard(suggestion, null);
                 corrected._corrected_name = suggestion;
-                corrected._original_name = name;
+                corrected._original_name = lookupName;
                 return res.json(useSpawnCompact ? sanitizeCardForSpawn(corrected) : sanitizeCardForResponse(corrected));
               } catch (e) {
                 // fall through to error response
@@ -1808,7 +1811,7 @@ app.get('/card/:name', async (req, res) => {
           const suggestionList = suggestions.slice(0, 5).join(', ');
           return res.status(404).json({
             object: 'error',
-            details: `Card not found: ${name}. Did you mean: ${suggestionList}?`
+            details: `Card not found: ${lookupName}. Did you mean: ${suggestionList}?`
           });
         }
       } catch (e) {
@@ -2755,14 +2758,13 @@ app.get('/search', async (req, res) => {
       // Fallback to API if bulk data returned null (no matches)
       if (!scryfallCards) {
         if (isStrictBulkModeEnabled() && !forceApi) {
-          return res.json({
-            object: 'list',
-            total_cards: 0,
-            data: []
-          });
+          // Last resort for strict bulk mode: allow a live lookup only when bulk has no result.
+          markCurrentRequestLiveApiAllowed();
+          res.setHeader('X-Bulk-Fallback', 'bulk_no_results_live_api');
+        } else {
+          res.setHeader('X-Bulk-Fallback', 'bulk_no_results');
         }
         debugLog(`[Fallback] Bulk data returned no results for "${searchQuery}", using API`);
-        res.setHeader('X-Bulk-Fallback', 'bulk_no_results');
         scryfallCards = await scryfallLib.searchCards(searchQuery, limitNum, requestedUnique);
       }
     } else {
