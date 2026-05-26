@@ -952,7 +952,7 @@ Importer=setmetatable({
       encodedName = urlEncode(encodedName)
     end
     local function requestNameFallback()
-      WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
+      WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=cards&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
         spawnList(wr,qTbl)
       end)
     end
