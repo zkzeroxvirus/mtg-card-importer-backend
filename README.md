@@ -8,7 +8,7 @@ A Node.js backend that proxies the Scryfall API to provide Magic: The Gathering 
 
 ## 🎨 Feature: Custom Image Proxies
 
-You can now spawn cards with custom artwork while keeping official card data:
+Spawn cards with custom artwork while keeping official card data:
 
 ```
 scryfall island https://your-custom-art.com/island.jpg
@@ -18,7 +18,7 @@ See [CUSTOM_IMAGE_PROXY_GUIDE.md](CUSTOM_IMAGE_PROXY_GUIDE.md) for full document
 
 ## 🖼️ Feature: Single Image Spawning
 
-You can now spawn a blank card directly from any image URL (no card lookup/proxy data):
+Spawn a blank card directly from any image URL (no card lookup/proxy data):
 
 ```
 scryfall https://cards.scryfall.io/large/front/0/0/0058be07-a8a1-448e-8c3d-61718cb384ec.jpg?1562875117
