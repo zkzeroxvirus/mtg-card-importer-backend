@@ -6,9 +6,9 @@ A Node.js backend that proxies the Scryfall API to provide Magic: The Gathering 
 
 **⚡ Optimized for high concurrency** - Supports 500+ concurrent users with clustering and compression. See [PERFORMANCE_GUIDE.md](PERFORMANCE_GUIDE.md) for details.
 
-## 🎨 New Feature: Custom Image Proxies!
+## 🎨 Feature: Custom Image Proxies
 
-You can now spawn cards with custom artwork while keeping official card data:
+Spawn cards with custom artwork while keeping official card data:
 
 ```
 scryfall island https://your-custom-art.com/island.jpg
@@ -16,9 +16,9 @@ scryfall island https://your-custom-art.com/island.jpg
 
 See [CUSTOM_IMAGE_PROXY_GUIDE.md](CUSTOM_IMAGE_PROXY_GUIDE.md) for full documentation.
 
-## 🖼️ New Feature: Single Image Spawning
+## 🖼️ Feature: Single Image Spawning
 
-You can now spawn a blank card directly from any image URL (no card lookup/proxy data):
+Spawn a blank card directly from any image URL (no card lookup/proxy data):
 
 ```
 scryfall https://cards.scryfall.io/large/front/0/0/0058be07-a8a1-448e-8c3d-61718cb384ec.jpg?1562875117
@@ -92,6 +92,10 @@ npm run lint:fix        # Fix linting errors automatically
 
 # Build (validates that the project can be built)
 npm run build
+
+# Local Docker test stack (shortcut scripts)
+npm run docker:local:up
+npm run docker:local:down
 ```
 
 ### Docker (Recommended for Unraid/Self-Hosted)
@@ -410,7 +414,7 @@ docker build --no-cache -t mtg-card-importer-backend .
 Then run your container as normal:
 ```bash
 docker run -d \
-  --name mtg-card-importer \
+  --name mtg-card-importer-backend \
   --network mtg-net \
   -p 3000:3000 \
   -e NODE_ENV=production \
@@ -431,7 +435,7 @@ docker run -d \
 
 Check the logs to see the specific error:
 ```bash
-docker logs mtg-card-importer
+docker logs mtg-card-importer-backend
 ```
 
 Common issues:
