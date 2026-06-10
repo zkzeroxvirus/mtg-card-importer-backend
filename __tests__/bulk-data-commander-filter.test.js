@@ -310,4 +310,69 @@ describe('Bulk Data - Commander Filter', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test('should include legendary spacecraft in is:commander pool', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-spacecraft-commander-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const cards = [
+      {
+        id: 'legendary-spacecraft',
+        oracle_id: 'oracle-legendary-spacecraft',
+        name: 'Legendary Spacecraft Commander',
+        type_line: 'Legendary Artifact - Spacecraft',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'tst',
+        set_type: 'expansion',
+        lang: 'en',
+        color_identity: []
+      },
+      {
+        id: 'nonlegendary-spacecraft',
+        oracle_id: 'oracle-nonlegendary-spacecraft',
+        name: 'Nonlegendary Spacecraft',
+        type_line: 'Artifact - Spacecraft',
+        layout: 'normal',
+        games: ['paper'],
+        set: 'tst',
+        set_type: 'expansion',
+        lang: 'en',
+        color_identity: []
+      }
+    ];
+
+    fs.writeFileSync(cardFile, zlib.gzipSync(JSON.stringify(cards)));
+
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      jest.resetModules();
+      let bulkData;
+      jest.isolateModules(() => {
+        bulkData = require('../lib/bulk-data');
+      });
+
+      await bulkData.loadBulkData();
+
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+      const card = await bulkData.getRandomCard('is:commander game:paper');
+      randomSpy.mockRestore();
+
+      expect(card).toBeTruthy();
+      expect(card.id).toBe('legendary-spacecraft');
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
