@@ -2,6 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const axios = require('axios');
+const crypto = require('crypto');
+const fs = require('fs/promises');
+const path = require('path');
 const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config();
 
@@ -17,11 +21,442 @@ const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const VERBOSE_REQUEST_LOGS = process.env.VERBOSE_REQUEST_LOGS === 'true';
 const requestContext = new AsyncLocalStorage();
+const IMAGE_PROXY_CACHE_TTL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_TTL_MS || '86400000', 10) || 86400000, 60000);
+const IMAGE_PROXY_CACHE_MAX_SIZE = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_MAX_SIZE || '2000', 10) || 2000, 1);
+const IMAGE_PROXY_CACHE_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_MAX_BYTES || '536870912', 10) || 536870912, 1048576);
+const IMAGE_PROXY_TIMEOUT_MS = Math.max(parseInt(process.env.IMAGE_PROXY_TIMEOUT_MS || '15000', 10) || 15000, 1000);
+const IMAGE_PROXY_CACHE_DIR = String(process.env.IMAGE_PROXY_CACHE_DIR || path.join(process.cwd(), 'data', 'image-cache')).trim();
+const IMAGE_PROXY_DISK_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_MAX_BYTES || '5368709120', 10) || 5368709120, 10485760);
+const IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS || '300000', 10) || 300000, 10000);
+const IMAGE_PROXY_DISK_CLEANUP_TARGET_RATIO = 0.9;
+const ALLOWED_IMAGE_PROXY_HOSTS = new Set(['cards.scryfall.io']);
+const imageProxyCache = new Map();
+const imageProxyInFlight = new Map();
+let imageProxyCacheBytes = 0;
+let imageProxyLastDiskCleanupAt = 0;
+let imageProxyDiskCleanupInProgress = false;
 
 function debugLog(...args) {
   if (VERBOSE_REQUEST_LOGS) {
     console.log(...args);
   }
+}
+
+function getCurrentRequestOrigin() {
+  const configuredBaseUrl = String(process.env.IMAGE_PROXY_BASE_URL || process.env.PUBLIC_BASE_URL || '').trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/+$/, '');
+  }
+
+  const context = requestContext.getStore();
+  if (context?.origin) {
+    return context.origin;
+  }
+
+  return null;
+}
+
+function isProxyableScryfallImageUrl(urlString) {
+  if (typeof urlString !== 'string') {
+    return false;
+  }
+
+  let urlObj;
+  try {
+    urlObj = new URL(urlString.trim());
+  } catch {
+    return false;
+  }
+
+  if (!/^https?:$/i.test(urlObj.protocol)) {
+    return false;
+  }
+
+  return ALLOWED_IMAGE_PROXY_HOSTS.has(urlObj.hostname.toLowerCase());
+}
+
+function buildImageProxyUrl(urlString) {
+  if (!isProxyableScryfallImageUrl(urlString)) {
+    return urlString;
+  }
+
+  const normalized = urlString.trim();
+  const origin = getCurrentRequestOrigin();
+  if (!origin) {
+    return normalized;
+  }
+
+  return `${origin}/image-proxy?url=${encodeURIComponent(normalized)}`;
+}
+
+function rewriteImageUriMap(imageUris) {
+  if (!imageUris || typeof imageUris !== 'object') {
+    return imageUris;
+  }
+
+  const rewritten = { ...imageUris };
+  for (const key of Object.keys(rewritten)) {
+    if (typeof rewritten[key] === 'string') {
+      rewritten[key] = buildImageProxyUrl(rewritten[key]);
+    }
+  }
+
+  return rewritten;
+}
+
+function rewriteCardImageFields(card) {
+  if (!card || typeof card !== 'object') {
+    return card;
+  }
+
+  const rewritten = { ...card };
+  if (rewritten.image_uris) {
+    rewritten.image_uris = rewriteImageUriMap(rewritten.image_uris);
+  }
+
+  if (Array.isArray(rewritten.card_faces)) {
+    rewritten.card_faces = rewritten.card_faces.map((face) => {
+      if (!face || typeof face !== 'object') {
+        return face;
+      }
+
+      const faceClone = { ...face };
+      if (faceClone.image_uris) {
+        faceClone.image_uris = rewriteImageUriMap(faceClone.image_uris);
+      }
+      return faceClone;
+    });
+  }
+
+  return rewritten;
+}
+
+function cacheImageResponse(cacheKey, entry) {
+  const existing = imageProxyCache.get(cacheKey);
+  if (existing?.buffer) {
+    imageProxyCacheBytes -= existing.buffer.length;
+  }
+  imageProxyCache.set(cacheKey, entry);
+  if (entry?.buffer) {
+    imageProxyCacheBytes += entry.buffer.length;
+  }
+  trimImageMemoryCache();
+}
+
+function getCachedImageResponse(cacheKey) {
+  const cached = imageProxyCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (Date.now() >= cached.expiresAt) {
+    if (cached?.buffer) {
+      imageProxyCacheBytes -= cached.buffer.length;
+    }
+    imageProxyCache.delete(cacheKey);
+    return null;
+  }
+
+  imageProxyCache.delete(cacheKey);
+  imageProxyCache.set(cacheKey, cached);
+  return cached;
+}
+
+function trimImageMemoryCache() {
+  const now = Date.now();
+
+  for (const [key, value] of imageProxyCache.entries()) {
+    if (!value || now >= value.expiresAt) {
+      if (value?.buffer) {
+        imageProxyCacheBytes -= value.buffer.length;
+      }
+      imageProxyCache.delete(key);
+    }
+  }
+
+  while (imageProxyCache.size > IMAGE_PROXY_CACHE_MAX_SIZE || imageProxyCacheBytes > IMAGE_PROXY_CACHE_MAX_BYTES) {
+    const oldestKey = imageProxyCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    const oldestEntry = imageProxyCache.get(oldestKey);
+    if (oldestEntry?.buffer) {
+      imageProxyCacheBytes -= oldestEntry.buffer.length;
+    }
+    imageProxyCache.delete(oldestKey);
+  }
+
+  if (imageProxyCacheBytes < 0) {
+    imageProxyCacheBytes = 0;
+  }
+}
+
+function createImageEtag(buffer) {
+  return `W/"${crypto.createHash('sha1').update(buffer).digest('hex')}"`;
+}
+
+function getImageProxyCacheKey(urlString) {
+  return crypto.createHash('sha256').update(String(urlString || '')).digest('hex');
+}
+
+function getImageProxyCachePaths(urlString) {
+  const cacheKey = getImageProxyCacheKey(urlString);
+  return {
+    cacheKey,
+    metaPath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.json`),
+    filePath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`),
+    tempPath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.tmp`)
+  };
+}
+
+async function ensureImageProxyCacheDir() {
+  await fs.mkdir(IMAGE_PROXY_CACHE_DIR, { recursive: true });
+}
+
+async function cleanupImageDiskCacheIfNeeded(force = false) {
+  const now = Date.now();
+  if (!force && now - imageProxyLastDiskCleanupAt < IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+  if (imageProxyDiskCleanupInProgress) {
+    return;
+  }
+
+  imageProxyDiskCleanupInProgress = true;
+  try {
+    await ensureImageProxyCacheDir();
+    const dirEntries = await fs.readdir(IMAGE_PROXY_CACHE_DIR, { withFileTypes: true });
+    const binFiles = [];
+
+    for (const dirEntry of dirEntries) {
+      if (!dirEntry.isFile() || !dirEntry.name.endsWith('.bin')) {
+        continue;
+      }
+
+      const binPath = path.join(IMAGE_PROXY_CACHE_DIR, dirEntry.name);
+      try {
+        const stat = await fs.stat(binPath);
+        binFiles.push({
+          baseName: dirEntry.name.slice(0, -4),
+          binPath,
+          size: stat.size,
+          mtimeMs: stat.mtimeMs
+        });
+      } catch {
+        // Ignore files removed between readdir/stat.
+      }
+    }
+
+    let totalBytes = binFiles.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes <= IMAGE_PROXY_DISK_MAX_BYTES) {
+      imageProxyLastDiskCleanupAt = now;
+      return;
+    }
+
+    const targetBytes = Math.floor(IMAGE_PROXY_DISK_MAX_BYTES * IMAGE_PROXY_DISK_CLEANUP_TARGET_RATIO);
+    binFiles.sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+    for (const file of binFiles) {
+      if (totalBytes <= targetBytes) {
+        break;
+      }
+
+      const metaPath = path.join(IMAGE_PROXY_CACHE_DIR, `${file.baseName}.json`);
+      await Promise.allSettled([
+        fs.unlink(file.binPath),
+        fs.unlink(metaPath)
+      ]);
+      totalBytes -= file.size;
+    }
+
+    imageProxyLastDiskCleanupAt = now;
+  } catch (error) {
+    console.warn('[ImageProxy] Disk cache cleanup skipped:', error.message);
+  } finally {
+    imageProxyDiskCleanupInProgress = false;
+  }
+}
+
+async function getImageDiskCacheUsage() {
+  await ensureImageProxyCacheDir();
+  const dirEntries = await fs.readdir(IMAGE_PROXY_CACHE_DIR, { withFileTypes: true });
+
+  let totalBytes = 0;
+  let binFiles = 0;
+  let metaFiles = 0;
+  let tempFiles = 0;
+  let otherFiles = 0;
+
+  for (const dirEntry of dirEntries) {
+    if (!dirEntry.isFile()) {
+      continue;
+    }
+
+    const fullPath = path.join(IMAGE_PROXY_CACHE_DIR, dirEntry.name);
+    try {
+      const stat = await fs.stat(fullPath);
+      totalBytes += stat.size;
+    } catch {
+      continue;
+    }
+
+    if (dirEntry.name.endsWith('.bin')) {
+      binFiles += 1;
+    } else if (dirEntry.name.endsWith('.json')) {
+      metaFiles += 1;
+    } else if (dirEntry.name.endsWith('.tmp')) {
+      tempFiles += 1;
+    } else {
+      otherFiles += 1;
+    }
+  }
+
+  return {
+    totalBytes,
+    binFiles,
+    metaFiles,
+    tempFiles,
+    otherFiles,
+    totalFiles: binFiles + metaFiles + tempFiles + otherFiles
+  };
+}
+
+async function getImageCacheStatsSnapshot() {
+  const disk = await getImageDiskCacheUsage();
+  return {
+    memory: {
+      entries: imageProxyCache.size,
+      bytes: imageProxyCacheBytes,
+      maxEntries: IMAGE_PROXY_CACHE_MAX_SIZE,
+      maxBytes: IMAGE_PROXY_CACHE_MAX_BYTES,
+      ttlMs: IMAGE_PROXY_CACHE_TTL_MS
+    },
+    disk: {
+      path: IMAGE_PROXY_CACHE_DIR,
+      bytes: disk.totalBytes,
+      maxBytes: IMAGE_PROXY_DISK_MAX_BYTES,
+      totalFiles: disk.totalFiles,
+      binFiles: disk.binFiles,
+      metaFiles: disk.metaFiles,
+      tempFiles: disk.tempFiles,
+      otherFiles: disk.otherFiles,
+      cleanupIntervalMs: IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS,
+      lastCleanupAt: imageProxyLastDiskCleanupAt ? new Date(imageProxyLastDiskCleanupAt).toISOString() : null
+    },
+    inFlightRequests: imageProxyInFlight.size
+  };
+}
+
+async function readImageProxyCacheFromDisk(urlString) {
+  const { cacheKey, metaPath, filePath } = getImageProxyCachePaths(urlString);
+  try {
+    const [metaRaw, buffer] = await Promise.all([
+      fs.readFile(metaPath, 'utf8'),
+      fs.readFile(filePath)
+    ]);
+    const meta = JSON.parse(metaRaw);
+    if (!buffer || !buffer.length) {
+      return null;
+    }
+
+    const entry = {
+      buffer,
+      contentType: String(meta.contentType || 'application/octet-stream').toLowerCase(),
+      etag: meta.etag || createImageEtag(buffer),
+      lastModified: meta.lastModified || new Date().toUTCString(),
+      expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
+      cacheKey
+    };
+    cacheImageResponse(urlString, entry);
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+async function writeImageProxyCacheToDisk(urlString, entry) {
+  const { metaPath, filePath, tempPath } = getImageProxyCachePaths(urlString);
+  await ensureImageProxyCacheDir();
+  await fs.writeFile(tempPath, entry.buffer);
+  await Promise.all([
+    fs.writeFile(metaPath, JSON.stringify({
+      contentType: entry.contentType,
+      etag: entry.etag,
+      lastModified: entry.lastModified,
+      sourceUrl: urlString,
+      cachedAt: new Date().toISOString()
+    })),
+    fs.rename(tempPath, filePath)
+  ]);
+  await cleanupImageDiskCacheIfNeeded(false);
+}
+
+async function getImageProxyCacheEntry(urlString) {
+  const cacheKey = String(urlString || '');
+  const inMemory = imageProxyCache.get(cacheKey);
+  if (inMemory) {
+    if (Date.now() < inMemory.expiresAt) {
+      imageProxyCache.delete(cacheKey);
+      imageProxyCache.set(cacheKey, inMemory);
+      return inMemory;
+    }
+    if (inMemory?.buffer) {
+      imageProxyCacheBytes -= inMemory.buffer.length;
+    }
+    imageProxyCache.delete(cacheKey);
+  }
+
+  const onDisk = await readImageProxyCacheFromDisk(urlString);
+  if (onDisk) {
+    return onDisk;
+  }
+
+  return null;
+}
+
+async function fetchAndCacheImageProxyEntry(urlString, requestSignal = null) {
+  const cacheKey = String(urlString || '');
+  const existing = imageProxyInFlight.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = (async () => {
+    const response = await axios.get(urlString, {
+      responseType: 'arraybuffer',
+      timeout: IMAGE_PROXY_TIMEOUT_MS,
+      signal: requestSignal
+    });
+
+    const contentType = String(response.headers['content-type'] || '').toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      const error = new Error('Upstream image proxy returned a non-image response');
+      error.status = 502;
+      throw error;
+    }
+
+    const buffer = Buffer.from(response.data);
+    const entry = {
+      buffer,
+      contentType,
+      etag: createImageEtag(buffer),
+      lastModified: response.headers['last-modified'] || new Date().toUTCString(),
+      expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS
+    };
+
+    cacheImageResponse(cacheKey, entry);
+    await writeImageProxyCacheToDisk(urlString, entry);
+    return entry;
+  })().finally(() => {
+    imageProxyInFlight.delete(cacheKey);
+  });
+
+  imageProxyInFlight.set(cacheKey, pending);
+  return pending;
+}
+
+if (typeof scryfallLib.setCardImageProxyUrlProvider === 'function') {
+  scryfallLib.setCardImageProxyUrlProvider(buildImageProxyUrl);
 }
 
 // Security and limits
@@ -510,9 +945,13 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   const controller = new globalThis.AbortController();
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const requestHost = forwardedHost || String(req.headers.host || '').trim();
   const context = {
     signal: controller.signal,
-    allowLiveApi: parseBooleanLike(String(req.query?.forceApi)) === true
+    allowLiveApi: parseBooleanLike(String(req.query?.forceApi)) === true,
+    origin: requestHost ? `${forwardedProto || req.protocol || 'http'}://${requestHost}` : null
   };
 
   const abortRequest = () => {
@@ -606,7 +1045,7 @@ function sanitizeCardForResponse(card) {
     return card;
   }
 
-  const clone = { ...card };
+  const clone = rewriteCardImageFields({ ...card });
   for (const key of Object.keys(clone)) {
     if (key.startsWith('_')) {
       delete clone[key];
@@ -635,6 +1074,9 @@ function sanitizeCardForResponse(card) {
         return face;
       }
       const faceClone = { ...face };
+      if (faceClone.image_uris) {
+        faceClone.image_uris = rewriteImageUriMap(faceClone.image_uris);
+      }
       for (const key of Object.keys(faceClone)) {
         if (key.startsWith('_')) {
           delete faceClone[key];
@@ -790,7 +1232,7 @@ function isDirectImageUrl(urlString) {
 }
 
 function createSingleImageSpawnCard(imageUrl) {
-  const normalized = imageUrl.trim();
+  const normalized = buildImageProxyUrl(String(imageUrl || '').trim());
   return {
     object: 'card',
     id: `image-spawn-${Buffer.from(normalized).toString('base64').slice(0, 24)}`,
@@ -1571,9 +2013,26 @@ app.get('/', (req, res) => {
       random: 'GET /random',
       search: 'GET /search',
       bulkStats: 'GET /bulk/stats',
-      metrics: 'GET /metrics'
+      metrics: 'GET /metrics',
+      imageCacheStats: 'GET /image-cache/stats'
     }
   });
+});
+
+app.get('/image-cache/stats', async (_req, res) => {
+  try {
+    const stats = await getImageCacheStatsSnapshot();
+    res.json({
+      status: 'ok',
+      imageCache: stats
+    });
+  } catch (error) {
+    console.error('[ImageCache] Stats error:', error.message);
+    res.status(500).json({
+      object: 'error',
+      details: 'Failed to read image cache stats'
+    });
+  }
 });
 
 // Dedicated metrics endpoint for monitoring
@@ -3129,6 +3588,74 @@ app.get('/proxy', async (req, res) => {
 });
 
 /**
+ * GET /image-proxy?url=...
+ * Proxy and cache Scryfall card image bytes for Tabletop Simulator.
+ */
+app.get('/image-proxy', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '').trim();
+    if (!rawUrl) {
+      return res.status(400).json({ object: 'error', details: 'Missing url parameter' });
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(rawUrl);
+    } catch {
+      return res.status(400).json({ object: 'error', details: 'Invalid image URL format' });
+    }
+
+    if (!isProxyableScryfallImageUrl(parsedUrl.toString())) {
+      return res.status(400).json({
+        object: 'error',
+        details: 'Invalid URL - must be a Scryfall card image URL'
+      });
+    }
+
+    const normalizedUrl = parsedUrl.toString();
+    const cached = await getImageProxyCacheEntry(normalizedUrl);
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Content-Type', cached.contentType);
+      res.setHeader('Content-Length', cached.buffer.length);
+      if (cached.etag) {
+        res.setHeader('ETag', cached.etag);
+      }
+      if (cached.lastModified) {
+        res.setHeader('Last-Modified', cached.lastModified);
+      }
+      if (String(req.headers['if-none-match'] || '') === cached.etag) {
+        return res.status(304).end();
+      }
+      return res.status(200).send(cached.buffer);
+    }
+
+    const context = requestContext.getStore();
+    const entry = await fetchAndCacheImageProxyEntry(normalizedUrl, context?.signal);
+
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Content-Type', entry.contentType);
+    res.setHeader('Content-Length', entry.buffer.length);
+    res.setHeader('ETag', entry.etag);
+    res.setHeader('Last-Modified', entry.lastModified);
+    return res.status(200).send(entry.buffer);
+  } catch (error) {
+    console.error('[ImageProxy] Error:', error.message);
+    const upstreamStatus = error?.response?.status;
+    if (upstreamStatus === 404) {
+      return res.status(404).json({ object: 'error', details: 'Image not found' });
+    }
+
+    if (error?.code === 'ERR_CANCELED' || error?.name === 'AbortError') {
+      return res.status(499).json({ object: 'error', details: 'Request canceled because the client disconnected.' });
+    }
+
+    const { status, details } = normalizeError(error, 502);
+    return res.status(status).json({ object: 'error', details, status });
+  }
+});
+
+/**
  * Error handler
  */
 app.use((err, req, res, _next) => {
@@ -3150,6 +3677,12 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`Metrics: http://localhost:${PORT}/metrics`);
     console.log(`Readiness probe: http://localhost:${PORT}/ready`);
     console.log(`Bulk data enabled: ${USE_BULK_DATA}`);
+    const imageProxyBaseUrl = getCurrentRequestOrigin();
+    if (imageProxyBaseUrl) {
+      console.log(`[Init] Image proxy base URL: ${imageProxyBaseUrl}`);
+    } else {
+      console.warn('[Init] Image proxy base URL is not set (IMAGE_PROXY_BASE_URL/PUBLIC_BASE_URL). Falling back to request host.');
+    }
 
     // Load persisted tag cache (non-fatal, runs in all modes)
     tagCache.load().catch((err) =>

@@ -26,6 +26,18 @@ scryfall https://cards.scryfall.io/large/front/0/0/0058be07-a8a1-448e-8c3d-61718
 
 This mode is intentionally separate from custom image proxies.
 
+## 🖼️ Feature: Image Proxy Host
+
+Tabletop Simulator must receive a publicly reachable image URL. By default, the backend rewrites Scryfall image URLs to:
+
+```text
+https://api.mtginfo.org/image-proxy?url=...
+```
+
+For local testing, set `IMAGE_PROXY_BASE_URL` to your public tunnel or internet-facing host. If you want to keep the API and image traffic separate, you can point `IMAGE_PROXY_BASE_URL` at a dedicated host such as `https://images.mtginfo.org`.
+
+The proxy URL is what TTS loads; the backend then fetches and caches the Scryfall image bytes on the server.
+
 ## Overview
 
 This backend acts as a middleware between the Amuzet Card Importer (Tabletop Simulator Lua script) and Scryfall's API. It:

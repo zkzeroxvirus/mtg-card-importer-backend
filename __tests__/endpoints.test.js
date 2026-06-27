@@ -5,6 +5,10 @@
 
 const request = require('supertest');
 
+jest.mock('axios', () => ({
+  get: jest.fn()
+}));
+
 // Mock environment variables before requiring the server
 process.env.NODE_ENV = 'test';
 process.env.DEFAULT_CARD_BACK = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
@@ -12,6 +16,9 @@ process.env.USE_BULK_DATA = 'false';
 
 jest.mock('../lib/scryfall', () => {
   let randomCounter = 0;
+  const proxyImageUrl = (url) => (url && String(url).startsWith('https://cards.scryfall.io/')
+    ? `http://127.0.0.1/image-proxy?url=${encodeURIComponent(url)}`
+    : url);
 
   const parseDecklist = (decklistText) => {
     const cards = [];
@@ -81,8 +88,8 @@ jest.mock('../lib/scryfall', () => {
       DeckIDs: [100],
       CustomDeck: {
         '1': {
-          FaceURL: scryfallCard.image_uris.normal,
-          BackURL: cardBack,
+          FaceURL: proxyImageUrl(scryfallCard.image_uris.normal),
+          BackURL: proxyImageUrl(cardBack),
           NumWidth: 1,
           NumHeight: 1,
           BackIsHidden: true,
@@ -95,6 +102,7 @@ jest.mock('../lib/scryfall', () => {
     getCardBackUrl: jest.fn((_card, back) => back),
     getOracleText: jest.fn(() => 'Mock oracle text'),
     proxyUri: jest.fn(async (uri) => ({ object: 'card', id: 'proxied', uri })),
+    setCardImageProxyUrlProvider: jest.fn(),
     globalQueue: { wait: jest.fn(async () => {}) }
   };
 });
@@ -549,14 +557,14 @@ describe('Server Endpoints - Random Card', () => {
     expect(lines[0].ContainedObjects).toHaveLength(2);
     expect(lines[0].ContainedObjects[0].CustomDeck).toEqual({
       '1': expect.objectContaining({
-        FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+        FaceURL: 'http://127.0.0.1/image-proxy?url=https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F0%2F0%2Fmock.jpg',
         BackURL: expect.any(String),
         Type: 0
       })
     });
     expect(lines[0].ContainedObjects[1].CustomDeck).toEqual({
       '2': expect.objectContaining({
-        FaceURL: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg',
+        FaceURL: 'http://127.0.0.1/image-proxy?url=https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F0%2F0%2Fmock.jpg',
         BackURL: expect.any(String),
         Type: 0
       })
@@ -903,6 +911,7 @@ describe('Server Endpoints - Random Card', () => {
     const deckLine = lines.find(line => Array.isArray(line.ContainedObjects));
     expect(deckLine).toBeDefined();
     expect(deckLine.ContainedObjects).toHaveLength(1);
+    expect(deckLine.ContainedObjects[0].CustomDeck['1'].FaceURL).toContain('/image-proxy?url=');
   });
 
   test('POST /random/build should hydrate cards without image_uris before conversion', async () => {
@@ -930,7 +939,7 @@ describe('Server Endpoints - Random Card', () => {
       DeckIDs: [100],
       CustomDeck: {
         '1': {
-          FaceURL: card.image_uris?.normal,
+          FaceURL: `http://127.0.0.1/image-proxy?url=${encodeURIComponent(card.image_uris?.normal)}`,
           BackURL: cardBack,
           NumWidth: 1,
           NumHeight: 1,
@@ -950,7 +959,8 @@ describe('Server Endpoints - Random Card', () => {
     const lines = response.text.split('\n').filter(Boolean).map(line => JSON.parse(line));
     expect(lines).toHaveLength(1);
     expect(lines[0].Name).toBe('DeckCustom');
-    expect(lines[0].CustomDeck['1'].FaceURL).toBe('https://cards.scryfall.io/normal/front/0/0/mock.jpg');
+    expect(lines[0].CustomDeck['1'].FaceURL).toContain('/image-proxy?url=');
+    expect(lines[0].CustomDeck['1'].FaceURL).toBe('http://127.0.0.1/image-proxy?url=https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F0%2F0%2Fmock.jpg');
   });
 });
 
@@ -1347,6 +1357,60 @@ describe('Server Endpoints - Proxy', () => {
       .get('/proxy')
       .query({ uri: 'https://evil-site.com/api' });
     expect(response.status).toBe(400);
+  });
+});
+
+describe('Server Endpoints - Image Proxy', () => {
+  const axios = require('axios');
+  const fs = require('fs/promises');
+  const path = require('path');
+  const cacheDir = process.env.IMAGE_PROXY_CACHE_DIR || path.join(__dirname, '..', 'data', 'image-cache');
+
+  beforeEach(() => {
+    axios.get.mockReset();
+  });
+
+  test('GET /image-proxy should require url parameter', async () => {
+    const response = await request(app).get('/image-proxy');
+    expect(response.status).toBe(400);
+  });
+
+  test('GET /image-proxy should return cached image bytes for Scryfall URLs', async () => {
+    await fs.rm(cacheDir, { recursive: true, force: true });
+    delete require.cache[require.resolve('../server')];
+
+    axios.get.mockResolvedValueOnce({
+      data: Buffer.from('image-bytes'),
+      headers: {
+        'content-type': 'image/jpeg',
+        'last-modified': 'Mon, 01 Jan 2024 00:00:00 GMT'
+      }
+    });
+
+    const imageUrl = 'https://cards.scryfall.io/normal/front/0/0/mock.jpg';
+    const freshApp = require('../server');
+    const response = await request(freshApp)
+      .get('/image-proxy')
+      .query({ url: imageUrl });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('image/jpeg');
+    expect(response.headers['cache-control']).toContain('immutable');
+    expect(response.body).toBeInstanceOf(Buffer);
+    expect(response.body.toString('utf8')).toBe('image-bytes');
+    expect(axios.get).toHaveBeenCalledWith(imageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
+  });
+});
+
+describe('Server Endpoints - Image Cache Stats', () => {
+  test('GET /image-cache/stats should return image cache metrics', async () => {
+    const response = await request(app).get('/image-cache/stats');
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveProperty('status', 'ok');
+    expect(response.body).toHaveProperty('imageCache');
+    expect(response.body.imageCache).toHaveProperty('memory');
+    expect(response.body.imageCache).toHaveProperty('disk');
+    expect(response.body.imageCache).toHaveProperty('inFlightRequests');
   });
 });
 
