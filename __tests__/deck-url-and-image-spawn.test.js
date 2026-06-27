@@ -54,8 +54,12 @@ describe('Deck URL imports removal and image spawning', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Custom Image');
-    expect(response.body.image_uris.normal).toContain('/image-proxy?url=');
-    expect(decodeURIComponent(new URL(response.body.image_uris.normal).searchParams.get('url'))).toBe(imageUrl);
+    expect(response.body.image_uris.normal).toContain('/image-proxy/');
+    expect(response.body.image_uris.normal.endsWith('.jpg')).toBe(true);
+    const encodedSection = response.body.image_uris.normal
+      .split('/image-proxy/')[1]
+      .replace(/\.(jpg|jpeg|png|webp|webm|mp4)$/i, '');
+    expect(decodeURIComponent(encodedSection)).toBe(imageUrl);
     expect(scryfallLib.getCard).not.toHaveBeenCalled();
   });
 

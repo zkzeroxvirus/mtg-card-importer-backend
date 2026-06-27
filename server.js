@@ -30,6 +30,7 @@ const IMAGE_PROXY_DISK_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_DIS
 const IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS || '300000', 10) || 300000, 10000);
 const IMAGE_PROXY_DISK_CLEANUP_TARGET_RATIO = 0.9;
 const ALLOWED_IMAGE_PROXY_HOSTS = new Set(['cards.scryfall.io']);
+const TTS_SUPPORTED_IMAGE_PROXY_EXTENSIONS = new Set(['jpg', 'png', 'webp', 'webm', 'mp4']);
 const imageProxyCache = new Map();
 const imageProxyInFlight = new Map();
 let imageProxyCacheBytes = 0;
@@ -86,7 +87,49 @@ function buildImageProxyUrl(urlString) {
     return normalized;
   }
 
-  return `${origin}/image-proxy?url=${encodeURIComponent(normalized)}`;
+  return `${origin}/image-proxy/${encodeURIComponent(normalized)}.${getProxyImageExtension(normalized)}`;
+}
+
+function getProxyImageExtension(urlString) {
+  try {
+    const parsedUrl = new URL(String(urlString || '').trim());
+    const extensionMatch = parsedUrl.pathname.match(/\.([a-z0-9]+)$/i);
+    if (!extensionMatch) {
+      return 'jpg';
+    }
+
+    const ext = extensionMatch[1].toLowerCase();
+    if (ext === 'jpeg') {
+      return 'jpg';
+    }
+
+    if (TTS_SUPPORTED_IMAGE_PROXY_EXTENSIONS.has(ext)) {
+      return ext;
+    }
+  } catch {
+    // Fall through to default.
+  }
+
+  return 'jpg';
+}
+
+function getImageProxyRequestSource(req) {
+  const queryUrl = String(req.query.url || '').trim();
+  if (queryUrl) {
+    return queryUrl;
+  }
+
+  const encodedPath = String(req.params.encodedUrl || '').trim();
+  if (!encodedPath) {
+    return '';
+  }
+
+  const withoutExt = encodedPath.replace(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i, '');
+  try {
+    return decodeURIComponent(withoutExt);
+  } catch {
+    return '';
+  }
 }
 
 function rewriteImageUriMap(imageUris) {
@@ -3589,13 +3632,14 @@ app.get('/proxy', async (req, res) => {
 
 /**
  * GET /image-proxy?url=...
+ * GET /image-proxy/:encodedUrlWithExtension
  * Proxy and cache Scryfall card image bytes for Tabletop Simulator.
  */
-app.get('/image-proxy', async (req, res) => {
+app.get(['/image-proxy', '/image-proxy/:encodedUrl'], async (req, res) => {
   try {
-    const rawUrl = String(req.query.url || '').trim();
+    const rawUrl = getImageProxyRequestSource(req);
     if (!rawUrl) {
-      return res.status(400).json({ object: 'error', details: 'Missing url parameter' });
+      return res.status(400).json({ object: 'error', details: 'Missing image URL' });
     }
 
     let parsedUrl;
