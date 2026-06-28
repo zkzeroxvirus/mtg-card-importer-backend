@@ -1,9 +1,11 @@
 -- Drop-to-fix Object Script for TTS
--- Put this script on a single object. Drop a Card/Deck onto it to rewrite
--- Scryfall image URLs through your proxy.
+-- Put this script on a single object. Drop any object onto it and, if that
+-- object contains Scryfall-backed images anywhere in its data, they will be
+-- rewritten through your image proxy.
 
 IMAGE_PROXY_BASE = "https://api.mtginfo.org/image-proxy"
 local pendingFixByGuid = {}
+local tableScanInProgress = false
 
 local function notify(message, playerColor, color)
   if playerColor and playerColor ~= "" and Player[playerColor] then
@@ -55,16 +57,6 @@ local function isObjectSettled(obj)
   return (not spawning) and resting and (not smoothMoving)
 end
 
-local function isFixableObjectType(objType)
-  return objType == "Card" or objType == "Deck" or objType == "DeckCustom"
-end
-
-local function getObjectType(obj)
-  return safeEval(function()
-    return obj.type
-  end)
-end
-
 local function isScryfallImageURL(url)
   return type(url) == "string" and url:find("^https?://cards%.scryfall%.io/") ~= nil
 end
@@ -106,18 +98,8 @@ local function stripKnownImageSuffix(url)
 
   local cleaned = url
   local extensions = {"jpg", "jpeg", "png", "webp", "webm", "mp4"}
-  
-  -- Keep stripping extensions until none are found (handles .jpg.jpg.jpg cases)
-  local changed = true
-  while changed do
-    changed = false
-    for _, ext in ipairs(extensions) do
-      local before = cleaned
-      cleaned = cleaned:gsub("%." .. ext .. "$", "")
-      if cleaned ~= before then
-        changed = true
-      end
-    end
+  for _, ext in ipairs(extensions) do
+    cleaned = cleaned:gsub("%." .. ext .. "$", "")
   end
 
   return cleaned
@@ -220,7 +202,6 @@ local function normalizeScryfallSize(url)
     return url
   end
 
-  -- Force the more stable/consistent "normal" asset size.
   return url:gsub("(https?://cards%.scryfall%.io/)(large)(/)", "%1normal%3")
 end
 
@@ -234,8 +215,6 @@ local function proxyImageURL(url)
     return url
   end
 
-  -- Drop Scryfall cache-buster query strings; they can produce malformed
-  -- extension suffixes when repeatedly re-proxied.
   sourceUrl = stripQueryAndHash(sourceUrl)
   if sourceUrl == "" then
     return url
@@ -270,65 +249,82 @@ local function rewriteCustomDeck(customDeck, changed)
   return changed
 end
 
+local function rewriteAnyValue(value, changed)
+  local valueType = type(value)
+  if valueType == "string" then
+    local rewritten = proxyImageURL(value)
+    if rewritten ~= value then
+      changed = changed + 1
+      return rewritten, changed
+    end
+
+    return value, changed
+  end
+
+  if valueType ~= "table" then
+    return value, changed
+  end
+
+  if value.CustomDeck then
+    changed = rewriteCustomDeck(value.CustomDeck, changed)
+  end
+
+  for key, child in pairs(value) do
+    if key ~= "CustomDeck" then
+      local rewrittenChild
+      rewrittenChild, changed = rewriteAnyValue(child, changed)
+      value[key] = rewrittenChild
+    end
+  end
+
+  return value, changed
+end
+
 local function rewriteObjectData(objData, changed)
   if type(objData) ~= "table" then
     return changed
   end
 
-  changed = rewriteCustomDeck(objData.CustomDeck, changed)
+  changed = changed or 0
 
-  if objData.ContainedObjects then
-    for _, child in ipairs(objData.ContainedObjects) do
-      changed = rewriteObjectData(child, changed)
-    end
-  end
-
-  if objData.States then
-    for _, stateData in pairs(objData.States) do
-      changed = rewriteObjectData(stateData, changed)
-    end
-  end
-
+  local rewrittenData
+  rewrittenData, changed = rewriteAnyValue(objData, changed)
   return changed
 end
 
-local function objectDataHasDirectScryfall(objData)
+local function objectDataHasScryfall(objData)
   if type(objData) ~= "table" then
     return false
   end
 
-  if type(objData.CustomDeck) == "table" then
-    for _, cd in pairs(objData.CustomDeck) do
-      if isScryfallImageURL(cd.FaceURL) or isScryfallImageURL(cd.BackURL) then
+  local function valueHasScryfall(value)
+    local valueType = type(value)
+    if valueType == "string" then
+      return isScryfallImageURL(getScryfallSourceURL(value) or value)
+    end
+
+    if valueType ~= "table" then
+      return false
+    end
+
+    for _, child in pairs(value) do
+      if valueHasScryfall(child) then
         return true
       end
     end
+
+    return false
   end
 
-  if objData.ContainedObjects then
-    for _, child in ipairs(objData.ContainedObjects) do
-      if objectDataHasDirectScryfall(child) then
-        return true
-      end
-    end
-  end
-
-  if objData.States then
-    for _, stateData in pairs(objData.States) do
-      if objectDataHasDirectScryfall(stateData) then
-        return true
-      end
-    end
-  end
-
-  return false
+  return valueHasScryfall(objData)
 end
 
-local function fixDroppedObjectInternal(obj, playerColor, allowRetry)
-  local objType = getObjectType(obj)
-  if not isObjectUsable(obj) or not isFixableObjectType(objType) then
-    notify("Drop a Card or Deck onto this tool.", playerColor, {1, 0.6, 0.2})
-    return false
+local function fixDroppedObjectInternal(obj, playerColor, allowRetry, options)
+  local opts = options or {}
+
+  if not isObjectUsable(obj) then
+    notify("Drop an object onto this tool.", playerColor, {1, 0.6, 0.2})
+    return 0
   end
 
   local objectData = safeEval(function()
@@ -336,14 +332,15 @@ local function fixDroppedObjectInternal(obj, playerColor, allowRetry)
   end)
   if type(objectData) ~= "table" then
     notify("Could not read dropped object data.", playerColor, {1, 0.3, 0.3})
-    return false
+    return 0
   end
 
   local changed = rewriteObjectData(objectData, 0)
-
   if changed == 0 then
-    notify("No Scryfall image URLs found to update.", playerColor, {1, 0.6, 0.2})
-    return false
+    if not opts.silentNoChange then
+      notify("No Scryfall image URLs found on this object.", playerColor, {1, 0.6, 0.2})
+    end
+    return 0
   end
 
   local pos = safeEval(function()
@@ -357,7 +354,7 @@ local function fixDroppedObjectInternal(obj, playerColor, allowRetry)
   end)
   if not pos or not rot or not scale then
     notify("Could not read dropped object transform.", playerColor, {1, 0.3, 0.3})
-    return false
+    return 0
   end
 
   safeEval(function()
@@ -365,7 +362,9 @@ local function fixDroppedObjectInternal(obj, playerColor, allowRetry)
   end)
   local spawned = spawnObjectData({data = objectData, position = pos, rotation = rot, scale = scale})
 
-  notify("Fixed " .. tostring(changed) .. " image URL(s) through the proxy.", playerColor, {0.4, 1, 0.4})
+  if not opts.suppressSuccess then
+    notify("Fixed " .. tostring(changed) .. " image URL(s) through the proxy.", playerColor, {0.4, 1, 0.4})
+  end
 
   if allowRetry and spawned then
     Wait.condition(function()
@@ -373,7 +372,7 @@ local function fixDroppedObjectInternal(obj, playerColor, allowRetry)
         local spawnedData = safeEval(function()
           return spawned.getData()
         end)
-        if objectDataHasDirectScryfall(spawnedData) then
+        if objectDataHasScryfall(spawnedData) then
           notify("Running one more image-fix pass...", playerColor, {0.9, 0.9, 0.2})
           fixDroppedObjectInternal(spawned, playerColor, false)
         end
@@ -383,83 +382,104 @@ local function fixDroppedObjectInternal(obj, playerColor, allowRetry)
     end, 2)
   end
 
-  return true
+  return changed
 end
 
 function fixDroppedObject(obj, playerColor)
-  return fixDroppedObjectInternal(obj, playerColor, true)
+  return fixDroppedObjectInternal(obj, playerColor, true) > 0
 end
 
-local function isObjectOnTool(obj)
-  if not isObjectUsable(obj) then
-    return false
-  end
-
-  local toolBounds = safeEval(function()
-    return self.getBounds()
+local function getObjectData(obj)
+  return safeEval(function()
+    return obj.getData()
   end)
-  if not toolBounds or not toolBounds.center or not toolBounds.size then
-    return false
+end
+
+local function runTableScanStep(objects, index, playerColor, summary)
+  if index > #objects then
+    tableScanInProgress = false
+
+    if summary.objectsFixed > 0 then
+      notify(
+        "Scan complete: fixed " .. tostring(summary.objectsFixed) .. " object(s) and rewrote " .. tostring(summary.urlsFixed) .. " image URL(s).",
+        playerColor,
+        {0.4, 1, 0.4}
+      )
+    else
+      notify("Scan complete: no direct Scryfall image URLs found.", playerColor, {1, 0.6, 0.2})
+    end
+
+    return
   end
 
-  local pos = safeEval(function()
-    return obj.getPosition()
-  end)
-  if not pos then
-    return false
+  local obj = objects[index]
+  if isObjectUsable(obj) and obj ~= self and isObjectSettled(obj) then
+    summary.objectsScanned = summary.objectsScanned + 1
+
+    local objectData = getObjectData(obj)
+    if objectDataHasScryfall(objectData) then
+      local guid = safeEval(function()
+        return obj.getGUID()
+      end)
+
+      if guid and not pendingFixByGuid[guid] then
+        pendingFixByGuid[guid] = true
+
+        local changed = fixDroppedObjectInternal(obj, playerColor, true, {
+          silentNoChange = true,
+          suppressSuccess = true,
+        })
+
+        if changed > 0 then
+          summary.objectsFixed = summary.objectsFixed + 1
+          summary.urlsFixed = summary.urlsFixed + changed
+        end
+
+        pendingFixByGuid[guid] = nil
+      end
+    end
   end
 
-  local halfX = (toolBounds.size.x or 0) * 0.5
-  local halfZ = (toolBounds.size.z or 0) * 0.5
-  local pad = 0.35
+  Wait.frames(function()
+    runTableScanStep(objects, index + 1, playerColor, summary)
+  end, 1)
+end
 
-  local withinX = math.abs(pos.x - toolBounds.center.x) <= (halfX + pad)
-  local withinZ = math.abs(pos.z - toolBounds.center.z) <= (halfZ + pad)
-  return withinX and withinZ
+local function startTableScan(playerColor)
+  if tableScanInProgress then
+    notify("Image-fix scan already running.", playerColor, {1, 0.6, 0.2})
+    return
+  end
+
+  tableScanInProgress = true
+  notify("Scanning all table objects for Scryfall images...", playerColor, {0.9, 0.9, 0.2})
+
+  local objects = getAllObjects()
+  runTableScanStep(objects, 1, playerColor, {
+    objectsScanned = 0,
+    objectsFixed = 0,
+    urlsFixed = 0,
+  })
+end
+
+function onDropped(playerColor)
+  startTableScan(playerColor)
 end
 
 function onObjectDrop(playerColor, droppedObject)
-  -- Some TTS setups fire this hook broadly; require real overlap with this tool.
-  local droppedType = getObjectType(droppedObject)
-  if not isObjectUsable(droppedObject) or not isFixableObjectType(droppedType) then
-    return
-  end
-
-  local guid = safeEval(function()
+  local droppedGuid = safeEval(function()
     return droppedObject.getGUID()
   end)
-  if guid and pendingFixByGuid[guid] then
-    return
-  end
+  local selfGuid = safeEval(function()
+    return self.getGUID()
+  end)
 
-  if guid then
-    pendingFixByGuid[guid] = true
-  end
-
-  Wait.condition(function()
-    if isObjectUsable(droppedObject) and isObjectOnTool(droppedObject) then
-      fixDroppedObject(droppedObject, playerColor)
-    end
-    if guid then
-      pendingFixByGuid[guid] = nil
-    end
-  end, function()
-    if not isObjectUsable(droppedObject) then
-      return true
-    end
-
-    return isObjectSettled(droppedObject)
-  end, 2)
-
-  -- Failsafe: clear debounce if object never reaches "ready" state.
-  if guid then
-    Wait.time(function()
-      pendingFixByGuid[guid] = nil
-    end, 15)
+  if droppedGuid ~= nil and selfGuid ~= nil and droppedGuid == selfGuid then
+    startTableScan(playerColor)
   end
 end
 
 function onLoad()
-  self.setName("Deck Image Fix Tool")
-  self.setDescription("Drop a Card or Deck on this object to rewrite Scryfall image URLs through the proxy.")
+  self.setName("Image Fix Tool (Any Object)")
+  self.setDescription("Pick up and drop this tool to scan all table objects and rewrite any Scryfall-backed images through the proxy.")
 end

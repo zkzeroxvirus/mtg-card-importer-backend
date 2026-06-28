@@ -1,0 +1,43 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "query-local-random-otag",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'd:\\Github\\mtg-card-importer-backend';",
+				"$queries=@('otag:manarock','otag:manarock+id:g','id:g+otag:manarock');",
+				"foreach($q in $queries){",
+				"$url = \"http://localhost:3000/random?count=17&q=$q&explain=true\";",
+				"$res = curl.exe -sS -D - \"$url\";",
+				"\"=== QUERY: $q ===\";",
+				"$headers,$body = $res -split \"`r?`n`r?`n\",2;",
+				"($headers -split \"`r?`n\" | Where-Object {$_ -match '^HTTP/|^X-Query-Plan:|^X-Query-Explain:'});",
+				"try {",
+				"$obj = $body | ConvertFrom-Json;",
+				"\"CARDS=$($obj.data.Count)\";",
+				"\"FIRST5=\" + (($obj.data | Select-Object -First 5 | ForEach-Object { $_.name }) -join ' | ');",
+				"} catch {",
+				"'Failed to parse JSON body';",
+				"}",
+				"\"\";",
+				"}"
+			]
+		},
+		{
+			"label": "test-price-api-routing",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"test",
+				"--",
+				"__tests__/price-api-routing.test.js"
+			]
+		}
+	]
+}

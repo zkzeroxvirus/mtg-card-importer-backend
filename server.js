@@ -12,6 +12,7 @@ require('dotenv').config();
 const scryfallLib = require('./lib/scryfall');
 const bulkData = require('./lib/bulk-data');
 const tagCache = require('./lib/tag-cache');
+const oracleTags = require('./lib/oracle-tags');
 
 const app = express();
 
@@ -436,17 +437,9 @@ async function writeImageProxyCacheToDisk(urlString, entry) {
 
 async function getImageProxyCacheEntry(urlString) {
   const cacheKey = String(urlString || '');
-  const inMemory = imageProxyCache.get(cacheKey);
+  const inMemory = getCachedImageResponse(cacheKey);
   if (inMemory) {
-    if (Date.now() < inMemory.expiresAt) {
-      imageProxyCache.delete(cacheKey);
-      imageProxyCache.set(cacheKey, inMemory);
-      return inMemory;
-    }
-    if (inMemory?.buffer) {
-      imageProxyCacheBytes -= inMemory.buffer.length;
-    }
-    imageProxyCache.delete(cacheKey);
+    return inMemory;
   }
 
   const onDisk = await readImageProxyCacheFromDisk(urlString);
@@ -623,7 +616,7 @@ function hasStructuredFilters(query) {
   if (!query) {
     return false;
   }
-  const filterRegex = /(?:^|[\s+(])(?:t|type|s|set|r|rarity|c|color|id|identity|o|oracle|name|cmc|mv|pow|power|tou|toughness|loy|loyalty|is|f|format|legal|banned|restricted|layout|wm|watermark|lang|language|game|frame|border|stamp|has|kw|keyword|a|artist|ft|flavor|block|prints|usd|eur|tix|produces|m|mana|year|date|otag|oracletag|function|atag|art|arttag):/i;
+  const filterRegex = /(?:^|[\s+(])(?:t|type|s|set|r|rarity|c|color|id|identity|o|oracle|name|cmc|mv|pow|power|tou|toughness|loy|loyalty|is|f|format|legal|banned|restricted|layout|wm|watermark|lang|language|game|frame|border|stamp|has|kw|keyword|a|artist|ft|flavor|block|prints|usd|eur|tix|produces|m|mana|year|date|otag|oracletag|function|atag|art|arttag|native):/i;
   return filterRegex.test(String(query));
 }
 function getRandomUniqKey(card) {
@@ -1352,7 +1345,7 @@ async function hydrateCardForTts(card) {
   return card;
 }
 
-const TAGGER_FILTER_PREFIXES = ['otag', 'oracletag', 'function', 'atag', 'art', 'arttag'];
+const TAGGER_FILTER_PREFIXES = ['otag', 'oracletag', 'function', 'atag', 'art', 'arttag', 'native'];
 const TAGGER_FILTER_PATTERN = TAGGER_FILTER_PREFIXES.join('|');
 const TAGGER_FILTER_REGEX = new RegExp(`(?:^|[\\s+\\(])(-?(?:${TAGGER_FILTER_PATTERN}))[:=]`, 'i');
 const COLON_ONLY_PREFIXES = [
@@ -1457,6 +1450,34 @@ function mergeTagCacheStatus(currentStatus, nextStatus) {
   const currentPriority = priority[currentStatus] ?? 0;
   const nextPriority = priority[nextStatus] ?? 0;
   return nextPriority > currentPriority ? nextStatus : currentStatus;
+}
+
+function parseCanonicalTaggerTerm(term) {
+  const match = String(term || '').match(/^([a-z]+):(.*)$/i);
+  if (!match) {
+    return { prefix: '', value: '' };
+  }
+  return {
+    prefix: String(match[1] || '').toLowerCase(),
+    value: String(match[2] || '').trim().toLowerCase()
+  };
+}
+
+function isOracleTaggerPrefix(prefix) {
+  const normalizedPrefix = String(prefix || '').toLowerCase();
+  return normalizedPrefix === 'otag' || normalizedPrefix === 'oracletag' || normalizedPrefix === 'function' || normalizedPrefix === 'native';
+}
+
+function getOracleIdsFromOracleTagsBulk(term) {
+  const { value } = parseCanonicalTaggerTerm(term);
+  if (!value || !oracleTags.isLoaded()) {
+    return null;
+  }
+  const oracleIds = oracleTags.getOracleIdsForTerm(value);
+  if (!Array.isArray(oracleIds)) {
+    return null;
+  }
+  return oracleIds;
 }
 
 function intersectOracleIdLists(oracleIdLists) {
@@ -1618,6 +1639,19 @@ function hydrateFromTagCache(oracleIds, requestedCount) {
 function scheduleTagCacheRefresh(query) {
   setImmediate(async () => {
     try {
+      const { prefix } = parseCanonicalTaggerTerm(query);
+      if (isOracleTaggerPrefix(prefix) && oracleTags.isLoaded()) {
+        const oracleIds = getOracleIdsFromOracleTagsBulk(query);
+        if (Array.isArray(oracleIds)) {
+          tagCache.set(query, oracleIds);
+          tagCache.save();
+          if (process.send) {
+            process.send({ type: 'tag_cache_update', data: tagCache.serializeForIPC() });
+          }
+          return;
+        }
+      }
+
       const cards = await scryfallLib.searchCards(
         query,
         Number.MAX_SAFE_INTEGER,
@@ -1652,7 +1686,16 @@ async function resolveTaggerCacheUniverse(query, res = null) {
   let cacheStatus = 'warm';
   const oracleIdLists = [];
 
+  if (positiveTerms.some((term) => isOracleTaggerPrefix(parseCanonicalTaggerTerm(term).prefix))) {
+    try {
+      await oracleTags.loadOracleTags();
+    } catch (error) {
+      debugLog(`[OracleTags] Failed to load oracle tags bulk data: ${error.message}`);
+    }
+  }
+
   for (const term of positiveTerms) {
+    const { prefix } = parseCanonicalTaggerTerm(term);
     const cacheEntry = tagCache.get(term);
     const isStaleEntry = tagCache.isStale(term);
 
@@ -1663,6 +1706,19 @@ async function resolveTaggerCacheUniverse(query, res = null) {
         scheduleTagCacheRefresh(term);
       }
       continue;
+    }
+
+    if (isOracleTaggerPrefix(prefix)) {
+      const oracleIdsFromBulk = getOracleIdsFromOracleTagsBulk(term);
+      if (Array.isArray(oracleIdsFromBulk)) {
+        tagCache.set(term, oracleIdsFromBulk);
+        await tagCache.save();
+        if (process.send) {
+          process.send({ type: 'tag_cache_update', data: tagCache.serializeForIPC() });
+        }
+        oracleIdLists.push(oracleIdsFromBulk);
+        continue;
+      }
     }
 
     cacheStatus = mergeTagCacheStatus(cacheStatus, 'cold');
@@ -1745,12 +1801,12 @@ async function resolveTaggerSearchCards(query, limit, requestedUnique = 'cards',
 }
 
 /**
- * Fetch cards for a tagger (otag:/atag:/arttag:/function:) query.
+ * Fetch cards for a tagger (otag:/atag:/arttag:/function:/native:) query.
  *
  * Cache strategy (stale-while-revalidate):
 *   warm  - cache hit, TTL fresh   -> hydrate from bulk, no API call
 *   stale - cache hit, TTL expired -> serve stale immediately + background refresh
-*   cold  - no cache entry         -> call Scryfall API, populate cache
+*   cold  - uncached non-oracle taggers -> call Scryfall API, populate cache
  *
  * @param {string}                    query          Scryfall query string
  * @param {number}                    requestedCount Number of cards to return
@@ -1853,7 +1909,7 @@ function getQueryHint(query) {
   const q = query.toLowerCase();
 
   // Non-numeric keyword filters require a colon operator
-  if (/\b(is|t|type|s|set|r|rarity|o|oracle|name|a|artist|ft|flavor|kw|keyword|layout|wm|watermark|lang|language|game|format|f|legal|banned|restricted|block|stamp|frame|border|has|otag|oracletag|function|atag|art|arttag)=/i.test(q)) {
+  if (/\b(is|t|type|s|set|r|rarity|o|oracle|name|a|artist|ft|flavor|kw|keyword|layout|wm|watermark|lang|language|game|format|f|legal|banned|restricted|block|stamp|frame|border|has|otag|oracletag|function|atag|art|arttag|native)=/i.test(q)) {
     return ' (Use ":" for keyword filters, e.g., is:funny or t:token)';
   }
   
@@ -2153,12 +2209,11 @@ app.get('/card/:name', async (req, res) => {
   const requestEnforceCommander = req.query.enforceCommander === undefined
     ? null
     : parseBooleanLike(String(req.query.enforceCommander)) !== false;
+  const lookupName = String(name || '')
+    .replace(/^scryfall\s+/i, '')
+    .trim();
   
   try {
-    const lookupName = String(name || '')
-      .replace(/^scryfall\s+/i, '')
-      .trim();
-
     if (!lookupName) {
       return res.status(400).json({ object: 'error', details: 'Card name required' });
     }
@@ -3551,6 +3606,7 @@ app.post('/bulk/reload', async (req, res) => {
     console.log('[API] Manual bulk data reload requested');
     await bulkData.downloadBulkData();
     await bulkData.loadBulkData();
+    await oracleTags.loadOracleTags({ forceRefresh: true });
     
     res.json({
       success: true,
@@ -3738,6 +3794,15 @@ if (process.env.NODE_ENV !== 'test') {
       bulkData.loadBulkData()
         .then(() => {
           console.log('[Init] Bulk data ready!');
+
+          oracleTags.loadOracleTags()
+            .then(() => {
+              const oracleTagStats = oracleTags.getStats();
+              console.log(`[Init] Oracle tags ready (${oracleTagStats.terms} terms)`);
+            })
+            .catch((error) => {
+              console.error('[Init] Failed to load oracle tags bulk data:', error.message);
+            });
         })
         .catch((error) => {
           console.error('[Init] Failed to load bulk data, falling back to API mode:', error.message);

@@ -338,6 +338,17 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
   });
 
+  test('GET /random should bypass commander legality for native queries when enforceCommander=true', async () => {
+    scryfallLib.getRandomCard.mockClear();
+
+    const randomResponse = await request(app)
+      .get('/random')
+      .query({ q: 'native:elf', count: 1, enforceCommander: 'true' });
+
+    expect(randomResponse.status).toBe(200);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('native:elf lang:en');
+  });
+
   test('GET /random should normalize function= queries and bypass commander legality', async () => {
     scryfallLib.getRandomCard.mockClear();
 

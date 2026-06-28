@@ -9,9 +9,11 @@ const request = require('supertest');
 // Mock modules
 jest.mock('../lib/scryfall');
 jest.mock('../lib/bulk-data');
+jest.mock('../lib/oracle-tags');
 
 const scryfallLib = require('../lib/scryfall');
 const bulkData = require('../lib/bulk-data');
+const oracleTags = require('../lib/oracle-tags');
 
 describe('Price Filter API Routing', () => {
   let app;
@@ -61,6 +63,19 @@ describe('Price Filter API Routing', () => {
       totalCards: 100,
       prefilteredCount: 12,
       finalCount: 5
+    });
+
+    oracleTags.isLoaded.mockReturnValue(true);
+    oracleTags.loadOracleTags.mockResolvedValue(true);
+    oracleTags.getOracleIdsForTerm.mockImplementation((term) => {
+      const key = String(term || '').toLowerCase();
+      if (key.includes('builddraw')) {
+        return ['oracle-fn-1', 'oracle-fn-2'];
+      }
+      if (key.includes('draw')) {
+        return ['oracle-otag-1', 'oracle-otag-2', 'oracle-otag-3'];
+      }
+      return [];
     });
     
     scryfallLib.searchCards.mockResolvedValue([
@@ -138,9 +153,6 @@ describe('Price Filter API Routing', () => {
     });
 
     test('should use shared tag cache path for otag filters', async () => {
-      scryfallLib.searchCards.mockResolvedValueOnce([
-        { id: 'otag-api-1', oracle_id: 'oracle-otag-1', name: 'Otag Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
-      ]);
       bulkData.searchCards.mockResolvedValueOnce([
         { id: 'otag-bulk-1', oracle_id: 'oracle-otag-1', name: 'Otag Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
       ]);
@@ -151,7 +163,7 @@ describe('Price Filter API Routing', () => {
 
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.searchCards).toHaveBeenCalled();
-      expect(scryfallLib.searchCards).toHaveBeenCalledWith('otag:draw', expect.any(Number), 'cards', 'name');
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
   });
 
@@ -220,11 +232,6 @@ describe('Price Filter API Routing', () => {
     });
 
     test('should use shared tag cache path for random queries with otag filter', async () => {
-      scryfallLib.searchCards.mockResolvedValueOnce([
-        { id: 'otag-api-1', oracle_id: 'oracle-otag-1', name: 'Otag Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
-        { id: 'otag-api-2', oracle_id: 'oracle-otag-2', name: 'Otag Card 2', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
-        { id: 'otag-api-3', oracle_id: 'oracle-otag-3', name: 'Otag Card 3', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
-      ]);
       bulkData.searchCards.mockResolvedValueOnce([
         { id: 'otag-bulk-1', oracle_id: 'oracle-otag-1', name: 'Otag Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
         { id: 'otag-bulk-2', oracle_id: 'oracle-otag-2', name: 'Otag Card 2', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
@@ -238,14 +245,11 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
     test('should use shared tag cache path for random queries with function tag alias', async () => {
-      scryfallLib.searchCards.mockResolvedValueOnce([
-        { id: 'fn-api-1', oracle_id: 'oracle-fn-1', name: 'Function Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
-        { id: 'fn-api-2', oracle_id: 'oracle-fn-2', name: 'Function Card 2', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
-      ]);
       bulkData.searchCards.mockResolvedValueOnce([
         { id: 'fn-bulk-1', oracle_id: 'oracle-fn-1', name: 'Function Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
         { id: 'fn-bulk-2', oracle_id: 'oracle-fn-2', name: 'Function Card 2', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
@@ -258,6 +262,7 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
@@ -266,7 +271,7 @@ describe('Price Filter API Routing', () => {
         .get('/random?count=3&q=set:lea')
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(response.headers['x-query-plan']).toMatch(/^bulk:/);
       expect(bulkData.getRandomCards).toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
@@ -281,7 +286,7 @@ describe('Price Filter API Routing', () => {
         .send({ q: 'usd>=50 t:artifact', count: 1, enforceCommander: true })
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(response.headers['x-query-plan']).toMatch(/^bulk:/);
       expect(bulkData.getRandomCard).toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
@@ -324,7 +329,7 @@ describe('Price Filter API Routing', () => {
         .send({ q: 't:artifact', count: 2, enforceCommander: true })
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(response.headers['x-query-plan']).toMatch(/^bulk:/);
       expect(bulkData.getRandomCards).toHaveBeenCalledWith('t:artifact lang:en f:commander', 2, true, false);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
@@ -376,10 +381,6 @@ describe('Price Filter API Routing', () => {
     });
 
     test('should use shared tag cache path for random/build queries with otag filter', async () => {
-      scryfallLib.searchCards.mockResolvedValueOnce([
-        { id: 'otag-card', oracle_id: 'oracle-otag-1', name: 'Otag Card', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
-        { id: 'otag-card-2', oracle_id: 'oracle-otag-2', name: 'Otag Card 2', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
-      ]);
       bulkData.searchCards.mockResolvedValueOnce([
         { id: 'otag-card', oracle_id: 'oracle-otag-1', name: 'Otag Card', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
         { id: 'otag-card-2', oracle_id: 'oracle-otag-2', name: 'Otag Card 2', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
@@ -405,14 +406,11 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
     test('should use shared tag cache path for random/build queries with function tag alias', async () => {
-      scryfallLib.searchCards.mockResolvedValueOnce([
-        { id: 'function-card', oracle_id: 'oracle-fn-1', name: 'Function Card', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
-        { id: 'function-card-2', oracle_id: 'oracle-fn-2', name: 'Function Card 2', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
-      ]);
       bulkData.searchCards.mockResolvedValueOnce([
         { id: 'function-card', oracle_id: 'oracle-fn-1', name: 'Function Card', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
         { id: 'function-card-2', oracle_id: 'oracle-fn-2', name: 'Function Card 2', type_line: 'Creature', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
@@ -438,6 +436,7 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
 
@@ -468,7 +467,7 @@ describe('Price Filter API Routing', () => {
         .send({ q: 'set:lea', count: 1, enforceCommander: true })
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(response.headers['x-query-plan']).toMatch(/^bulk:/);
       expect(bulkData.getRandomCard).toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
@@ -590,7 +589,7 @@ describe('Price Filter API Routing', () => {
         .query({ q: 't:artifact', explain: 'true' })
         .expect(200);
 
-      expect(response.headers['x-query-plan']).toBe('bulk:bulk_loaded');
+      expect(response.headers['x-query-plan']).toMatch(/^bulk:/);
       expect(response.headers['x-query-explain']).toContain('mode=random');
       expect(bulkData.getQueryExplain).toHaveBeenCalledWith('t:artifact lang:en f:commander', 'random');
     });

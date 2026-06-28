@@ -13,13 +13,16 @@ services:
       NODE_OPTIONS: --max-old-space-size=4096
       PORT: 3000
       USE_BULK_DATA: "true"
+      STRICT_BULK_MODE: "true"
       BULK_DATA_PATH: /app/data
-      BULK_DATA_TYPE: default_cards
-      BULK_INCLUDE_RULINGS: "true"
+      BULK_DATA_TYPE: oracle_cards
+      BULK_INCLUDE_RULINGS: "false"
+      BULK_SCHEDULED_UPDATE_KEEP_OLD_DATA: "false"
       WORKERS: 1
-      STARTUP_STAGGER_MS: 0
+      STARTUP_STAGGER_MS: 500
       MAX_CACHE_SIZE: 2000
       MAX_DECK_SIZE: 500
+      MAX_RANDOM_COUNT: 500
       SCRYFALL_DELAY: 100
       IMAGE_PROXY_BASE_URL: https://api.mtginfo.org
       IMAGE_PROXY_CACHE_MAX_SIZE: 2000
