@@ -13,6 +13,9 @@ nBooster = 0
 boosterDecks = {}
 local BOOSTER_BUILD_TIMEOUT = 25
 local RANDOM_BUILD_ENDPOINT_PATH = '/random/build'
+local RANDOM_LIST_ENDPOINT_PATH = '/random'
+local SEARCH_ENDPOINT_PATH = '/search'
+local BACKEND_POOL_COUNT_LIMIT = 1000
 
 AUTOSPLAY_SPAWN_DELAY_FRAMES = 10
 POOL_CHECK_DEBOUNCE_SECONDS  = 0.7
@@ -102,6 +105,9 @@ packInput = {
   otag      = "",
 }
 portalInput = { termType=1, termOp=1, termValue="", count=5 }
+portalTravelerFungalLichActive = false
+portalCountLabelButtonIndex = nil
+portalProjectedLabelButtonIndex = nil
 pendingMysticCard = nil
 pendingMysticCMC  = nil
 pendingBazaarCard = nil
@@ -177,7 +183,7 @@ ACHIEVEMENTS_LIST = {
     { name = "Dimir Identity Buff - Whisper Network", desc = "If your commander is Blue: Once per turn, when you cast a spell on an opponent's turn, you may untap target nonland permanent. \nIf your commander is Black: Once per turn, when you target a permanent you don't control, you may exile target card in any graveyard.\nUnlock: Beat a crypt fight where all players' commander identities were either Blue, Black, or Dimir." },
     { name = "Selesnya Identity Buff - Harmony's Bloom", desc = "If your commander is White: Once per turn, when you gain life, you may put a +1/+1 counter on a creature you control. \nIf your commander is Green: Once per turn, when you cast a creature spell, you may gain 1 life.\nUnlock: Beat a crypt fight where all players' commander identities were either Green, White, or Selesnya." },
     { name = "Raccoon's Rage", desc = "After you draw your opening hand and finish mulligans, you may put a Mountain card from outside the game into your hand.\n(Beat a crypt fight with a Raccoon Commander)" },
-    { name = "Gamblers never quit", desc = "Once per town, when you pick your first town action that costs XP, you flip a coin. You may not use this buff if you cannot pay double the XP cost. If you win the coin flip, the town action is free. If you lose the coin flip, the town action costs double XP.\nUnlock: Win a coin flip 6 times in a row." },
+    { name = "Gamblers never quit", desc = "Once per town, when you pick your first XP-cost town action, including Merchant pack purchases, you flip a coin. You may not use this buff if you cannot pay double the XP cost. If you win the coin flip, the town action is free. If you lose the coin flip, the town action costs double XP.\nUnlock: Win a coin flip 6 times in a row." },
     { name = "Stick it To Me", desc = "At the beginning of the game, spawn 5 random sticker sheets to create your sticker deck.\nUnlock: Beat a crypt fight with stickers." },
     { name = "Gruul Identity Buff - Primal Fury", desc = "If your commander is Red: Once per turn, when a creature you control becomes modified, you may give it haste until end of turn. \nIf your commander is Green: Once per turn, when a creature you control attacks, you may give it trample until end of turn.\nUnlock: Beat a crypt fight where all players' commander identities were either Red, Green, or Gruul." },
     { name = "Chaos", desc = "Once per game, reroll an event.\nUnlock: Open 5 events in a row before an encounter." },
@@ -291,6 +297,7 @@ pendingTownActionType = nil  -- "upgrade" or "augment" during confirm step
 townNoteValue        = ""    -- live value of the optional-note input field
 cathedralTextValue   = ""    -- live value of the Cathedral description input
 merchantPacksPurchasedThisTown = {}
+gamblersNeverQuitUsedThisTown = false  -- Gamblers Never Quit fires at most once per town
 
 function getMasterController()
   local masters = getObjectsWithTag(MASTER_TAG) or {}
@@ -355,6 +362,8 @@ end
 function resetTownActions()
   resetMerchantTownLocks()
   resetBuildingUsageForNewTown()
+  gamblersNeverQuitUsedThisTown = false
+  portalTravelerFungalLichActive = false
   if currentScreen == "buy" then
     showBuyScreen()
   elseif currentScreen == "experience" then
@@ -371,9 +380,12 @@ function canUseBuildingThisTown(buildingKey)
 end
 
 function decrementBuildingUse(buildingKey)
-  if not BUILDING_LIMITS[buildingKey] then return end  -- No limit = unlimited
+  local hasAnyUse = (buildingUsesThisTown[buildingKey] or 0) > 0
+    or (bonusBuildingUsesByKey[buildingKey] or 0) > 0
+    or (bonusBuildingUsesGeneric or 0) > 0
+  if not hasAnyUse then return end
   -- Decrement in order: townUses first, then buildingBonus, then genericBonus
-  if buildingUsesThisTown[buildingKey] and buildingUsesThisTown[buildingKey] > 0 then
+  if BUILDING_LIMITS[buildingKey] and buildingUsesThisTown[buildingKey] and buildingUsesThisTown[buildingKey] > 0 then
     buildingUsesThisTown[buildingKey] = buildingUsesThisTown[buildingKey] - 1
   elseif bonusBuildingUsesByKey[buildingKey] and bonusBuildingUsesByKey[buildingKey] > 0 then
     bonusBuildingUsesByKey[buildingKey] = bonusBuildingUsesByKey[buildingKey] - 1
@@ -448,6 +460,54 @@ function applyTownCostModifiers(baseCost)
   return cost
 end
 
+function refundXP(amount, description)
+  local amt = math.max(0, math.floor(tonumber(amount) or 0))
+  if amt <= 0 then return xp end
+  xp = math.max(XP_MIN, math.floor(xp + amt))
+  recordXPTransaction(amt, description or "XP Refund")
+  refreshXPDisplay()
+  notifyMasters()
+  return xp
+end
+
+function getBlacksmithBonusUseKey(actionType)
+  if actionType == "upgrade" then return "Blacksmith:Upgrade" end
+  if actionType == "augment" then return "Blacksmith:Augment" end
+  return nil
+end
+
+function getTownActionCost(actionType)
+  local baseCost = 0
+  if actionType == "upgrade" then
+    baseCost = UPGRADE_COST
+  elseif actionType == "augment" then
+    baseCost = AUGMENT_COST
+  end
+  local cost = applyTownCostModifiers(baseCost)
+  local bonusKey = getBlacksmithBonusUseKey(actionType)
+  if bonusKey and (bonusBuildingUsesByKey[bonusKey] or 0) > 0 then
+    return 0, true
+  end
+  return cost, false
+end
+
+function consumeBlacksmithBonusUse(actionType)
+  local bonusKey = getBlacksmithBonusUseKey(actionType)
+  if not bonusKey then return false end
+  if (bonusBuildingUsesByKey[bonusKey] or 0) <= 0 then return false end
+  decrementBuildingUse(bonusKey)
+  return true
+end
+
+function getEffectiveStandardPackCount()
+  return math.max(1, settings.cardsPerPack + getPackChoiceBonusFromBrands())
+end
+
+function getEffectivePortalPackCount(count)
+  local baseCount = math.max(1, math.floor(tonumber(count) or 1))
+  return math.max(1, baseCount + getPackChoiceBonusFromBrands())
+end
+
 function applyMerchantCostModifiers(baseCost)
   local cost = math.max(0, math.floor(tonumber(baseCost) or 0))
   local settingsState = getMasterGameplaySettings()
@@ -518,7 +578,8 @@ function onLoad(saved)
           equippedBuffs = {}
           for i = 1, MAX_EQUIPPED do
             local b = data.equippedBuffs[i]
-            if type(b) == "table" and type(b.name) == "string" then
+            -- Brands are not equippable; silently drop any legacy saved entries.
+            if type(b) == "table" and type(b.name) == "string" and b.category ~= "brands" then
               equippedBuffs[i] = {name = b.name, category = b.category}
             end
           end
@@ -1717,12 +1778,46 @@ function resetPortalInput()
   portalInput = { termType=1, termOp=1, termValue="", count=5 }
 end
 
+function getPortalMaxCount()
+  return portalTravelerFungalLichActive and 20 or 15
+end
+
+function grantFungalLichPortalBonus()
+  if portalTravelerFungalLichActive then return end
+  portalTravelerFungalLichActive = true
+  broadcastToAll("[" .. self.getName() .. "] Fungal Lich: Portal now allows up to 20 XP this town.", {0.5, 0.8, 0.45})
+  if currentScreen == "input" and activePack == "portal" then
+    openPortalInput()
+  end
+end
+
+function receiveTravelerEffect(params)
+  if type(params) ~= "table" then return end
+  local travelerName = tostring(params.name or params.traveler or params.effect or "")
+  local lowered = travelerName:lower()
+  if lowered:match("fungal lich") then
+    grantFungalLichPortalBonus()
+  end
+end
+
+function refreshPortalPreviewLabels()
+  local portalMaxCount = getPortalMaxCount()
+  if portalCountLabelButtonIndex and self.editButton then
+    pcall(function() self.editButton({index = portalCountLabelButtonIndex, label = "Count (1-" .. tostring(portalMaxCount) .. ")"}) end)
+  end
+  if portalProjectedLabelButtonIndex and self.editButton then
+    pcall(function() self.editButton({index = portalProjectedLabelButtonIndex, label = tostring(getEffectivePortalPackCount(portalInput.count))}) end)
+  end
+end
+
 function openPortalInput()
   if activePack ~= "portal" then
     resetPortalInput()
     resetPackInput()
   end
   activePack = "portal"
+  portalCountLabelButtonIndex = nil
+  portalProjectedLabelButtonIndex = nil
   openScreen("input", nil)
   trackButton({
     click_function = "xp_noop", function_owner = self,
@@ -1733,9 +1828,10 @@ function openPortalInput()
   })
   drawColorToggles(-0.4)
   drawPortalTermSlot(0.15)
-  trackButton({
+  local portalMaxCount = getPortalMaxCount()
+  portalCountLabelButtonIndex = trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Count (1-15)",
+    label = "Count (1-" .. tostring(portalMaxCount) .. ")",
     position = {-1.2, 0.1, 0.72},
     width = 700, height = 180, font_size = 82,
     color = LABEL_BG, font_color = {0, 0, 0},
@@ -1747,6 +1843,13 @@ function openPortalInput()
     position = {1.2, 0.1, 0.72},
     width = 400, height = 180, font_size = 100,
     color = {1, 1, 1}, font_color = {0, 0, 0},
+  })
+  portalProjectedLabelButtonIndex = trackButton({
+    click_function = "xp_noop", function_owner = self,
+    label = "" .. tostring(getEffectivePortalPackCount(portalInput.count)),
+    position = {2, 0.1, 0.72},
+    width = 180, height = 180, font_size = 60,
+    color = {0.92, 0.95, 0.98}, font_color = {0, 0, 0},
   })
   trackButton({
     click_function = "click_inputCancel", function_owner = self,
@@ -1804,8 +1907,13 @@ function click_portalTermOp()
 end
 function portal_term_input(_, _, v)  portalInput.termValue = v or "" end
 function portal_count_input(_, _, v)
-  local n = tonumber(v) or 5
-  portalInput.count = math.max(1, math.min(15, math.floor(n)))
+  local n = tonumber(v)
+  if n then
+    portalInput.count = math.max(1, math.min(getPortalMaxCount(), math.floor(n)))
+  else
+    portalInput.count = 5
+  end
+  refreshPortalPreviewLabels()
 end
 
 function buildPortalQuery()
@@ -1822,7 +1930,8 @@ function buildPortalQuery()
 end
 
 function attemptPortalPurchase()
-  local count = math.max(1, math.min(15, portalInput.count or 5))
+  local count = math.max(1, math.min(getPortalMaxCount(), portalInput.count or 5))
+  local effectiveCount = getEffectivePortalPackCount(count)
   local cost  = count
   if xp < cost then
     broadcastToAll("[" .. self.getName() .. "] Not enough XP for Temporal Pack (need "
@@ -1838,20 +1947,20 @@ function attemptPortalPurchase()
   recordXPTransaction(-cost, "Temporal Pack (" .. count .. " cards)")
   decrementBuildingUse("Portal")
   notifyMasters()
-  broadcastToAll("[" .. self.getName() .. "] Temporal Pack (" .. count .. " cards) for "
+  broadcastToAll("[" .. self.getName() .. "] Temporal Pack (" .. effectiveCount .. " cards) for "
     .. cost .. " XP (" .. xp .. " remaining).", {0.4, 0.85, 0.4})
-  postBuildNDJSON({ q=q, count=count, enforceCommander=true, forceApi=false, back=backURL },
+  postBuildNDJSON({ q=q, count=effectiveCount, enforceCommander=true, forceApi=false, back=backURL },
     function(wr)
       if not wr.is_done then return end
       local hasError = wr.is_error or (wr.response_code and wr.response_code >= 400)
       if hasError or not wr.text or wr.text == "" then
-        xp = xp + cost; recordXPTransaction(cost, "Temporal Pack Refund (fetch error)"); notifyMasters(); refreshXPDisplay(); refreshEssenceDisplay()
+        refundXP(cost, "Temporal Pack Refund (fetch error)"); refreshEssenceDisplay()
         broadcastToAll("[" .. self.getName() .. "] Temporal Pack fetch failed. XP refunded.", {0.9, 0.3, 0.3})
         return
       end
       local deck = firstDeckFromNDJSON(wr.text)
       if not deck then
-        xp = xp + cost; recordXPTransaction(cost, "Temporal Pack Refund (no cards)"); notifyMasters(); refreshXPDisplay(); refreshEssenceDisplay()
+        refundXP(cost, "Temporal Pack Refund (no cards)"); refreshEssenceDisplay()
         broadcastToAll("[" .. self.getName() .. "] Temporal Pack returned no cards. XP refunded.", {0.9, 0.3, 0.3})
         return
       end
@@ -2175,17 +2284,19 @@ end
 function showBlacksmithScreen()
   openScreen("blacksmith", nil, "Blacksmith")
   local BW, BH, BF = 700, 280, 70
+  local upgradeCost, upgradeFree = getTownActionCost("upgrade")
   trackButton({
     click_function = "click_blacksmithUpgrade", function_owner = self,
-    label = "Upgrade\n" .. UPGRADE_COST .. " XP",
+    label = "Upgrade\n" .. (upgradeFree and "Free" or tostring(upgradeCost) .. " XP"),
     position = {-0.75, 0.1, 0.15},
     width = BW, height = BH, font_size = BF,
     color = {0.15, 0.3, 0.12}, font_color = {0.8, 1.0, 0.7},
     tooltip = "Submit a card to be upgraded — " .. UPGRADE_COST .. " XP",
   })
+  local augmentCost, augmentFree = getTownActionCost("augment")
   trackButton({
     click_function = "click_blacksmithAugment", function_owner = self,
-    label = "Augment\n" .. AUGMENT_COST .. " XP",
+    label = "Augment\n" .. (augmentFree and "Free" or tostring(augmentCost) .. " XP"),
     position = {0.75, 0.1, 0.15},
     width = BW, height = BH, font_size = BF,
     color = {0.28, 0.18, 0.08}, font_color = {1.0, 0.88, 0.55},
@@ -2669,6 +2780,17 @@ function handleMerchantPackCashoutDrop(obj, packName)
     return
   end
   
+  -- Mystery packs have no filters to configure — spawn immediately without
+  -- touching pendingMerchantPackCashout so the flag can never get stuck.
+  if packDef.packType == "mystery" then
+    broadcastToAll("[" .. self.getName() .. "] Redeeming Merchant Pack: " .. packName, {0.5, 0.85, 0.5})
+    spawnMysteryPack(0, "mystery")
+    ess_safeDestructObject(obj)
+    requestSync(DEBOUNCE_SECONDS)
+    showRedeemCashoutScreen()
+    return
+  end
+
   -- Store the cashout token reference
   pendingMerchantPackCashout = {
     object = obj,
@@ -2738,12 +2860,13 @@ function handleRedeemCashoutDrop(obj)
 
   bonusName = bonusName:gsub("^%s*", ""):gsub("%s*$", "")  -- Trim whitespace
 
-  -- Map special names to buildings
-  -- "Augment" and "Upgrade" both map to Blacksmith
+  -- Map special names to buildings or Blacksmith-specific action bonuses.
   -- "Mystic" and "Guild" are XP-gated (no limit)
   local buildingKey = nil
-  if bonusName == "Augment" or bonusName == "Upgrade" then
-    buildingKey = "Blacksmith"
+  if bonusName == "Augment" then
+    buildingKey = "Blacksmith:Augment"
+  elseif bonusName == "Upgrade" then
+    buildingKey = "Blacksmith:Upgrade"
   elseif bonusName == "Mystic" then
     buildingKey = "Mystic"
   elseif bonusName == "Guild" then
@@ -2814,8 +2937,32 @@ function buildGuildQuery()
   return table.concat(parts, "+")
 end
 
+function tryGamblersNeverQuit(baseCost)
+  if baseCost <= 0 then return nil end
+  if not isBuffEquipped("Gamblers never quit") then return nil end
+  if gamblersNeverQuitUsedThisTown then return nil end
+  -- Achievement requires the player to be able to afford double; otherwise it is skipped.
+  if xp < baseCost * 2 then
+    broadcastToAll("[" .. self.getName() .. "] Gamblers Never Quit: need "
+      .. (baseCost * 2) .. " XP to gamble (have " .. xp .. ") — normal cost applies.", {0.9, 0.75, 0.3})
+    return nil
+  end
+  gamblersNeverQuitUsedThisTown = true
+  local win = (math.random(1, 2) == 1)
+  if win then
+    broadcastToAll("[" .. self.getName() .. "] Gamblers Never Quit: HEADS — this action is FREE!", {0.3, 1, 0.3})
+    return 0
+  else
+    broadcastToAll("[" .. self.getName() .. "] Gamblers Never Quit: TAILS — this action costs DOUBLE ("
+      .. (baseCost * 2) .. " XP)!", {1, 0.35, 0.35})
+    return baseCost * 2
+  end
+end
+
 function click_guildRoll()
-  local cost = applyTownCostModifiers(GUILD_ROLL_COST)
+  local baseCost = applyTownCostModifiers(GUILD_ROLL_COST)
+  local gamblerResult = tryGamblersNeverQuit(baseCost)
+  local cost = (gamblerResult ~= nil) and gamblerResult or baseCost
   if xp < cost then
     broadcastToAll("[" .. self.getName() .. "] Not enough XP for Guild roll (need " .. cost .. ", have "
       .. xp .. ").", {0.9, 0.3, 0.3})
@@ -2858,8 +3005,8 @@ function showTownScreen()
   local upgradeBlocked = isTownActionBlocked("upgrade")
   local augmentBlocked = isTownActionBlocked("augment")
   openScreen("town", nil, "Town")
-  local upgradeCost = applyTownCostModifiers(UPGRADE_COST)
-  local augmentCost = applyTownCostModifiers(AUGMENT_COST)
+  local upgradeCost, upgradeFree = getTownActionCost("upgrade")
+  local augmentCost, augmentFree = getTownActionCost("augment")
   trackButton({
     click_function = cathedralBlocked and "xp_noop" or "click_townCathedral", function_owner = self,
     label = cathedralBlocked and "Cathedral\n(Blocked)" or "Cathedral\n(Free)",
@@ -2870,7 +3017,7 @@ function showTownScreen()
   })
   trackButton({
     click_function = upgradeBlocked and "xp_noop" or "click_townUpgrade", function_owner = self,
-    label = upgradeBlocked and "Upgrade\n(Blocked)" or ("Upgrade\n(" .. upgradeCost .. " XP)"),
+    label = upgradeBlocked and "Upgrade\n(Blocked)" or ("Upgrade\n(" .. (upgradeFree and "Free" or tostring(upgradeCost) .. " XP") .. ")"),
     position = {0.9, 0.1, 0.05},
     width = 800, height = 320, font_size = 78,
     color = upgradeBlocked and {0.28, 0.14, 0.14} or {0.15, 0.3, 0.12}, font_color = {0.8, 1.0, 0.7},
@@ -2878,7 +3025,7 @@ function showTownScreen()
   })
   trackButton({
     click_function = augmentBlocked and "xp_noop" or "click_townAugment", function_owner = self,
-    label = augmentBlocked and "Augment\n(Blocked)" or ("Augment\n(" .. augmentCost .. " XP)"),
+    label = augmentBlocked and "Augment\n(Blocked)" or ("Augment\n(" .. (augmentFree and "Free" or tostring(augmentCost) .. " XP") .. ")"),
     position = {0, 0.1, 0.75},
     width = 800, height = 320, font_size = 78,
     color = augmentBlocked and {0.28, 0.14, 0.14} or {0.28, 0.18, 0.08}, font_color = {1.0, 0.88, 0.55},
@@ -2990,13 +3137,12 @@ function showUpgradeInput(actionType)
   pendingTownCardObj    = nil
   pendingTownActionType = actionType
   townNoteValue         = ""
-  local baseCost  = (actionType == "upgrade") and UPGRADE_COST or AUGMENT_COST
-  local cost      = applyTownCostModifiers(baseCost)
+  local cost, freeAction = getTownActionCost(actionType)
   local typeLabel = actionType:sub(1,1):upper() .. actionType:sub(2)
   openScreen(actionType .. "_input", nil, typeLabel)
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = typeLabel .. "  —  " .. cost .. " XP",
+    label = typeLabel .. "  —  " .. (freeAction and "Free" or (tostring(cost) .. " XP")),
     position = {0, 0.1, -0.7},
     width = 1700, height = 185, font_size = 80,
     color = {0.12, 0.18, 0.1}, font_color = {0.75, 1, 0.65},
@@ -3052,9 +3198,8 @@ function handleTownCardDrop(obj, actionType)
     broadcastToAll("[" .. self.getName() .. "] Drop a single card, not a deck.", {0.9, 0.6, 0.3})
     return
   end
-  local baseCost = (actionType == "upgrade") and UPGRADE_COST or AUGMENT_COST
-  local cost = applyTownCostModifiers(baseCost)
-  if xp < cost then
+  local cost, _ = getTownActionCost(actionType)
+  if cost > 0 and xp < cost then
     broadcastToAll("[" .. self.getName() .. "] Not enough XP for " .. actionType
       .. " (need " .. cost .. ", have " .. xp .. ").", {0.9, 0.3, 0.3})
     return
@@ -3075,8 +3220,7 @@ function showTownCardConfirm(cardName, actionType)
     showTownScreen()
     return
   end
-  local baseCost = (actionType == "upgrade") and UPGRADE_COST or AUGMENT_COST
-  local cost = applyTownCostModifiers(baseCost)
+  local cost, freeAction = getTownActionCost(actionType)
   local typeLabel = actionType:sub(1,1):upper() .. actionType:sub(2)
   openScreen("town_card_confirm", nil, typeLabel .. " — Confirm")
   trackButton({
@@ -3088,7 +3232,7 @@ function showTownCardConfirm(cardName, actionType)
   })
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Cost: " .. cost .. " XP",
+    label = "Cost: " .. (freeAction and "Free" or (tostring(cost) .. " XP")),
     position = {0, 0.1, 0.05},
     width = 1700, height = 185, font_size = 80,
     color = {0.1, 0.16, 0.1}, font_color = {0.7, 1, 0.7},
@@ -3155,14 +3299,25 @@ function submitTownAction(actionType, text, cardGuid)
 
   local paidCost = nil
   if actionType == "upgrade" or actionType == "augment" then
-    local baseCost = (actionType == "upgrade") and UPGRADE_COST or AUGMENT_COST
-    local cost = applyTownCostModifiers(baseCost)
-    xp = math.max(XP_MIN, xp - cost)
-    local typeLabel = actionType:sub(1,1):upper() .. actionType:sub(2)
-    recordXPTransaction(-cost, typeLabel)
-    notifyMasters()
-    refreshXPDisplay()
+    local cost, freeBonus = getTownActionCost(actionType)
+    local usedBonus = false
+    if not freeBonus then
+      local gamblerResult = tryGamblersNeverQuit(cost)
+      if gamblerResult ~= nil then cost = gamblerResult end
+    else
+      usedBonus = consumeBlacksmithBonusUse(actionType)
+    end
+    if cost > 0 then
+      xp = math.max(XP_MIN, xp - cost)
+      local typeLabel = actionType:sub(1,1):upper() .. actionType:sub(2)
+      recordXPTransaction(-cost, typeLabel)
+      notifyMasters()
+      refreshXPDisplay()
+    else
+      recordXPTransaction(0, (actionType:sub(1,1):upper() .. actionType:sub(2)) .. " (Free)")
+    end
     paidCost = cost
+    pendingTownAction = {type = actionType, submittedAt = getTimeStr(), costPaid = paidCost, usedBonus = usedBonus}
   end
 
   pcall(function()
@@ -3175,7 +3330,9 @@ function submitTownAction(actionType, text, cardGuid)
     })
   end)
 
-  pendingTownAction = {type = actionType, submittedAt = getTimeStr(), costPaid = paidCost}
+  if not pendingTownAction then
+    pendingTownAction = {type = actionType, submittedAt = getTimeStr(), costPaid = paidCost}
+  end
   townNoteValue     = ""
   cathedralTextValue = ""
   showTownAwaitScreen()
@@ -3390,12 +3547,24 @@ function receiveTownActionCancelled(params)
   local actionType = params.type or ""
   if actionType == "upgrade" then
     local refund = (pendingTownAction and pendingTownAction.costPaid) or applyTownCostModifiers(UPGRADE_COST)
-    receiveXP({amount = refund})
+    refundXP(refund, "Upgrade Cancel Refund")
+    if pendingTownAction and pendingTownAction.usedBonus then
+      local bonusKey = getBlacksmithBonusUseKey("upgrade")
+      if bonusKey then
+        bonusBuildingUsesByKey[bonusKey] = (bonusBuildingUsesByKey[bonusKey] or 0) + 1
+      end
+    end
     broadcastToAll("[" .. self.getName() .. "] Upgrade cancelled — "
       .. refund .. " XP refunded.", {0.9, 0.9, 0.5})
   elseif actionType == "augment" then
     local refund = (pendingTownAction and pendingTownAction.costPaid) or applyTownCostModifiers(AUGMENT_COST)
-    receiveXP({amount = refund})
+    refundXP(refund, "Augment Cancel Refund")
+    if pendingTownAction and pendingTownAction.usedBonus then
+      local bonusKey = getBlacksmithBonusUseKey("augment")
+      if bonusKey then
+        bonusBuildingUsesByKey[bonusKey] = (bonusBuildingUsesByKey[bonusKey] or 0) + 1
+      end
+    end
     broadcastToAll("[" .. self.getName() .. "] Augment cancelled — "
       .. refund .. " XP refunded.", {0.9, 0.9, 0.5})
   end
@@ -3429,14 +3598,14 @@ function showSettingsScreen()
   local labelX, ctrlX = -1.4, 1.4
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Cards/Pack", position = {labelX, 0.1, -0.55},
+    label = "Pack Size", position = {labelX, 0.1, -0.55},
     width = 800, height = 180, font_size = 90,
     color = LABEL_BG, font_color = {0, 0, 0},
+    tooltip = "Mystery packs are exempt.",
   })
-  trackInput({
-    input_function = "cardsPerPack_input", function_owner = self,
-    label = "15", value = tostring(settings.cardsPerPack),
-    alignment = TTS_INPUT_ALIGN_RIGHT, validation = TTS_INPUT_VALIDATION_INT,
+  trackButton({
+    click_function = "xp_noop", function_owner = self,
+    label = tostring(getEffectiveStandardPackCount()),
     position = {ctrlX, 0.1, -0.55},
     width = 400, height = 180, font_size = 100,
     color = {1, 1, 1}, font_color = {0, 0, 0},
@@ -3527,7 +3696,10 @@ end
 
 function cardsPerPack_input(_, _, value)
   local n = tonumber(value)
-  if n and n > 0 then settings.cardsPerPack = math.floor(n) end
+  if n and n > 0 then
+    local brandBonus = getPackChoiceBonusFromBrands()
+    settings.cardsPerPack = math.max(1, math.floor(n - brandBonus))
+  end
 end
 function splayRows_input(_, _, value)
   local n = tonumber(value)
@@ -3879,52 +4051,8 @@ end
 function checkPoolSize(query, callback)
   if not query or query == "" then callback(nil) return end
 
-  -- Edit note: OTAG pool checks stay Scryfall-first so backend caps do not undercount the pool. Signed, Sirin.
-  -- OTAG is supported by Scryfall; prefer it for accurate pool totals.
-  -- If Scryfall fails, fall back to backend /search for resiliency.
-  if query:match("otag:") then
-    local adapted = query
-    adapted = adapted:gsub("id=",  "id<=")
-    adapted = adapted:gsub("<=",   "%%3C%%3D")
-    adapted = adapted:gsub(">=",   "%%3E%%3D")
-    adapted = adapted:gsub("<",    "%%3C")
-    adapted = adapted:gsub(">",    "%%3E")
-
-    local scryfallURL = SCRYFALL_SEARCH_URL .. "?q=" .. adapted .. "&unique=cards&format=json"
-    WebRequest.custom(scryfallURL, "GET", true, nil,
-      {["User-Agent"] = "MTGRoguelikeSpawner/2.0 (TTS mod; contact mtd.danab@gmail.com)"},
-      function(wr)
-        if not wr.is_error and wr.text and wr.text ~= "" then
-          local total = wr.text:match('"total_cards"%s*:%s*(%d+)')
-          if total then callback(tonumber(total)) return end
-          if wr.text:match('"code"%s*:%s*"not_found"') then callback(0) return end
-        end
-
-        local backendQuery = query:gsub(" ", "+")
-        local backendSearchURL = backendURL .. "/search?q=" .. backendQuery
-        WebRequest.custom(backendSearchURL, "GET", true, nil,
-          {['Accept-Language'] = 'en'},
-          function(wr2)
-            if wr2.is_error or not wr2.text or wr2.text == "" then
-              callback(nil)
-              return
-            end
-            local total = wr2.text:match('"total_cards"%s*:%s*(%d+)')
-            if total then
-              callback(tonumber(total))
-              return
-            end
-            if wr2.text:match('"code"%s*:%s*"not_found"') then
-              callback(0)
-              return
-            end
-            callback(nil)
-          end
-        )
-      end
-    )
-    return
-  end
+  -- Pool checks are backend-first for all packs (pro/mythic/otag).
+  -- If backend /search is unavailable (or returns a capped count), fall back to Scryfall.
 
   -- Adapt the spawner query syntax for the Scryfall public API:
   --   id=X   → id<=X   (within-identity; Scryfall uses <= for "can fit inside")
@@ -3932,38 +4060,65 @@ function checkPoolSize(query, callback)
   --   >=     → %3E%3D
   --   <      → %3C
   --   >      → %3E
-  local adapted = query
-  adapted = adapted:gsub("id=",  "id<=")
-  adapted = adapted:gsub("<=",   "%%3C%%3D")
-  adapted = adapted:gsub(">=",   "%%3E%%3D")
-  adapted = adapted:gsub("<",    "%%3C")
-  adapted = adapted:gsub(">",    "%%3E")
+  local function fallbackToScryfall()
+    local adapted = query
+    adapted = adapted:gsub("id=",  "id<=")
+    adapted = adapted:gsub("<=",   "%%3C%%3D")
+    adapted = adapted:gsub(">=",   "%%3E%%3D")
+    adapted = adapted:gsub("<",    "%%3C")
+    adapted = adapted:gsub(">",    "%%3E")
 
-  local url = SCRYFALL_SEARCH_URL .. "?q=" .. adapted .. "&unique=cards&format=json"
+    local url = SCRYFALL_SEARCH_URL .. "?q=" .. adapted .. "&unique=cards&format=json"
 
-  -- Scryfall requires a User-Agent header; WebRequest.get sends none and gets
-  -- a 403 "client_update_required".  Use WebRequest.custom to supply one.
-  WebRequest.custom(url, "GET", true, nil,
-    {["User-Agent"] = "MTGRoguelikeSpawner/2.0 (TTS mod; contact mtd.danab@gmail.com)"},
-    function(wr)
-      if wr.is_error or not wr.text or wr.text == "" then
+    -- Scryfall requires a User-Agent header; WebRequest.get sends none and gets
+    -- a 403 "client_update_required".  Use WebRequest.custom to supply one.
+    WebRequest.custom(url, "GET", true, nil,
+      {["User-Agent"] = "MTGRoguelikeSpawner/2.0 (TTS mod; contact mtd.danab@gmail.com)"},
+      function(wr)
+        if wr.is_error or not wr.text or wr.text == "" then
+          callback(nil)
+          return
+        end
+        -- Pattern-match total_cards directly; avoids JSON.decode on the full
+        -- Scryfall payload (up to 175 card objects per page).
+        local total = wr.text:match('"total_cards"%s*:%s*(%d+)')
+        if total then
+          callback(tonumber(total))
+          return
+        end
+        -- Scryfall returns {code="not_found"} when the query is valid but matches
+        -- zero cards — that is a real answer (0), not an API failure.
+        if wr.text:match('"code"%s*:%s*"not_found"') then
+          callback(0)
+          return
+        end
         callback(nil)
-        return
       end
-      -- Pattern-match total_cards directly; avoids JSON.decode on the full
-      -- Scryfall payload (up to 175 card objects per page).
-      local total = wr.text:match('"total_cards"%s*:%s*(%d+)')
-      if total then
-        callback(tonumber(total))
-        return
+    )
+  end
+
+  local backendQuery = tostring(query):gsub("%+", " ")
+  local backendSearchURL = backendURL .. SEARCH_ENDPOINT_PATH
+    .. "?q=" .. urlEncode(backendQuery)
+    .. "&limit=" .. tostring(BACKEND_POOL_COUNT_LIMIT)
+  WebRequest.custom(backendSearchURL, "GET", true, nil,
+    {['Accept-Language'] = 'en'},
+    function(wr)
+      if not wr.is_error and wr.text and wr.text ~= "" then
+        local total = wr.text:match('"total_cards"%s*:%s*(%d+)')
+        if total then
+          local totalNum = tonumber(total)
+          if totalNum and totalNum < BACKEND_POOL_COUNT_LIMIT then
+            callback(totalNum)
+            return
+          end
+        end
+        if wr.text:match('"code"%s*:%s*"not_found"') then
+          callback(0)
+          return
+        end
       end
-      -- Scryfall returns {code="not_found"} when the query is valid but matches
-      -- zero cards — that is a real answer (0), not an API failure.
-      if wr.text:match('"code"%s*:%s*"not_found"') then
-        callback(0)
-        return
-      end
-      callback(nil)
+      fallbackToScryfall()
     end
   )
 end
@@ -3972,6 +4127,7 @@ function attemptPurchase(packName)
   local isCashoutRedemption = (pendingMerchantPackCashout ~= nil)
   local cashoutToken = isCashoutRedemption and pendingMerchantPackCashout.object or nil
   local cashoutName = isCashoutRedemption and pendingMerchantPackCashout.packName or nil
+  local paidXP = 0
   
   -- For cashout redemption, skip XP checks and locks
   if not isCashoutRedemption then
@@ -3981,13 +4137,16 @@ function attemptPurchase(packName)
       showBuyScreen()
       return
     end
-    local cost = getMerchantPackCost(packName)
+    local baseCost = getMerchantPackCost(packName)
+    local gamblerResult = tryGamblersNeverQuit(baseCost)
+    local cost = (gamblerResult ~= nil) and gamblerResult or baseCost
     if xp < cost then
       broadcastToAll("[" .. self.getName() .. "] Not enough XP for " .. packName
         .. " pack (have " .. xp .. ", need " .. cost .. ").", {0.9, 0.3, 0.3})
       return
     end
     xp = math.max(XP_MIN, xp - cost)
+    paidXP = cost
     markMerchantPackPurchased(packName)
     recordXPTransaction(-cost, packName:sub(1,1):upper() .. packName:sub(2) .. " Pack")
     notifyMasters()
@@ -3998,7 +4157,14 @@ function attemptPurchase(packName)
   end
 
   if packName == "mystery" then
-    spawnMysteryPack()
+    spawnMysteryPack(paidXP, packName)
+    -- Destroy the cashout token and clear state for mystery redemptions.
+    -- Without this, pendingMerchantPackCashout stays set and every subsequent
+    -- mystery pack purchase is treated as a cashout, skipping XP deduction entirely.
+    if isCashoutRedemption and cashoutToken then
+      ess_safeDestructObject(cashoutToken)
+      pendingMerchantPackCashout = nil
+    end
   else
     local q
     if packName == "identity" then q = buildIdentityQuery()
@@ -4008,10 +4174,8 @@ function attemptPurchase(packName)
     if not q or q == "" then
       if not isCashoutRedemption then
         broadcastToAll("[" .. self.getName() .. "] Empty pack query; refunding.", {0.9, 0.3, 0.3})
-        xp = xp + cost
+        refundXP(paidXP, packName .. " Pack Refund (empty query)")
         clearMerchantPackPurchased(packName)
-        recordXPTransaction(cost, packName .. " Pack Refund (empty query)")
-        notifyMasters()
       else
         broadcastToAll("[" .. self.getName() .. "] Merchant Pack: invalid filters, refunding token.", {0.9, 0.3, 0.3})
         if cashoutToken then
@@ -4022,8 +4186,8 @@ function attemptPurchase(packName)
         return
       end
     else
-      local packCount = settings.cardsPerPack + getPackChoiceBonusFromBrands()
-      local refundCost = isCashoutRedemption and 0 or 0  -- No refund cost for either
+      local packCount = getEffectiveStandardPackCount()
+      local refundCost = isCashoutRedemption and 0 or paidXP
       spawnParameterizedPack(q, packCount, refundCost, packName)
       
       -- If this was a cashout redemption, destroy the token
@@ -4044,17 +4208,27 @@ function attemptPurchase(packName)
   end
 end
 
-function spawnMysteryPack()
+function spawnMysteryPack(refundCost, packName)
   nBooster = (nBooster or 0) + 1
   local boosterN = nBooster
   getDeckDat(getMysteryPackQueries(), boosterN)
   local delivered = false
+
+  local function refundMystery(reason)
+    if refundCost and refundCost > 0 then
+      refundXP(refundCost, reason)
+      clearMerchantPackPurchased(packName)
+      refreshEssenceDisplay()
+    end
+  end
+
   Wait.condition(function()
     if delivered then return end
     delivered = true
     local dat = boosterDecks[boosterN]
     boosterDecks[boosterN] = nil
     if not dat then
+      refundMystery("Mystery Pack Refund (fetch error)")
       broadcastToAll("[" .. self.getName() .. "] Mystery pack fetch failed.", {0.9, 0.3, 0.3})
       return
     end
@@ -4064,6 +4238,7 @@ function spawnMysteryPack()
     if delivered then return end
     delivered = true
     boosterDecks[boosterN] = nil
+    refundMystery("Mystery Pack Refund (timeout)")
     broadcastToAll("[" .. self.getName() .. "] Mystery pack timed out.", {0.9, 0.3, 0.3})
   end, BOOSTER_BUILD_TIMEOUT + 5)
 end
@@ -4074,13 +4249,41 @@ function spawnParameterizedPack(query, count, refundCost, packName)
   local function refundWithMessage(message, reason)
     broadcastToAll(message, {0.9, 0.3, 0.3})
     if refundCost and refundCost > 0 then
-      xp = xp + refundCost
+      refundXP(refundCost, reason)
       clearMerchantPackPurchased(packName)
-      recordXPTransaction(refundCost, reason)
-      notifyMasters()
-      refreshXPDisplay()
       refreshEssenceDisplay()
     end
+  end
+
+  local function requestRandomFallback(fromReason)
+    local wantedCount = tonumber(count or settings.cardsPerPack) or 15
+    local randomQuery = tostring(query):gsub("%+", " ")
+    local randomUrl = backendURL .. RANDOM_LIST_ENDPOINT_PATH
+      .. "?q=" .. urlEncode(randomQuery)
+      .. "&count=" .. tostring(wantedCount)
+      .. "&enforceCommander=true"
+
+    WebRequest.custom(randomUrl, "GET", true, nil,
+      {['Accept-Language'] = 'en'},
+      function(wr)
+        if wr.is_error or not wr.text or wr.text == "" then
+          refundWithMessage(
+            "[" .. self.getName() .. "] Pack fetch failed after fallback (" .. tostring(fromReason or "build") .. ", HTTP " .. tostring(wr.response_code) .. "). XP refunded.",
+            "Pack Refund (fetch error)"
+          )
+          return
+        end
+        local deck = deckFromRandomListResponse(wr.text)
+        if deck then
+          spawnPackDeck(deck)
+          return
+        end
+        refundWithMessage(
+          "[" .. self.getName() .. "] Pack returned no cards after fallback (" .. tostring(fromReason or "build") .. "). XP refunded.",
+          "Pack Refund (no cards)"
+        )
+      end
+    )
   end
 
   local function requestBuild()
@@ -4091,6 +4294,10 @@ function spawnParameterizedPack(query, count, refundCost, packName)
       if not wr.is_done then return end
       local hasError = wr.is_error or (wr.response_code and wr.response_code >= 400)
       if hasError or not wr.text or wr.text == "" then
+        if isOtagQuery then
+          requestRandomFallback("build_error")
+          return
+        end
         refundWithMessage(
           "[" .. self.getName() .. "] Pack fetch failed (HTTP " .. tostring(wr.response_code) .. "). XP refunded.",
           "Pack Refund (fetch error)"
@@ -4100,6 +4307,10 @@ function spawnParameterizedPack(query, count, refundCost, packName)
 
       local deck = firstDeckFromNDJSON(wr.text)
       if not deck then
+        if isOtagQuery then
+          requestRandomFallback("build_no_cards")
+          return
+        end
         refundWithMessage(
           "[" .. self.getName() .. "] Pack returned no cards. XP refunded.",
           "Pack Refund (no cards)"
@@ -4109,29 +4320,6 @@ function spawnParameterizedPack(query, count, refundCost, packName)
 
       spawnPackDeck(deck)
     end)
-  end
-
-  if isOtagQuery then
-    local wantedCount = tonumber(count or settings.cardsPerPack) or 15
-    local randomQuery = tostring(query):gsub("%+", " ")
-    local randomUrl = backendURL .. "/random?q=" .. randomQuery:gsub(" ", "+") .. "+" .. tostring(wantedCount)
-
-    WebRequest.custom(randomUrl, "GET", true, nil,
-      {['Accept-Language'] = 'en'},
-      function(wr)
-        if wr.is_error or not wr.text or wr.text == "" then
-          requestBuild()
-          return
-        end
-        local deck = deckFromRandomListResponse(wr.text)
-        if deck then
-          spawnPackDeck(deck)
-          return
-        end
-        requestBuild()
-      end
-    )
-    return
   end
 
   requestBuild()
@@ -4669,6 +4857,17 @@ function fetchSavedValue()
     isSyncEnabled = true
     return
   end
+
+  local function ensureStarterEssence()
+    if essence < 200 then
+      essence = 200
+      print("[" .. self.getName() .. "] New profile detected. Granted starter Essence: " .. essence)
+      refreshEssenceDisplay()
+      if currentScreen == "essence" then showEssenceScreen() end
+      notifyMasters()
+    end
+  end
+
   local url = WEB_URL .. "?playerKey=" .. ess_urlEncode(localPlayerKey)
 
   WebRequest.get(url, function(req)
@@ -4678,6 +4877,7 @@ function fetchSavedValue()
     end
 
     if req.text == nil or req.text == "" then
+      ensureStarterEssence()
       isSyncEnabled = true
       if localPlayerKey then sendData(true) end
       return
@@ -4686,6 +4886,18 @@ function fetchSavedValue()
     local ok, data = pcall(JSON.decode, req.text)
     if not ok then
       isSyncEnabled = true
+      return
+    end
+
+    local hasProfileData = false
+    if data.value ~= nil or data.achievements ~= nil or data.crypt ~= nil
+      or data.tickets ~= nil or data.brands ~= nil or data.captures ~= nil then
+      hasProfileData = true
+    end
+    if not hasProfileData then
+      ensureStarterEssence()
+      isSyncEnabled = true
+      if localPlayerKey then sendData(true) end
       return
     end
 
@@ -5344,7 +5556,8 @@ function renderGridCell(entry, tab)
     color = unlocked and GRID_COLOR_OWNED or GRID_COLOR_LOCKED
   end
 
-  if isBuffEquipped(entry.name or entry.id) then
+  -- Brands are purchase-only — never show the equipped colour for them.
+  if tab ~= "brands" and isBuffEquipped(entry.name or entry.id) then
     color = GRID_COLOR_EQUIPPED
   end
 
@@ -5383,6 +5596,11 @@ function previewEssenceSlot(slot, playerColor, altClick)
   local count = ess_getItemCount(entry)
 
   if altClick then
+    -- Brands are not equippable; alt-click goes straight to admin refund or is a no-op.
+    if essenceTab == "brands" then
+      if adminMode then adminRemoveItem(entry) end
+      return
+    end
     -- Unequip beats admin-remove and sell, so equipped items can always be freed.
     local equippedIdx = isBuffEquipped(name)
     if equippedIdx then
@@ -5407,17 +5625,8 @@ function previewEssenceSlot(slot, playerColor, altClick)
   end
 
   if essenceTab == "brands" then
-    if count > 0 then
-      local idx = isBuffEquipped(name)
-      if idx then
-        showPurchaseConfirm(entry, "brands")
-      else
-        equipBuff(entry, "brands")
-        showEssenceScreen()
-      end
-    else
-      showPurchaseConfirm(entry, "brands")
-    end
+    -- Brands are purchase-only; clicking always opens the buy/upgrade confirm screen.
+    showPurchaseConfirm(entry, "brands")
     return
   end
 
@@ -5680,22 +5889,107 @@ function click_essShopBack()
   showEssenceScreen()
 end
 
-function handleCapturePurchase(obj)
-  if not obj or obj == self then return end
+function buildCapturePayloadFromObjectData(data, fallbackName, fallbackUrl)
+  if type(data) ~= "table" then return nil, fallbackUrl or "" end
 
-  -- Guard against rapid double-drops landing after the screen has already changed.
-  if currentScreen ~= "capture_prompt" then return end
-
-  local name = ""
-  pcall(function() name = obj.getName() or "" end)
-  if name == "" then
-    broadcastToAll("[" .. self.getName() .. "] Couldn't read the capture name — try again.", {0.9, 0.3, 0.3})
-    essenceTab = "captures"
-    showEssenceScreen()
-    return
+  -- Best case: preserve the full Infinite Bag payload exactly enough for TTS
+  -- to respawn it as Custom_Model_Infinite_Bag with its contained card intact.
+  if data.Name == "Custom_Model_Infinite_Bag" and hasContainedCardPayload(data) then
+    local payload = JSON.decode(JSON.encode(data))
+    payload.GUID = ""
+    payload.Nickname = buildCaptureTicketName(fallbackName)
+    local faceUrl = extractCaptureFaceUrlFromPayload(payload)
+    if faceUrl == "" then faceUrl = fallbackUrl or "" end
+    payload.GMNotes = buildCaptureNotes(fallbackName, faceUrl)
+    if payload.CustomMesh and (not payload.CustomMesh.DiffuseURL or payload.CustomMesh.DiffuseURL == "") then
+      payload.CustomMesh.DiffuseURL = faceUrl
+    end
+    return payload, faceUrl
   end
 
-  -- Re-check essence so only one of two simultaneous drops can win the race.
+  -- If someone drops a single card instead of the ticket bag, keep enough card data
+  -- to rebuild a one-card Infinite Bag from it later.
+  if data.Name == "Card" and type(data.CustomDeck) == "table" then
+    local cardId = tonumber(data.CardID) or 100
+    local deckSlot = math.floor(cardId / 100)
+    if deckSlot < 1 then deckSlot = 1 end
+    local deckEntry = data.CustomDeck[tostring(deckSlot)] or data.CustomDeck[deckSlot]
+    if not deckEntry then
+      for _, entry in pairs(data.CustomDeck) do
+        if type(entry) == "table" then deckEntry = entry break end
+      end
+    end
+    if type(deckEntry) == "table" then
+      local faceUrl = tostring(deckEntry.FaceURL or fallbackUrl or "")
+      local cardPayload = {
+        _schema = "capture_payload_v2",
+        bagDiffuseURL = faceUrl,
+        card = {
+          nickname = data.Nickname or fallbackName or "",
+          description = data.Description or "",
+          gmNotes = data.GMNotes or "",
+          memo = data.Memo or "",
+          cardID = cardId,
+          deckSlot = deckSlot,
+          faceURL = faceUrl,
+          backURL = deckEntry.BackURL or CAPTURE_DEFAULT_BACK_URL,
+          numWidth = deckEntry.NumWidth or 1,
+          numHeight = deckEntry.NumHeight or 1,
+          backIsHidden = deckEntry.BackIsHidden ~= false,
+          uniqueBack = deckEntry.UniqueBack == true,
+          deckType = deckEntry.Type or 0,
+          hideWhenFaceDown = data.HideWhenFaceDown ~= false,
+          hands = data.Hands ~= false,
+          sideways = data.SidewaysCard == true,
+        }
+      }
+      if type(data.States) == "table" and type(data.States[2]) == "table" then
+        local st = data.States[2]
+        local stId = tonumber(st.CardID) or 200
+        local stSlot = math.floor(stId / 100)
+        if stSlot < 1 then stSlot = 2 end
+        local stDeck = st.CustomDeck and (st.CustomDeck[tostring(stSlot)] or st.CustomDeck[stSlot])
+        if not stDeck and type(st.CustomDeck) == "table" then
+          for _, entry in pairs(st.CustomDeck) do
+            if type(entry) == "table" then stDeck = entry break end
+          end
+        end
+        if type(stDeck) == "table" then
+          cardPayload.card.stateTwo = {
+            nickname = st.Nickname or "",
+            description = st.Description or "",
+            gmNotes = st.GMNotes or "",
+            memo = st.Memo or "",
+            cardID = stId,
+            deckSlot = stSlot,
+            faceURL = stDeck.FaceURL or "",
+            backURL = stDeck.BackURL or CAPTURE_DEFAULT_BACK_URL,
+            numWidth = stDeck.NumWidth or 1,
+            numHeight = stDeck.NumHeight or 1,
+            backIsHidden = stDeck.BackIsHidden ~= false,
+            uniqueBack = stDeck.UniqueBack == true,
+            deckType = stDeck.Type or 0,
+            hideWhenFaceDown = st.HideWhenFaceDown ~= false,
+            hands = st.Hands ~= false,
+            sideways = st.SidewaysCard == true,
+          }
+        end
+      end
+      return cardPayload, faceUrl
+    end
+  end
+
+  return nil, fallbackUrl or ""
+end
+
+function commitCapturePurchase(obj, name, captureUrl, bagData)
+  if captureUrl == "" then
+    pcall(function()
+      local co = obj.getCustomObject()
+      if co and co.diffuse and co.diffuse ~= "" then captureUrl = co.diffuse end
+    end)
+  end
+
   local price = getCapturePrice()
   if essence < price then
     broadcastToAll("[" .. self.getName() .. "] Not enough Essence! Need " .. price
@@ -5705,49 +5999,129 @@ function handleCapturePurchase(obj)
     return
   end
 
-  -- obj.getData() must NEVER be called on an infinite bag during drop events — it crashes TTS.
-  -- GMNotes layout written by buildCaptureNotes: "CAPTURE_TICKET\nname\nimageUrl".
-  local captureUrl = ""
-  pcall(function()
-    local notes = obj.getGMNotes() or ""
-    local lines = {}
-    for line in (notes .. "\n"):gmatch("([^\n]*)\n") do lines[#lines + 1] = line end
-    if #lines >= 3 and ess_trim(lines[1]) == "CAPTURE_TICKET" then
-      captureUrl = ess_trim(lines[3])
-    end
-  end)
-  if captureUrl == "" then
-    pcall(function()
-      local co = obj.getCustomObject()
-      if co and co.diffuse and co.diffuse ~= "" then captureUrl = co.diffuse end
-    end)
-  end
-
-  -- Deduct essence BEFORE touching essenceState so getCaptureCount() in the price
-  -- calculation above matches the pre-purchase count.
   applyEssenceDeltaTracked(-price, "Capture: " .. name)
 
   local id = ess_toId(name)
   essenceState.captures[id] = essenceState.captures[id] or {
     id = id, name = name, unlocked = true, count = 0,
     url = captureUrl,
+    desc = "Capture ticket for " .. name .. ".",
     unlock_time = os.date("!%Y-%m-%dT%H:%M:%SZ"),
   }
   if captureUrl ~= "" and (essenceState.captures[id].url or "") == "" then
     essenceState.captures[id].url = captureUrl
   end
+  if bagData then
+    essenceState.captures[id].bagData = bagData
+  end
   essenceState.captures[id].count = (essenceState.captures[id].count or 0) + 1
+  essenceState.captures[id].unlocked = true
   essenceState.captures[id].last_unlock_time = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
   ess_safeDestructObject(obj)
 
-  broadcastToAll("[" .. self.getName() .. "] Captured: " .. name
+  local modeText = bagData and " as Infinite Bag" or ""
+  broadcastToAll("[" .. self.getName() .. "] Captured: " .. name .. modeText
     .. "  (-" .. tostring(price) .. " Essence)", {0.7, 0.9, 0.7})
 
   essenceTab = "captures"
   requestSync(DEBOUNCE_SECONDS)
   notifyMasters()
   showEssenceScreen()
+end
+
+function finalizeCapturePurchase(obj, name, captureUrl)
+  -- We defer here because obj.getData() on an Infinite Bag during the drop event
+  -- can return only the bag shell. If that happens, consume one object from the
+  -- Infinite Bag and serialize the actual contained card instead.
+  local bagData = nil
+  local data = nil
+  local okData = pcall(function() data = obj.getData() end)
+  if okData and type(data) == "table" then
+    bagData, captureUrl = buildCapturePayloadFromObjectData(data, name, captureUrl)
+  end
+
+  local objName = ""
+  if type(data) == "table" then objName = tostring(data.Name or "") end
+
+  if not bagData and objName == "Custom_Model_Infinite_Bag" then
+    local takePos = self.positionToWorld({0, 2.5, 0})
+    local okTake = pcall(function()
+      obj.takeObject({
+        position = takePos,
+        smooth = false,
+        callback_function = function(cardObj)
+          Wait.frames(function()
+            local cardBagData = nil
+            local cardUrl = captureUrl or ""
+            local cardData = nil
+            local okCardData = pcall(function() cardData = cardObj.getData() end)
+            if okCardData and type(cardData) == "table" then
+              cardBagData, cardUrl = buildCapturePayloadFromObjectData(cardData, name, cardUrl)
+            end
+            if cardUrl == "" then
+              pcall(function()
+                local co = cardObj.getCustomObject()
+                if co and co.face and co.face ~= "" then cardUrl = co.face end
+                if co and co.diffuse and co.diffuse ~= "" then cardUrl = co.diffuse end
+              end)
+            end
+            ess_safeDestructObject(cardObj)
+            commitCapturePurchase(obj, name, cardUrl, cardBagData)
+          end, 2)
+        end,
+      })
+    end)
+    if okTake then return end
+  end
+
+  commitCapturePurchase(obj, name, captureUrl, bagData)
+end
+
+function handleCapturePurchase(obj)
+  if not obj or obj == self then return end
+
+  -- Guard against rapid double-drops landing after the screen has already changed.
+  if currentScreen ~= "capture_prompt" then return end
+
+  local rawDisplayName = ""
+  pcall(function() rawDisplayName = obj.getName() or "" end)
+
+  local name       = ""
+  local captureUrl = ""
+
+  pcall(function()
+    local notes = obj.getGMNotes() or ""
+    local lines = {}
+    for line in (notes .. "\n"):gmatch("([^\n]*)\n") do lines[#lines + 1] = line end
+    if #lines >= 1 and ess_trim(lines[1]) == CAPTURE_NOTE_PREFIX then
+      if #lines >= 2 then name       = ess_trim(lines[2]) end
+      if #lines >= 3 then captureUrl = ess_trim(lines[3]) end
+    end
+  end)
+
+  if name == "" then
+    name = ess_parseCaptureTicketName(rawDisplayName) or ""
+  end
+
+  if name == "" then
+    broadcastToAll("[" .. self.getName() .. "] That is not a Capture Ticket — drop a token whose name starts with \"" .. CAPTURE_TICKET_LABEL .. "\".", {0.9, 0.3, 0.3})
+    return
+  end
+
+  currentScreen = "capture_processing"
+  openScreen("capture_processing", nil, "Add Capture")
+  trackButton({
+    click_function = "xp_noop", function_owner = self,
+    label = "Capturing ticket...",
+    position = {0, 0.1, 0.0},
+    width = 1600, height = 260, font_size = 90,
+    color = {0.18, 0.18, 0.28}, font_color = {1, 1, 1},
+  })
+
+  Wait.frames(function()
+    finalizeCapturePurchase(obj, name, captureUrl)
+  end, 3)
 end
 
 function onCollisionEnter(info)
@@ -5951,7 +6325,7 @@ TREASURE_PIRATE_BAG_TEMPLATE = {
     MaterialIndex = -1, MeshIndex = -1,
     CustomMesh = {
         MeshURL = MESH_URL,
-        DiffuseURL = "https://cards.scryfall.io/large/front/8/6/861b5889-0183-4bee-afeb-a4b2aa700a8e.jpg?1689996018",
+        DiffuseURL = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F8%2F6%2F861b5889-0183-4bee-afeb-a4b2aa700a8e.jpg.jpg",
         NormalURL = "", ColliderURL = MESH_URL,
         Convex = true, MaterialIndex = 3, TypeIndex = 7,
         CustomShader = { SpecularColor = { r=0, g=0, b=0 }, SpecularIntensity=0, SpecularSharpness=2, FresnelStrength=0 },
@@ -5976,7 +6350,7 @@ TREASURE_PIRATE_BAG_TEMPLATE = {
             LuaScript = "", LuaScriptState = "", XmlUI = "",
             CustomDeck = {
                 ["74"] = {
-                    FaceURL = "https://cards.scryfall.io/normal/front/b/2/b29d7556-9051-4451-812e-91513ef10e62.jpg?432026",
+                    FaceURL = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2Fb%2F2%2Fb29d7556-9051-4451-812e-91513ef10e62.jpg%3F1699974379.jpg?6272026",
                     BackURL = CAPTURE_DEFAULT_BACK_URL,
                     NumWidth = 1, NumHeight = 1,
                     BackIsHidden = true, UniqueBack = false, Type = 0,
@@ -6001,7 +6375,7 @@ SOL_RING_TICKET_BAG_TEMPLATE = {
     MaterialIndex = -1, MeshIndex = -1,
     CustomMesh = {
         MeshURL = MESH_URL,
-        DiffuseURL = "https://cards.scryfall.io/normal/front/8/5/858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg",
+        DiffuseURL = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F8%2F5%2F858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg.jpg",
         NormalURL = "", ColliderURL = MESH_URL,
         Convex = true, MaterialIndex = 3, TypeIndex = 7,
         CustomShader = { SpecularColor = { r=0, g=0, b=0 }, SpecularIntensity=0, SpecularSharpness=2, FresnelStrength=0 },
@@ -6026,7 +6400,7 @@ SOL_RING_TICKET_BAG_TEMPLATE = {
             LuaScript = "", LuaScriptState = "", XmlUI = "",
             CustomDeck = {
                 ["558545"] = {
-                    FaceURL = "https://cards.scryfall.io/normal/front/8/5/858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg",
+                    FaceURL = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F8%2F5%2F858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg.jpg",
                     BackURL = CAPTURE_DEFAULT_BACK_URL,
                     NumWidth = 1, NumHeight = 1,
                     BackIsHidden = true, UniqueBack = false, Type = 0,
@@ -6051,7 +6425,7 @@ ARCANE_SIGNET_TICKET_BAG_TEMPLATE = {
     MaterialIndex = -1, MeshIndex = -1,
     CustomMesh = {
         MeshURL = MESH_URL,
-        DiffuseURL = "https://cards.scryfall.io/normal/front/1/f/1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg",
+        DiffuseURL = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F1%2Ff%2F1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg.jpg",
         NormalURL = "", ColliderURL = MESH_URL,
         Convex = true, MaterialIndex = 3, TypeIndex = 7,
         CustomShader = { SpecularColor = { r=0, g=0, b=0 }, SpecularIntensity=0, SpecularSharpness=2, FresnelStrength=0 },
@@ -6076,7 +6450,7 @@ ARCANE_SIGNET_TICKET_BAG_TEMPLATE = {
             LuaScript = "", LuaScriptState = "", XmlUI = "",
             CustomDeck = {
                 ["159"] = {
-                    FaceURL = "https://cards.scryfall.io/normal/front/1/f/1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg",
+                    FaceURL = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F1%2Ff%2F1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg.jpg",
                     BackURL = CAPTURE_DEFAULT_BACK_URL,
                     NumWidth = 1, NumHeight = 1,
                     BackIsHidden = true, UniqueBack = false, Type = 0,
@@ -6141,7 +6515,7 @@ SPAWN_IMAGES = {
     ["Color Combo Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F8%2F4%2F84238335-e08c-421c-b9b9-70a679ff2967.jpg.jpg",
     ["Emblem Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F3%2F2%2F327ddaaf-b6a7-4c80-9b38-5ab68181b3d6.jpg.jpg",
     ["Arcane Signet Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F1%2Ff%2F1fc6b109-4657-4e9e-82f3-53ddd56aef1c.jpg.jpg",
-    ["Sol Ring Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2Fe%2Fe%2Fee6e5a35-fe21-4dee-b0ef-a8f2841511ad.jpg.jpg",
+    ["Sol Ring Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F8%2F5%2F858e0b83-7927-4e34-ae25-6ad7a787ad97.jpg.jpg",
     ["Conspiracy Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2F1%2F6%2F167c6740-0625-4987-8fac-516aab564ca1.jpg.jpg",
     ["Trinket Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2Fa%2F5%2Fa53baf25-1782-427b-a9dd-fc9b8dc6444f.jpg.jpg",
     ["Leyline Ticket"] = "https://api.mtginfo.org/image-proxy/https%3A%2F%2Fcards.scryfall.io%2Fnormal%2Ffront%2Fb%2F6%2Fb6dc1f5a-a6cc-4ab4-8bb9-e216e24ca735.jpg.jpg",
