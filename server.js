@@ -22,6 +22,9 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_BACK = process.env.DEFAULT_CARD_BACK || 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/';
 const USE_BULK_DATA = process.env.USE_BULK_DATA === 'true';
 const VERBOSE_REQUEST_LOGS = process.env.VERBOSE_REQUEST_LOGS === 'true';
+const ARCHIDEKT_PRECON_SOURCE_URL = 'https://archidekt.com/commander-precons';
+const ARCHIDEKT_API_BASE_URL = 'https://archidekt.com/api';
+const ARCHIDEKT_USER_AGENT = 'MTGCardImporterTTS/0.1 (+https://github.com/)';
 const requestContext = new AsyncLocalStorage();
 const IMAGE_PROXY_CACHE_TTL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_TTL_MS || '86400000', 10) || 86400000, 60000);
 const IMAGE_PROXY_CACHE_MAX_SIZE = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_MAX_SIZE || '2000', 10) || 2000, 1);
@@ -883,6 +886,201 @@ function buildDeckCustomObject(ttsCards, hand) {
   });
 
   return deckObject;
+}
+
+function getArchidektRequestHeaders(accept = 'application/json') {
+  return {
+    Accept: accept,
+    'User-Agent': ARCHIDEKT_USER_AGENT,
+    Referer: ARCHIDEKT_PRECON_SOURCE_URL
+  };
+}
+
+function extractArchidektPreconSummaries(html) {
+  const summaries = [];
+  const seenIds = new Set();
+  const deckLinkPattern = /\/decks\/(\d+)\/([^"'\s<>]+)/g;
+  let match;
+
+  while ((match = deckLinkPattern.exec(html)) !== null) {
+    const id = match[1];
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    const slug = decodeURIComponent(match[2] || '').replace(/[_-]+/g, ' ').trim();
+    summaries.push({
+      id,
+      name: slug ? slug.replace(/\b\w/g, (letter) => letter.toUpperCase()) : `Archidekt deck ${id}`
+    });
+  }
+
+  return summaries;
+}
+
+async function fetchArchidektPreconSummaries() {
+  try {
+    const response = await axios.get(ARCHIDEKT_PRECON_SOURCE_URL, {
+      headers: getArchidektRequestHeaders('text/html,application/xhtml+xml'),
+      timeout: 20000
+    });
+    const summaries = extractArchidektPreconSummaries(String(response.data || ''));
+    if (summaries.length > 0) {
+      return summaries;
+    }
+
+    const error = new Error(`Archidekt commander precon page did not contain deck links: ${ARCHIDEKT_PRECON_SOURCE_URL}`);
+    error.status = 502;
+    throw error;
+  } catch (error) {
+    if (error.status) {
+      throw error;
+    }
+
+    const status = error.response?.status;
+    const wrapped = new Error(`Unable to load Archidekt commander precons from ${ARCHIDEKT_PRECON_SOURCE_URL}${status ? ` (${status})` : ''}: ${error.message}`);
+    wrapped.status = 502;
+    throw wrapped;
+  }
+}
+
+async function fetchArchidektDeck(deckId) {
+  try {
+    const response = await axios.get(`${ARCHIDEKT_API_BASE_URL}/decks/${encodeURIComponent(deckId)}/`, {
+      headers: getArchidektRequestHeaders(),
+      timeout: 30000
+    });
+    return response.data;
+  } catch (error) {
+    const status = error.response?.status;
+    const wrapped = new Error(`Unable to load Archidekt deck ${deckId}${status ? ` (${status})` : ''}: ${error.message}`);
+    wrapped.status = 502;
+    throw wrapped;
+  }
+}
+
+function extractArchidektDeckCards(deck) {
+  if (!Array.isArray(deck?.cards)) {
+    return [];
+  }
+
+  return deck.cards.map((entry) => {
+    const categories = Array.isArray(entry?.categories) ? entry.categories : [];
+    const categoryNames = categories.map((category) => String(category || '').toLowerCase());
+    const card = entry?.card || {};
+    const oracleCard = card.oracleCard || {};
+    const quantity = Number.parseInt(entry?.quantity ?? 1, 10);
+
+    return {
+      count: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+      name: oracleCard.name || card.displayName || card.name || '',
+      scryfallId: card.uid || card.scryfall_id || card.scryfallId || '',
+      oracleId: oracleCard.uid || card.oracle_id || card.oracleId || '',
+      set: card.edition?.editioncode || card.set || '',
+      collectorNumber: card.collectorNumber || card.collector_number || '',
+      commander: categoryNames.includes('commander'),
+      sideboard: categoryNames.includes('sideboard') || categoryNames.includes('maybeboard')
+    };
+  }).filter((entry) => entry.name || entry.scryfallId);
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(concurrency, 1), items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }));
+
+  return results;
+}
+
+async function resolvePreconCard(entry) {
+  if (USE_BULK_DATA && bulkData.isLoaded()) {
+    const bulkLookups = [
+      () => entry.scryfallId ? bulkData.getCardById(entry.scryfallId) : null,
+      () => entry.set && entry.collectorNumber ? bulkData.getCardBySetNumber(entry.set, entry.collectorNumber, 'en') : null,
+      () => entry.oracleId ? bulkData.getCardByOracleId(entry.oracleId) : null,
+      () => entry.name ? bulkData.getCardByName(entry.name, entry.set || null) : null,
+      () => entry.name ? bulkData.getCardByName(entry.name) : null,
+      () => entry.name ? bulkData.getCardByPartialName(entry.name, entry.set || null) : null,
+      () => entry.name ? bulkData.getCardByPartialName(entry.name) : null
+    ];
+
+    for (const lookup of bulkLookups) {
+      const bulkCard = lookup();
+      if (bulkCard) {
+        return bulkCard;
+      }
+    }
+  }
+
+  if (entry.scryfallId) {
+    return scryfallLib.getCardById(entry.scryfallId);
+  }
+
+  return scryfallLib.getCard(entry.name);
+}
+
+async function buildArchidektPreconDeckObject(deck, cardBack, hand) {
+  const entries = extractArchidektDeckCards(deck);
+  if (entries.length === 0) {
+    const error = new Error('Archidekt deck did not contain any importable cards.');
+    error.status = 502;
+    throw error;
+  }
+
+  const ttsCards = [];
+  const warnings = [];
+
+  const resolvedEntries = await mapWithConcurrency(entries, 8, async (entry) => {
+    try {
+      return {
+        entry,
+        card: await hydrateCardForTts(await resolvePreconCard(entry))
+      };
+    } catch (error) {
+      return {
+        entry,
+        warning: `Skipped ${entry.name || entry.scryfallId}: ${error.message}`
+      };
+    }
+  });
+
+  for (const resolved of resolvedEntries) {
+    if (resolved.warning) {
+      warnings.push(resolved.warning);
+      continue;
+    }
+
+    const { entry, card } = resolved;
+
+    for (let i = 0; i < entry.count; i += 1) {
+      try {
+        ttsCards.push(scryfallLib.convertToTTSCard(card, cardBack));
+      } catch (error) {
+        warnings.push(`Skipped ${entry.name || entry.scryfallId}: ${error.message}`);
+      }
+    }
+  }
+
+  if (ttsCards.length === 0) {
+    const error = new Error('No cards from the selected Archidekt precon had usable image data.');
+    error.status = 502;
+    throw error;
+  }
+
+  const deckObject = buildDeckCustomObject(ttsCards, hand || null);
+  deckObject.Nickname = deck?.name || 'Archidekt Commander Precon';
+  deckObject.Description = `Source: ${ARCHIDEKT_PRECON_SOURCE_URL}`;
+
+  return { deckObject, warnings };
 }
 
 // Security: Validate card back URL is from allowed domains
@@ -2491,6 +2689,46 @@ app.get('/cards/:set/:number/:lang?', async (req, res) => {
     res.json(sanitizeCardForResponse(scryfallCard));
   } catch (error) {
     console.error('Error fetching card by set/number:', error.message);
+    const { status, details } = normalizeError(error, 502);
+    res.status(status).json({ object: 'error', details });
+  }
+});
+
+ /**
+  * GET /precons/random
+ * Picks a random public Commander precon from Archidekt's commander-precons page
+ * and returns one DeckCustom NDJSON object for TTS spawning.
+ */
+app.get('/precons/random', randomLimiter, async (req, res) => {
+  try {
+    const cardBack = req.query.back || DEFAULT_BACK;
+    if (!isValidCardBackURL(cardBack)) {
+      return res.status(400).json({
+        object: 'error',
+        details: 'Invalid card back URL. Only Steam CDN and Imgur URLs are allowed.'
+      });
+    }
+
+    if (parseBooleanLike(String(req.query.forceApi)) === true) {
+      markCurrentRequestLiveApiAllowed();
+    }
+
+    const summaries = await fetchArchidektPreconSummaries();
+    const selected = summaries[Math.floor(Math.random() * summaries.length)];
+    const deck = await fetchArchidektDeck(selected.id);
+    const { deckObject, warnings } = await buildArchidektPreconDeckObject(deck, cardBack, null);
+
+    deckObject.Nickname = deckObject.Nickname || selected.name || 'Archidekt Commander Precon';
+    deckObject.Description = [
+      deckObject.Description,
+      `Deck: https://archidekt.com/decks/${selected.id}`
+    ].filter(Boolean).join('\n');
+
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    const warningLines = warnings.slice(0, 10).map((warning) => JSON.stringify({ object: 'warning', warning }));
+    res.send(`${warningLines.length ? `${warningLines.join('\n')}\n` : ''}${JSON.stringify(deckObject)}\n`);
+  } catch (error) {
+    console.error('Error building Archidekt precon:', error.message);
     const { status, details } = normalizeError(error, 502);
     res.status(status).json({ object: 'error', details });
   }

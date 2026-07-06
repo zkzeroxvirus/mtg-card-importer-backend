@@ -919,6 +919,19 @@ function getDeckDat(urlTable, boosterN)
   local function finalizeDeckDat()
     if finalized then return end
     finalized = true
+    local doubles = false
+    local namesSeen = {}
+    for _, card in pairs(deckDat.ContainedObjects) do
+      local cardName = card and card.Nickname
+      if cardName then
+        if namesSeen[cardName] then
+          doubles = true
+          break
+        end
+        namesSeen[cardName] = true
+      end
+    end
+
     local newObjects, newIDs = {}, {}
     for i = 1, #urlTable do
       if deckDat.ContainedObjects[i] then
@@ -928,7 +941,11 @@ function getDeckDat(urlTable, boosterN)
     end
     deckDat.ContainedObjects = newObjects
     deckDat.DeckIDs = newIDs
-    boosterDecks[boosterN] = deckDat
+    if doubles then
+      getDeckDat(urlTable, boosterN)
+    else
+      boosterDecks[boosterN] = deckDat
+    end
   end
   Wait.condition(finalizeDeckDat, function() return nLoading == nLoaded end)
   Wait.time(function()

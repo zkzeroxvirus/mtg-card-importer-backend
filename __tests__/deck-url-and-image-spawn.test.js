@@ -11,7 +11,9 @@ jest.mock('axios', () => ({
 jest.mock('../lib/bulk-data', () => ({
   isLoaded: jest.fn(() => false),
   getCardByName: jest.fn(),
+  getCardByPartialName: jest.fn(),
   getCardById: jest.fn(),
+  getCardByOracleId: jest.fn(),
   getCardBySetNumber: jest.fn(),
   getRandomCards: jest.fn(),
   getStats: jest.fn(() => ({ loaded: false, cardCount: 0 }))
@@ -44,8 +46,24 @@ describe('Deck URL imports removal and image spawning', () => {
       name: 'Island',
       image_uris: { normal: 'https://cards.scryfall.io/normal/front/1/1/test.jpg' }
     });
+    scryfallLib.getCardById.mockResolvedValue({
+      id: 'sf-island',
+      name: 'Island',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/1/1/test.jpg' }
+    });
     scryfallLib.parseDecklist.mockReturnValue([{ count: 1, name: 'Island' }]);
-    scryfallLib.convertToTTSCard.mockReturnValue({ Name: 'Card', Nickname: 'Island' });
+    scryfallLib.convertToTTSCard.mockReturnValue({
+      Name: 'Card',
+      Nickname: 'Island',
+      CustomDeck: {
+        1: {
+          FaceURL: 'https://cards.scryfall.io/normal/front/1/1/test.jpg',
+          BackURL: process.env.DEFAULT_CARD_BACK,
+          NumWidth: 1,
+          NumHeight: 1
+        }
+      }
+    });
   });
 
   test('GET /card/:name supports direct image URL spawning', async () => {
@@ -100,5 +118,70 @@ describe('Deck URL imports removal and image spawning', () => {
 
     expect(response.status).toBe(410);
     expect(response.body.details).toContain('removed');
+  });
+
+  test('GET /precons/random builds a DeckCustom from the Archidekt commander precon source', async () => {
+    axios.get
+      .mockResolvedValueOnce({
+        data: '<a href="/decks/23426916/mock_precon">Mock Precon</a>'
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: 23426916,
+          name: 'Mock Precon',
+          cards: [
+            {
+              quantity: 1,
+              categories: ['Commander'],
+              card: {
+                uid: 'sf-island',
+                oracleCard: {
+                  name: 'Island'
+                }
+              }
+            }
+          ]
+        }
+      });
+
+    const response = await request(app).get('/precons/random');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('application/x-ndjson');
+
+    const lines = response.text.trim().split(/\r?\n/);
+    const deck = JSON.parse(lines[lines.length - 1]);
+    expect(deck.Name).toBe('DeckCustom');
+    expect(deck.Nickname).toBe('Mock Precon');
+    expect(deck.Description).toContain('https://archidekt.com/commander-precons');
+    expect(deck.Description).toContain('https://archidekt.com/decks/23426916');
+    expect(deck.ContainedObjects).toHaveLength(1);
+    expect(scryfallLib.getCardById).toHaveBeenCalledWith('sf-island');
+  });
+
+  test('GET /precons/random reports the configured Archidekt source when list loading fails', async () => {
+    axios.get.mockRejectedValue(new Error('network down'));
+
+    const response = await request(app).get('/precons/random');
+
+    expect(response.status).toBe(502);
+    expect(response.body.details).toContain('https://archidekt.com/commander-precons');
+  });
+
+  test('GET /precons/random requests Archidekt without browser cookies', async () => {
+    axios.get.mockRejectedValue(new Error('stop after first request'));
+
+    await request(app).get('/precons/random');
+
+    expect(axios.get).toHaveBeenCalledWith(
+      'https://archidekt.com/commander-precons',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: 'text/html,application/xhtml+xml',
+          'User-Agent': expect.stringContaining('MTGCardImporterTTS')
+        })
+      })
+    );
+    expect(axios.get.mock.calls[0][1].headers).not.toHaveProperty('Cookie');
   });
 });
