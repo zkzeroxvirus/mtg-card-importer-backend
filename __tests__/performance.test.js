@@ -1,5 +1,47 @@
 /* global it */
 const request = require('supertest');
+
+process.env.NODE_ENV = 'test';
+process.env.USE_BULK_DATA = 'false';
+
+jest.mock('../lib/scryfall', () => ({
+  getCard: jest.fn(async (name) => ({
+    object: 'card',
+    id: `mock-${String(name).toLowerCase().replace(/\s+/g, '-')}`,
+    oracle_id: `oracle-${String(name).toLowerCase().replace(/\s+/g, '-')}`,
+    name,
+    lang: 'en',
+    layout: 'normal',
+    mana_cost: '{R}',
+    cmc: 1,
+    type_line: 'Instant',
+    oracle_text: 'Mock card text.',
+    colors: ['R'],
+    color_identity: ['R'],
+    legalities: {},
+    prices: {},
+    set: 'tst',
+    set_name: 'Test Set',
+    collector_number: '1',
+    rarity: 'common',
+    artist: 'Test Artist',
+    released_at: '2026-01-01',
+    image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+    games: ['paper']
+  })),
+  autocompleteCardName: jest.fn(() => []),
+  getCardById: jest.fn(),
+  getCardBySetNumber: jest.fn(),
+  searchCards: jest.fn(async () => []),
+  getRandomCard: jest.fn(),
+  getSet: jest.fn(),
+  getCardRulings: jest.fn(),
+  getPrintings: jest.fn(),
+  proxyUri: jest.fn(),
+  parseDecklist: jest.fn(),
+  convertToTTSCard: jest.fn()
+}));
+
 const app = require('../server');
 
 describe('Performance and Monitoring Endpoints', () => {

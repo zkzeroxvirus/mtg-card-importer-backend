@@ -8,6 +8,8 @@ jest.mock('axios');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { Readable } = require('stream');
+const zlib = require('zlib');
 const bulkData = require('../lib/bulk-data');
 
 describe('Bulk Data - Download Retry Logic', () => {
@@ -167,6 +169,219 @@ describe('Bulk Data - Streaming Decompression', () => {
     // Documents error handling requirement during decompression
     const shouldHandleErrors = true;
     expect(shouldHandleErrors).toBe(true);
+  });
+
+  test('should parse gzip JSONL bulk files', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const filePath = path.join(tempDir, 'jsonl.json.gz');
+    const cards = [
+      { id: '1', name: 'Card One' },
+      { id: '2', name: 'Card Two' }
+    ];
+    const jsonl = cards.map(JSON.stringify).join('\n') + '\n';
+    fs.writeFileSync(filePath, zlib.gzipSync(Buffer.from(jsonl, 'utf8')));
+
+    try {
+      const parsed = await bulkData.parseGzipBulkFile(filePath);
+      expect(parsed).toEqual(cards);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('should parse gzipped JSON array bulk files', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const filePath = path.join(tempDir, 'array.json.gz');
+    const cards = [
+      { id: '3', name: 'Card Three' },
+      { id: '4', name: 'Card Four' }
+    ];
+    const json = JSON.stringify(cards);
+    fs.writeFileSync(filePath, zlib.gzipSync(Buffer.from(json, 'utf8')));
+
+    try {
+      const parsed = await bulkData.parseGzipBulkFile(filePath);
+      expect(parsed).toEqual(cards);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('should cache streamed JSONL downloads as gzip files', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const cards = [
+      { id: 'jsonl-1', name: 'Streamed One' },
+      { id: 'jsonl-2', name: 'Streamed Two' }
+    ];
+    const jsonl = `${cards.map(JSON.stringify).join('\n')}\n`;
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      jest.resetModules();
+      let isolatedBulkData;
+      let isolatedAxios;
+      jest.isolateModules(() => {
+        isolatedAxios = require('axios');
+        isolatedAxios.get.mockReset();
+        isolatedAxios.get.mockImplementation((url) => {
+          if (String(url).includes('/bulk-data/')) {
+            return Promise.resolve({
+              data: {
+                jsonl_download_uri: 'https://data.scryfall.test/default-cards.jsonl',
+                size: Buffer.byteLength(jsonl),
+                updated_at: '2026-07-02T00:00:00Z'
+              }
+            });
+          }
+
+          return Promise.resolve({
+            data: Readable.from([Buffer.from(jsonl, 'utf8')]),
+            headers: { 'content-type': 'application/x-ndjson' },
+            config: { url }
+          });
+        });
+        isolatedBulkData = require('../lib/bulk-data');
+      });
+
+      await isolatedBulkData.downloadBulkData();
+
+      expect(fs.existsSync(cardFile)).toBe(true);
+      expect(isolatedAxios.get.mock.calls[1][1]).toMatchObject({
+        responseType: 'stream',
+        decompress: false
+      });
+      await expect(isolatedBulkData.parseGzipBulkFile(cardFile)).resolves.toEqual(cards);
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('should skip download when manifest matches Scryfall metadata', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const manifestFile = `${cardFile}.manifest.json`;
+    const downloadUri = 'https://data.scryfall.test/default-cards.jsonl';
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+
+      fs.writeFileSync(cardFile, zlib.gzipSync(Buffer.from('[]', 'utf8')));
+      fs.writeFileSync(manifestFile, JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: '2026-07-02T00:00:00Z',
+        size: 2,
+        selectedDownloadUri: downloadUri,
+        sourceFormat: 'streaming JSONL'
+      }));
+
+      jest.resetModules();
+      let isolatedBulkData;
+      let isolatedAxios;
+      jest.isolateModules(() => {
+        isolatedAxios = require('axios');
+        isolatedAxios.get.mockReset();
+        isolatedAxios.get.mockResolvedValue({
+          data: {
+            jsonl_download_uri: downloadUri,
+            size: 2,
+            updated_at: '2026-07-02T00:00:00Z'
+          }
+        });
+        isolatedBulkData = require('../lib/bulk-data');
+      });
+
+      await isolatedBulkData.downloadBulkData();
+
+      expect(isolatedAxios.get).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('should restore previous in-memory data when reload fails', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-data-'));
+    const cardBasename = 'oracle_cards';
+    const cardFile = path.join(tempDir, `${cardBasename}.json.gz`);
+    const originalCard = {
+      id: 'safe-card',
+      oracle_id: 'safe-oracle',
+      name: 'Safe Card',
+      lang: 'en',
+      set: 'tst',
+      collector_number: '1',
+      type_line: 'Creature',
+      games: ['paper']
+    };
+    const originalEnv = { ...process.env };
+
+    try {
+      process.env.BULK_DATA_PATH = tempDir;
+      process.env.BULK_DATA_TYPE = cardBasename;
+      process.env.BULK_INCLUDE_RULINGS = 'false';
+      fs.writeFileSync(cardFile, zlib.gzipSync(Buffer.from(JSON.stringify([originalCard]), 'utf8')));
+
+      jest.resetModules();
+      let isolatedBulkData;
+      let isolatedAxios;
+      jest.isolateModules(() => {
+        isolatedAxios = require('axios');
+        isolatedAxios.get.mockReset();
+        isolatedAxios.get.mockImplementation((url) => {
+          if (String(url).includes('/bulk-data/')) {
+            return Promise.resolve({
+              data: {
+                jsonl_download_uri: 'https://data.scryfall.test/bad.jsonl',
+                size: 9,
+                updated_at: '2026-07-03T00:00:00Z'
+              }
+            });
+          }
+
+          return Promise.resolve({
+            data: Readable.from([Buffer.from('not-json\n', 'utf8')]),
+            headers: { 'content-type': 'application/x-ndjson' },
+            config: { url }
+          });
+        });
+        isolatedBulkData = require('../lib/bulk-data');
+      });
+
+      await isolatedBulkData.loadBulkData();
+      await expect(isolatedBulkData.reloadBulkData({ forceDownload: true })).rejects.toThrow();
+
+      expect(isolatedBulkData.isLoaded()).toBe(true);
+      expect(isolatedBulkData.getCardById('safe-card').name).toBe('Safe Card');
+    } finally {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key];
+        }
+      });
+      Object.assign(process.env, originalEnv);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

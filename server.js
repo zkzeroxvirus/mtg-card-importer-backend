@@ -13,6 +13,7 @@ const scryfallLib = require('./lib/scryfall');
 const bulkData = require('./lib/bulk-data');
 const tagCache = require('./lib/tag-cache');
 const oracleTags = require('./lib/oracle-tags');
+const { isStandaloneNonGameplayCard } = require('./lib/card-filters');
 
 const app = express();
 
@@ -26,6 +27,7 @@ const IMAGE_PROXY_CACHE_TTL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE
 const IMAGE_PROXY_CACHE_MAX_SIZE = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_MAX_SIZE || '2000', 10) || 2000, 1);
 const IMAGE_PROXY_CACHE_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_CACHE_MAX_BYTES || '536870912', 10) || 536870912, 1048576);
 const IMAGE_PROXY_TIMEOUT_MS = Math.max(parseInt(process.env.IMAGE_PROXY_TIMEOUT_MS || '15000', 10) || 15000, 1000);
+const RELATED_PART_RESOLVE_TIMEOUT_MS = Math.max(parseInt(process.env.RELATED_PART_RESOLVE_TIMEOUT_MS || '5000', 10) || 5000, 1000);
 const IMAGE_PROXY_CACHE_DIR = String(process.env.IMAGE_PROXY_CACHE_DIR || path.join(process.cwd(), 'data', 'image-cache')).trim();
 const IMAGE_PROXY_DISK_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_MAX_BYTES || '5368709120', 10) || 5368709120, 10485760);
 const IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS || '300000', 10) || 300000, 10000);
@@ -77,20 +79,6 @@ function isProxyableScryfallImageUrl(urlString) {
   return ALLOWED_IMAGE_PROXY_HOSTS.has(urlObj.hostname.toLowerCase());
 }
 
-function buildImageProxyUrl(urlString) {
-  if (!isProxyableScryfallImageUrl(urlString)) {
-    return urlString;
-  }
-
-  const normalized = urlString.trim();
-  const origin = getCurrentRequestOrigin();
-  if (!origin) {
-    return normalized;
-  }
-
-  return `${origin}/image-proxy/${encodeURIComponent(normalized)}.${getProxyImageExtension(normalized)}`;
-}
-
 function getProxyImageExtension(urlString) {
   try {
     const parsedUrl = new URL(String(urlString || '').trim());
@@ -114,6 +102,36 @@ function getProxyImageExtension(urlString) {
   return 'jpg';
 }
 
+function getProxyImageFileName(urlString) {
+  try {
+    const parsedUrl = new URL(String(urlString || '').trim());
+    const pathname = parsedUrl.pathname || '';
+    const segments = pathname.split('/');
+    return segments[segments.length - 1] || '';
+  } catch {
+    return '';
+  }
+}
+
+function buildImageProxyUrl(urlString) {
+  if (!isProxyableScryfallImageUrl(urlString)) {
+    return urlString;
+  }
+
+  const normalized = urlString.trim();
+  const origin = getCurrentRequestOrigin();
+  if (!origin) {
+    return normalized;
+  }
+
+  const fileName = getProxyImageFileName(normalized);
+  if (fileName && /\.[a-z0-9]+$/i.test(fileName)) {
+    return `${origin}/image-proxy/${fileName}`;
+  }
+
+  return `${origin}/image-proxy/${encodeURIComponent(normalized)}.${getProxyImageExtension(normalized)}`;
+}
+
 function getImageProxyRequestSource(req) {
   const queryUrl = String(req.query.url || '').trim();
   if (queryUrl) {
@@ -125,12 +143,29 @@ function getImageProxyRequestSource(req) {
     return '';
   }
 
-  const withoutExt = encodedPath.replace(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i, '');
+  const pathWithoutQuery = encodedPath.replace(/[?#].*$/, '');
+  const extensionMatch = pathWithoutQuery.match(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i);
+  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : 'jpg';
+  const withoutExt = pathWithoutQuery.replace(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i, '');
+
+  let decoded;
   try {
-    return decodeURIComponent(withoutExt);
+    decoded = decodeURIComponent(withoutExt);
   } catch {
     return '';
   }
+
+  if (isProxyableScryfallImageUrl(decoded)) {
+    return decoded;
+  }
+
+  const fileName = decoded.replace(/^.*[/]/, '');
+  if (/^[A-Za-z0-9._~-]+$/.test(fileName) && fileName.length >= 2) {
+    const ext = extension === 'jpeg' ? 'jpg' : extension;
+    return `https://cards.scryfall.io/normal/front/${fileName.charAt(0)}/${fileName.charAt(1)}/${fileName}.${ext}`;
+  }
+
+  return '';
 }
 
 function rewriteImageUriMap(imageUris) {
@@ -2318,6 +2353,13 @@ app.get('/card/:name', async (req, res) => {
     }
 
     // Preserve full all_parts to match Scryfall API behavior
+
+    if (isStandaloneNonGameplayCard(scryfallCard)) {
+      return res.status(404).json({
+        object: 'error',
+        details: `Card not found or not gameplay-usable: ${lookupName}`
+      });
+    }
     
     if (requestEnforceCommander && scryfallCard && !shouldBypassCommanderForCard(scryfallCard)) {
       const commanderLegality = scryfallCard.legalities && scryfallCard.legalities.commander;
@@ -3494,9 +3536,11 @@ app.get('/related', async (req, res) => {
       if (!resolvedCard) {
         resolvedCard = getBulkCardFromUri(part.uri);
       }
-      if (!resolvedCard && (forceApi || !isStrictBulkModeEnabled())) {
+      const canLiveResolveRelatedPart = forceApi || !isStrictBulkModeEnabled() || resolveCards;
+      if (!resolvedCard && canLiveResolveRelatedPart) {
         try {
-          resolvedCard = await scryfallLib.proxyUri(part.uri);
+          markCurrentRequestLiveApiAllowed();
+          resolvedCard = await scryfallLib.proxyUri(part.uri, { timeout: RELATED_PART_RESOLVE_TIMEOUT_MS });
         } catch (resolveError) {
           console.warn(`[Related] Failed to resolve part URI ${part.uri}: ${resolveError.message}`);
           continue;
@@ -3604,8 +3648,7 @@ app.post('/bulk/reload', async (req, res) => {
     }
     
     console.log('[API] Manual bulk data reload requested');
-    await bulkData.downloadBulkData();
-    await bulkData.loadBulkData();
+    await bulkData.reloadBulkData({ keepOldOnFailure: true });
     await oracleTags.loadOracleTags({ forceRefresh: true });
     
     res.json({

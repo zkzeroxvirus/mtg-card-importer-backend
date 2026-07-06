@@ -124,8 +124,16 @@ describe('Scryfall API - Error Handling', () => {
     const result = await localScryfall.searchCards('test', 3);
 
     expect(getMock).toHaveBeenCalledTimes(2);
-    expect(getMock).toHaveBeenNthCalledWith(1, '/cards/search?q=test&unique=cards');
-    expect(getMock).toHaveBeenNthCalledWith(2, '/cards/search?page=2&q=test');
+    expect(getMock).toHaveBeenNthCalledWith(
+      1,
+      '/cards/search?q=test&unique=cards',
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
+    expect(getMock).toHaveBeenNthCalledWith(
+      2,
+      '/cards/search?page=2&q=test',
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
     expect(result).toEqual([{ id: 'card-1' }, { id: 'card-2' }, { id: 'card-3' }]);
   });
 

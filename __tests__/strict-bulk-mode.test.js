@@ -136,7 +136,7 @@ describe('Strict bulk mode live API fallback behavior', () => {
     expect(scryfallLib.getCard).not.toHaveBeenCalled();
   });
 
-  test('GET /related resolve=cards should skip unresolved proxy lookups in strict bulk mode without forceApi', async () => {
+  test('GET /related resolve=cards should live-resolve unresolved token parts in strict bulk mode without forceApi', async () => {
     const sourceCard = {
       ...createCard('Source Card'),
       id: 'source-id',
@@ -155,15 +155,24 @@ describe('Strict bulk mode live API fallback behavior', () => {
     bulkData.getCardByName.mockReturnValueOnce(sourceCard);
     bulkData.getAllPartsById.mockReturnValueOnce([relatedPart]);
     bulkData.getCardById.mockReturnValueOnce(null);
+    scryfallLib.proxyUri.mockResolvedValueOnce({
+      ...createCard('Token Part'),
+      id: 'token-id',
+      layout: 'token',
+      type_line: 'Token Creature',
+      image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/token.jpg' }
+    });
 
     const response = await request(app)
       .get('/related')
-      .query({ name: 'Source Card', resolve: 'cards' });
+      .query({ name: 'Source Card', resolve: 'cards', compact: 'spawn' });
 
     expect(response.status).toBe(200);
     expect(Array.isArray(response.body.data)).toBe(true);
-    expect(response.body.data).toHaveLength(0);
-    expect(scryfallLib.proxyUri).not.toHaveBeenCalled();
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].name).toBe('Token Part');
+    expect(response.body.data[0].image_uris.normal).toContain('/image-proxy/');
+    expect(scryfallLib.proxyUri).toHaveBeenCalledWith('https://api.scryfall.com/cards/token-id', { timeout: 5000 });
   });
 
   test('GET /related should allow live source lookup when forceApi=true', async () => {

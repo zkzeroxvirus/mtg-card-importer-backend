@@ -5,7 +5,8 @@ module.exports = [
     ignores: [
       'node_modules/**',
       'coverage/**',
-      'data/**'
+      'data/**',
+      'MTG-TOOLS/**'
     ]
   },
   js.configs.recommended,

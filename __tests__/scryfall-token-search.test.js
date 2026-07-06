@@ -22,6 +22,9 @@ describe('Scryfall API - Token Search Query', () => {
       unique: 'cards'
     });
 
-    expect(getMock).toHaveBeenCalledWith(`/cards/search?${expectedParams.toString()}`);
+    expect(getMock).toHaveBeenCalledWith(
+      `/cards/search?${expectedParams.toString()}`,
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
   });
 });

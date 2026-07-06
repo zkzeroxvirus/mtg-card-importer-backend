@@ -121,6 +121,49 @@ describe('Token card lookup', () => {
     expect(scryfallLib.getCard).toHaveBeenCalledWith('treasure nabber', undefined);
   });
 
+  test('should reject standalone non-gameplay card results from generic lookup', async () => {
+    scryfallLib.searchCards.mockResolvedValue([]);
+    scryfallLib.getCard.mockResolvedValue({
+      object: 'card',
+      name: 'Storm Counter',
+      type_line: 'Card',
+      layout: 'normal',
+      oracle_text: '',
+      legalities: {
+        commander: 'not_legal',
+        modern: 'not_legal'
+      }
+    });
+
+    const response = await request(app).get('/card/storm%20counter');
+
+    expect(response.status).toBe(404);
+    expect(response.body.details).toContain('not gameplay-usable');
+    expect(scryfallLib.getCard).toHaveBeenCalledWith('storm counter', undefined);
+  });
+
+  test('should allow legal poster cards from generic lookup', async () => {
+    scryfallLib.searchCards.mockResolvedValue([]);
+    scryfallLib.getCard.mockResolvedValue({
+      object: 'card',
+      name: 'Aether Vial',
+      type_line: 'Artifact',
+      layout: 'normal',
+      set_type: 'box',
+      promo_types: ['poster'],
+      oracle_text: 'At the beginning of your upkeep, you may put a charge counter on this artifact.',
+      legalities: {
+        modern: 'legal',
+        commander: 'legal'
+      }
+    });
+
+    const response = await request(app).get('/card/aether%20vial');
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe('Aether Vial');
+  });
+
   test('should bypass commander legality checks for token lookup when enforceCommander=true', async () => {
     scryfallLib.searchCards.mockResolvedValue([
       {
