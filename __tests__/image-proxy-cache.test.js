@@ -122,4 +122,24 @@ describe('Image Proxy Persistent Cache', () => {
     expect(response.body.toString('utf8')).toBe('repaired-image-bytes');
     expect(axios.get).toHaveBeenCalledWith(normalImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
   });
+
+  test('should proxy Scryfall-like image paths under the image proxy base', async () => {
+    const normalImageUrl = 'https://cards.scryfall.io/normal/front/a/4/a4e86622-6f30-41b2-87d0-d345110e2387.jpg?12345';
+
+    axios.get.mockResolvedValueOnce({
+      data: Buffer.from('path-style-image-bytes'),
+      headers: {
+        'content-type': 'image/jpeg',
+        'last-modified': 'Mon, 01 Jan 2024 00:00:00 GMT'
+      }
+    });
+
+    const app = require('../server');
+    const response = await request(app)
+      .get('/image-proxy/normal/front/a/4/a4e86622-6f30-41b2-87d0-d345110e2387.jpg?12345');
+
+    expect(response.status).toBe(200);
+    expect(response.body.toString('utf8')).toBe('path-style-image-bytes');
+    expect(axios.get).toHaveBeenCalledWith(normalImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
+  });
 });

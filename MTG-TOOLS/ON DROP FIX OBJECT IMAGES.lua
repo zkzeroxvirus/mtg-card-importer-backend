@@ -83,16 +83,6 @@ local function isScryfallImageURL(url)
   return type(url) == "string" and url:find("^https?://cards%.scryfall%.io/") ~= nil
 end
 
-local function urlEncode(s)
-  if type(s) ~= "string" then
-    return ""
-  end
-
-  return (s:gsub("([^%w%-_%.~])", function(c)
-    return string.format("%%%02X", string.byte(c))
-  end))
-end
-
 local function urlDecode(s)
   if type(s) ~= "string" then
     return ""
@@ -105,16 +95,6 @@ local function urlDecode(s)
     end
     return string.format("%%%s", hex)
   end))
-end
-
-local function stripQueryAndHash(url)
-  if type(url) ~= "string" then
-    return ""
-  end
-
-  local trimmed = url:gsub("#.*$", "")
-  trimmed = trimmed:gsub("%?.*$", "")
-  return trimmed
 end
 
 local function stripProxyPathSuffix(url)
@@ -133,23 +113,13 @@ local function stripProxyPathSuffix(url)
   return url
 end
 
-local function getProxyFileExtension(url)
-  local pathOnly = stripQueryAndHash(url)
-  local ext = pathOnly:match("%.([A-Za-z0-9]+)$")
-  if not ext then
-    return "jpg"
+local function getScryfallImageProxyPath(url)
+  if type(url) ~= "string" then
+    return nil
   end
 
-  ext = string.lower(ext)
-  if ext == "jpeg" then
-    return "jpg"
-  end
-
-  if ext == "jpg" or ext == "png" or ext == "webp" or ext == "webm" or ext == "mp4" then
-    return ext
-  end
-
-  return "jpg"
+  local pathAndQuery = url:match("^https?://cards%.scryfall%.io(/.+)$")
+  return pathAndQuery
 end
 
 local function normalizeWeservSource(url)
@@ -268,8 +238,12 @@ local function proxyImageURL(url)
     return url
   end
 
-  local ext = getProxyFileExtension(sourceUrl)
-  return IMAGE_PROXY_BASE .. "/" .. urlEncode(sourceUrl) .. "." .. ext
+  local pathAndQuery = getScryfallImageProxyPath(sourceUrl)
+  if not pathAndQuery then
+    return url
+  end
+
+  return IMAGE_PROXY_BASE .. pathAndQuery
 end
 
 local function rewriteCustomDeck(customDeck, changed)

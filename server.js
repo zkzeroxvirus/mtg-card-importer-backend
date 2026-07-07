@@ -38,7 +38,6 @@ const IMAGE_PROXY_DISK_CLEANUP_TARGET_RATIO = 0.9;
 const IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS || '60000', 10) || 60000, 10000);
 const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS || '600000', 10) || 600000, 10000);
 const ALLOWED_IMAGE_PROXY_HOSTS = new Set(['cards.scryfall.io']);
-const TTS_SUPPORTED_IMAGE_PROXY_EXTENSIONS = new Set(['jpg', 'png', 'webp', 'webm', 'mp4']);
 const imageProxyCache = new Map();
 const imageProxyFailureCache = new Map();
 const imageProxyInFlight = new Map();
@@ -120,29 +119,6 @@ function normalizeScryfallImageUrl(urlString) {
   }
 }
 
-function getProxyImageExtension(urlString) {
-  try {
-    const parsedUrl = new URL(String(urlString || '').trim());
-    const extensionMatch = parsedUrl.pathname.match(/\.([a-z0-9]+)$/i);
-    if (!extensionMatch) {
-      return 'jpg';
-    }
-
-    const ext = extensionMatch[1].toLowerCase();
-    if (ext === 'jpeg') {
-      return 'jpg';
-    }
-
-    if (TTS_SUPPORTED_IMAGE_PROXY_EXTENSIONS.has(ext)) {
-      return ext;
-    }
-  } catch {
-    // Fall through to default.
-  }
-
-  return 'jpg';
-}
-
 function buildImageProxyUrl(urlString) {
   if (!isProxyableScryfallImageUrl(urlString)) {
     return urlString;
@@ -154,21 +130,35 @@ function buildImageProxyUrl(urlString) {
     return normalized;
   }
 
-  return `${origin}/image-proxy/${encodeURIComponent(normalized)}.${getProxyImageExtension(normalized)}`;
+  try {
+    const parsedUrl = new URL(normalized);
+    return `${origin}/image-proxy${parsedUrl.pathname}${parsedUrl.search}`;
+  } catch {
+    return normalized;
+  }
 }
 
 function getImageProxyRequestSource(req) {
   const queryUrl = String(req.query.url || '').trim();
   if (queryUrl) {
-    return queryUrl;
+    return normalizeScryfallImageUrl(queryUrl);
   }
 
-  const encodedPath = String(req.params.encodedUrl || '').trim();
+  const wildcardPath = typeof req.params[0] === 'string' ? req.params[0].trim() : '';
+  const encodedPath = wildcardPath || String(req.params.encodedUrl || '').trim();
   if (!encodedPath) {
     return '';
   }
 
   const pathWithoutQuery = encodedPath.replace(/[?#].*$/, '');
+  const originalQuery = String(req.originalUrl || '').includes('?')
+    ? `?${String(req.originalUrl).split('?').slice(1).join('?')}`
+    : '';
+
+  if (/^(small|normal|large|png|art_crop|border_crop)\/(front|back)\//i.test(pathWithoutQuery)) {
+    return normalizeScryfallImageUrl(`https://cards.scryfall.io/${pathWithoutQuery}${originalQuery}`);
+  }
+
   const withoutExt = pathWithoutQuery.replace(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i, '');
 
   let decoded;
@@ -4098,9 +4088,10 @@ app.get('/proxy', async (req, res) => {
 /**
  * GET /image-proxy?url=...
  * GET /image-proxy/:encodedUrlWithExtension
+ * GET /image-proxy/:imageKind/:face/:shardA/:shardB/:fileName
  * Proxy and cache Scryfall card image bytes for Tabletop Simulator.
  */
-app.get(['/image-proxy', '/image-proxy/:encodedUrl'], async (req, res) => {
+app.get(['/image-proxy', '/image-proxy/:encodedUrl', '/image-proxy/*'], async (req, res) => {
   try {
     const rawUrl = getImageProxyRequestSource(req);
     if (!rawUrl) {

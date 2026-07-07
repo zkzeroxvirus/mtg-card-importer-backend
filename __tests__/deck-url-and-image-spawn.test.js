@@ -68,15 +68,15 @@ describe('Deck URL imports removal and image spawning', () => {
 
   test('GET /card/:name supports direct image URL spawning', async () => {
     const imageUrl = 'https://cards.scryfall.io/large/front/0/0/0058be07-a8a1-448e-8c3d-61718cb384ec.jpg?1562875117';
-    const normalImageUrl = 'https://cards.scryfall.io/normal/front/0/0/0058be07-a8a1-448e-8c3d-61718cb384ec.jpg?1562875117';
     const response = await request(app).get(`/card/${encodeURIComponent(imageUrl)}`);
 
     expect(response.status).toBe(200);
     expect(response.body.name).toBe('Custom Image');
     expect(response.body.image_uris.normal).toContain('/image-proxy/');
-    expect(response.body.image_uris.normal.endsWith('.jpg')).toBe(true);
-    expect(response.body.image_uris.normal).toContain(encodeURIComponent(normalImageUrl));
-    expect(response.body.image_uris.normal).not.toContain(encodeURIComponent(imageUrl));
+    expect(response.body.image_uris.normal).toContain('.jpg');
+    expect(response.body.image_uris.normal).toContain('/image-proxy/normal/front/0/0/0058be07-a8a1-448e-8c3d-61718cb384ec.jpg?1562875117');
+    expect(response.body.image_uris.normal).not.toContain('/image-proxy/large/');
+    expect(response.body.image_uris.normal).not.toContain('.jpg.jpg');
     expect(scryfallLib.getCard).not.toHaveBeenCalled();
   });
 
