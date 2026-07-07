@@ -35,13 +35,18 @@ const IMAGE_PROXY_CACHE_DIR = String(process.env.IMAGE_PROXY_CACHE_DIR || path.j
 const IMAGE_PROXY_DISK_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_MAX_BYTES || '5368709120', 10) || 5368709120, 10485760);
 const IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS || '300000', 10) || 300000, 10000);
 const IMAGE_PROXY_DISK_CLEANUP_TARGET_RATIO = 0.9;
+const IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS || '60000', 10) || 60000, 10000);
+const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS || '600000', 10) || 600000, 10000);
 const ALLOWED_IMAGE_PROXY_HOSTS = new Set(['cards.scryfall.io']);
 const TTS_SUPPORTED_IMAGE_PROXY_EXTENSIONS = new Set(['jpg', 'png', 'webp', 'webm', 'mp4']);
 const imageProxyCache = new Map();
+const imageProxyFailureCache = new Map();
 const imageProxyInFlight = new Map();
 let imageProxyCacheBytes = 0;
 let imageProxyLastDiskCleanupAt = 0;
 let imageProxyDiskCleanupInProgress = false;
+let imageProxyDiskStatsSnapshot = null;
+let imageProxyDiskStatsRefreshing = false;
 
 function debugLog(...args) {
   if (VERBOSE_REQUEST_LOGS) {
@@ -82,6 +87,39 @@ function isProxyableScryfallImageUrl(urlString) {
   return ALLOWED_IMAGE_PROXY_HOSTS.has(urlObj.hostname.toLowerCase());
 }
 
+function normalizeScryfallImageUrl(urlString) {
+  if (!isProxyableScryfallImageUrl(urlString)) {
+    return urlString;
+  }
+
+  try {
+    const parsedUrl = new URL(String(urlString || '').trim());
+    const segments = parsedUrl.pathname.split('/').filter(Boolean);
+    const imageKind = segments[0];
+    const face = segments[1];
+    const firstShard = segments[2];
+    const secondShard = segments[3];
+    const fileName = segments[4] || '';
+    const idMatch = fileName.match(/^([0-9a-f-]{36})\.[a-z0-9]+$/i);
+
+    if (
+      !idMatch ||
+      !['small', 'normal', 'large', 'png', 'art_crop', 'border_crop'].includes(imageKind) ||
+      !['front', 'back'].includes(face) ||
+      !/^[0-9a-f]$/i.test(firstShard) ||
+      !/^[0-9a-f]$/i.test(secondShard)
+    ) {
+      return parsedUrl.toString();
+    }
+
+    const id = idMatch[1].toLowerCase();
+    parsedUrl.pathname = `/normal/${face}/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`;
+    return parsedUrl.toString();
+  } catch {
+    return urlString;
+  }
+}
+
 function getProxyImageExtension(urlString) {
   try {
     const parsedUrl = new URL(String(urlString || '').trim());
@@ -105,31 +143,15 @@ function getProxyImageExtension(urlString) {
   return 'jpg';
 }
 
-function getProxyImageFileName(urlString) {
-  try {
-    const parsedUrl = new URL(String(urlString || '').trim());
-    const pathname = parsedUrl.pathname || '';
-    const segments = pathname.split('/');
-    return segments[segments.length - 1] || '';
-  } catch {
-    return '';
-  }
-}
-
 function buildImageProxyUrl(urlString) {
   if (!isProxyableScryfallImageUrl(urlString)) {
     return urlString;
   }
 
-  const normalized = urlString.trim();
+  const normalized = normalizeScryfallImageUrl(urlString);
   const origin = getCurrentRequestOrigin();
   if (!origin) {
     return normalized;
-  }
-
-  const fileName = getProxyImageFileName(normalized);
-  if (fileName && /\.[a-z0-9]+$/i.test(fileName)) {
-    return `${origin}/image-proxy/${fileName}`;
   }
 
   return `${origin}/image-proxy/${encodeURIComponent(normalized)}.${getProxyImageExtension(normalized)}`;
@@ -147,8 +169,6 @@ function getImageProxyRequestSource(req) {
   }
 
   const pathWithoutQuery = encodedPath.replace(/[?#].*$/, '');
-  const extensionMatch = pathWithoutQuery.match(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i);
-  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : 'jpg';
   const withoutExt = pathWithoutQuery.replace(/\.(jpg|jpeg|png|webp|webm|mp4|m4u|mou|rawt|unity3d)$/i, '');
 
   let decoded;
@@ -159,13 +179,14 @@ function getImageProxyRequestSource(req) {
   }
 
   if (isProxyableScryfallImageUrl(decoded)) {
-    return decoded;
+    return normalizeScryfallImageUrl(decoded);
   }
 
   const fileName = decoded.replace(/^.*[/]/, '');
   if (/^[A-Za-z0-9._~-]+$/.test(fileName) && fileName.length >= 2) {
-    const ext = extension === 'jpeg' ? 'jpg' : extension;
-    return `https://cards.scryfall.io/normal/front/${fileName.charAt(0)}/${fileName.charAt(1)}/${fileName}.${ext}`;
+    const idMatch = fileName.match(/^([0-9a-f-]{36})(?:\.[a-z0-9]+)?$/i);
+    const id = (idMatch ? idMatch[1] : fileName).toLowerCase();
+    return `https://cards.scryfall.io/normal/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`;
   }
 
   return '';
@@ -247,6 +268,12 @@ function getCachedImageResponse(cacheKey) {
 function trimImageMemoryCache() {
   const now = Date.now();
 
+  for (const [key, value] of imageProxyFailureCache.entries()) {
+    if (!value || now >= value.expiresAt) {
+      imageProxyFailureCache.delete(key);
+    }
+  }
+
   for (const [key, value] of imageProxyCache.entries()) {
     if (!value || now >= value.expiresAt) {
       if (value?.buffer) {
@@ -271,6 +298,29 @@ function trimImageMemoryCache() {
   if (imageProxyCacheBytes < 0) {
     imageProxyCacheBytes = 0;
   }
+}
+
+function getCachedImageFailure(cacheKey) {
+  const cached = imageProxyFailureCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (Date.now() >= cached.expiresAt) {
+    imageProxyFailureCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached;
+}
+
+function cacheImageFailure(cacheKey, status, details) {
+  imageProxyFailureCache.set(cacheKey, {
+    status,
+    details,
+    expiresAt: Date.now() + IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS
+  });
+  trimImageMemoryCache();
 }
 
 function createImageEtag(buffer) {
@@ -403,8 +453,65 @@ async function getImageDiskCacheUsage() {
   };
 }
 
-async function getImageCacheStatsSnapshot() {
-  const disk = await getImageDiskCacheUsage();
+async function refreshImageDiskStatsSnapshot() {
+  if (imageProxyDiskStatsRefreshing) {
+    return;
+  }
+
+  imageProxyDiskStatsRefreshing = true;
+  try {
+    imageProxyDiskStatsSnapshot = {
+      ...(await getImageDiskCacheUsage()),
+      refreshedAt: Date.now(),
+      refreshing: false
+    };
+  } catch (error) {
+    imageProxyDiskStatsSnapshot = {
+      totalBytes: 0,
+      binFiles: 0,
+      metaFiles: 0,
+      tempFiles: 0,
+      otherFiles: 0,
+      totalFiles: 0,
+      refreshedAt: Date.now(),
+      refreshing: false,
+      error: error.message
+    };
+    throw error;
+  } finally {
+    imageProxyDiskStatsRefreshing = false;
+  }
+}
+
+function scheduleImageDiskStatsRefresh(force = false) {
+  const now = Date.now();
+  const lastRefresh = imageProxyDiskStatsSnapshot?.refreshedAt || 0;
+  if (!force && imageProxyDiskStatsRefreshing) {
+    return;
+  }
+  if (!force && lastRefresh && now - lastRefresh < IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS) {
+    return;
+  }
+
+  refreshImageDiskStatsSnapshot().catch((error) => {
+    console.warn('[ImageCache] Stats refresh skipped:', error.message);
+  });
+}
+
+function getImageCacheStatsSnapshot() {
+  scheduleImageDiskStatsRefresh(false);
+
+  const disk = imageProxyDiskStatsSnapshot || {
+    totalBytes: 0,
+    binFiles: 0,
+    metaFiles: 0,
+    tempFiles: 0,
+    otherFiles: 0,
+    totalFiles: 0,
+    refreshedAt: null,
+    refreshing: true
+  };
+
   return {
     memory: {
       entries: imageProxyCache.size,
@@ -423,9 +530,14 @@ async function getImageCacheStatsSnapshot() {
       tempFiles: disk.tempFiles,
       otherFiles: disk.otherFiles,
       cleanupIntervalMs: IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS,
-      lastCleanupAt: imageProxyLastDiskCleanupAt ? new Date(imageProxyLastDiskCleanupAt).toISOString() : null
+      statsRefreshIntervalMs: IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS,
+      lastCleanupAt: imageProxyLastDiskCleanupAt ? new Date(imageProxyLastDiskCleanupAt).toISOString() : null,
+      lastStatsRefreshAt: disk.refreshedAt ? new Date(disk.refreshedAt).toISOString() : null,
+      statsRefreshing: imageProxyDiskStatsRefreshing || Boolean(disk.refreshing),
+      statsError: disk.error || null
     },
-    inFlightRequests: imageProxyInFlight.size
+    inFlightRequests: imageProxyInFlight.size,
+    negativeCacheEntries: imageProxyFailureCache.size
   };
 }
 
@@ -475,6 +587,14 @@ async function writeImageProxyCacheToDisk(urlString, entry) {
 
 async function getImageProxyCacheEntry(urlString) {
   const cacheKey = String(urlString || '');
+  const failure = getCachedImageFailure(cacheKey);
+  if (failure) {
+    const error = new Error(failure.details);
+    error.status = failure.status;
+    error.cachedFailure = true;
+    throw error;
+  }
+
   const inMemory = getCachedImageResponse(cacheKey);
   if (inMemory) {
     return inMemory;
@@ -496,11 +616,19 @@ async function fetchAndCacheImageProxyEntry(urlString, requestSignal = null) {
   }
 
   const pending = (async () => {
-    const response = await axios.get(urlString, {
-      responseType: 'arraybuffer',
-      timeout: IMAGE_PROXY_TIMEOUT_MS,
-      signal: requestSignal
-    });
+    let response;
+    try {
+      response = await axios.get(urlString, {
+        responseType: 'arraybuffer',
+        timeout: IMAGE_PROXY_TIMEOUT_MS,
+        signal: requestSignal
+      });
+    } catch (error) {
+      if (error?.response?.status === 404) {
+        cacheImageFailure(cacheKey, 404, 'Image not found');
+      }
+      throw error;
+    }
 
     const contentType = String(response.headers['content-type'] || '').toLowerCase();
     if (!contentType.startsWith('image/')) {
@@ -3993,7 +4121,7 @@ app.get(['/image-proxy', '/image-proxy/:encodedUrl'], async (req, res) => {
       });
     }
 
-    const normalizedUrl = parsedUrl.toString();
+    const normalizedUrl = normalizeScryfallImageUrl(parsedUrl.toString());
     const cached = await getImageProxyCacheEntry(normalizedUrl);
     if (cached) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -4021,11 +4149,17 @@ app.get(['/image-proxy', '/image-proxy/:encodedUrl'], async (req, res) => {
     res.setHeader('Last-Modified', entry.lastModified);
     return res.status(200).send(entry.buffer);
   } catch (error) {
-    console.error('[ImageProxy] Error:', error.message);
     const upstreamStatus = error?.response?.status;
     if (upstreamStatus === 404) {
+      console.warn('[ImageProxy] Upstream image not found:', getImageProxyRequestSource(req));
       return res.status(404).json({ object: 'error', details: 'Image not found' });
     }
+
+    if (error?.cachedFailure) {
+      return res.status(error.status || 404).json({ object: 'error', details: error.message || 'Image not found' });
+    }
+
+    console.error('[ImageProxy] Error:', error.message);
 
     if (error?.code === 'ERR_CANCELED' || error?.name === 'AbortError') {
       return res.status(499).json({ object: 'error', details: 'Request canceled because the client disconnected.' });

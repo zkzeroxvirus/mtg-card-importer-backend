@@ -58,4 +58,46 @@ describe('Image Proxy Persistent Cache', () => {
     expect(secondResponse.body.toString('utf8')).toBe('image-bytes');
     expect(axios.get).not.toHaveBeenCalled();
   });
+
+  test('should cache upstream 404 image misses in memory', async () => {
+    const missingImageUrl = 'https://cards.scryfall.io/normal/front/0/0/missing.jpg';
+    axios.get.mockRejectedValueOnce({
+      message: 'Request failed with status code 404',
+      response: { status: 404 }
+    });
+
+    const app = require('../server');
+    const firstResponse = await request(app)
+      .get('/image-proxy')
+      .query({ url: missingImageUrl });
+    const secondResponse = await request(app)
+      .get('/image-proxy')
+      .query({ url: missingImageUrl });
+
+    expect(firstResponse.status).toBe(404);
+    expect(secondResponse.status).toBe(404);
+    expect(axios.get).toHaveBeenCalledTimes(1);
+  });
+
+  test('should fetch the normal jpg variant for non-normal Scryfall image URLs', async () => {
+    const pngImageUrl = 'https://cards.scryfall.io/png/back/4/a/4a1f905f-1d55-4d02-9d24-e58070793d3f.png?1782698306';
+    const normalImageUrl = 'https://cards.scryfall.io/normal/back/4/a/4a1f905f-1d55-4d02-9d24-e58070793d3f.jpg?1782698306';
+
+    axios.get.mockResolvedValueOnce({
+      data: Buffer.from('normal-image-bytes'),
+      headers: {
+        'content-type': 'image/jpeg',
+        'last-modified': 'Mon, 01 Jan 2024 00:00:00 GMT'
+      }
+    });
+
+    const app = require('../server');
+    const response = await request(app)
+      .get('/image-proxy')
+      .query({ url: pngImageUrl });
+
+    expect(response.status).toBe(200);
+    expect(response.body.toString('utf8')).toBe('normal-image-bytes');
+    expect(axios.get).toHaveBeenCalledWith(normalImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
+  });
 });
