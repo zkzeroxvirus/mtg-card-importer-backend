@@ -1,11 +1,12 @@
 -- Random Commander precon loader.
 -- Source selection and deck/card building live in the backend at /precons/random.
 
---PRECON_BACKEND_URL = "http://api.mtginfo.org"
-PRECON_BACKEND_URL = "http://localhost:3000"
+PRECON_BACKEND_URL = "http://api.mtginfo.org"
+--PRECON_BACKEND_URL = "http://localhost:3000"
 PRECON_BACKEND_RANDOM_URL = PRECON_BACKEND_URL .. "/precons/random"
 
 MAINDECK_POSITION_OFFSET = {0.0, 1, 0.1286}
+COMMANDER_POSITION_OFFSET = {0.7286, 1, -0.8257}
 
 lock = false
 playerColor = nil
@@ -71,6 +72,98 @@ local function failImport(message)
     finishImport()
 end
 
+local function cloneArray(values)
+    local out = {}
+    if type(values) ~= "table" then
+        return out
+    end
+
+    for _, value in ipairs(values) do
+        table.insert(out, value)
+    end
+
+    return out
+end
+
+local function copyCustomDeckEntries(source, target)
+    if type(source) ~= "table" or type(target) ~= "table" then
+        return
+    end
+
+    for key, value in pairs(source) do
+        target[tostring(key)] = value
+    end
+end
+
+local function addCardCustomDeckEntries(card, customDeck)
+    if type(card) ~= "table" then
+        return
+    end
+
+    copyCustomDeckEntries(card.CustomDeck, customDeck)
+
+    if type(card.States) == "table" then
+        for _, state in pairs(card.States) do
+            if type(state) == "table" then
+                copyCustomDeckEntries(state.CustomDeck, customDeck)
+            end
+        end
+    end
+end
+
+local function buildDeckFromCards(sourceDeck, cards, nicknameSuffix)
+    if type(cards) ~= "table" or #cards == 0 then
+        return nil
+    end
+
+    if #cards == 1 then
+        return cards[1]
+    end
+
+    local deck = {
+        CardID = sourceDeck.CardID or 0,
+        Name = "DeckCustom",
+        Nickname = (sourceDeck.Nickname or "Precon") .. (nicknameSuffix or ""),
+        Description = sourceDeck.Description or "",
+        Transform = sourceDeck.Transform,
+        HideWhenFaceDown = sourceDeck.HideWhenFaceDown == true,
+        AltLookAngle = sourceDeck.AltLookAngle or {x = 0, y = 0, z = 0},
+        DeckIDs = {},
+        CustomDeck = {},
+        ContainedObjects = cloneArray(cards),
+    }
+
+    for _, card in ipairs(cards) do
+        if card.CardID then
+            table.insert(deck.DeckIDs, card.CardID)
+        end
+        addCardCustomDeckEntries(card, deck.CustomDeck)
+    end
+
+    return deck
+end
+
+local function splitPreconDeck(deckDat)
+    local mainCards = {}
+    local commanderCards = {}
+
+    for _, card in ipairs(deckDat.ContainedObjects or {}) do
+        if card._preconSection == "commander" then
+            table.insert(commanderCards, card)
+        else
+            table.insert(mainCards, card)
+        end
+    end
+
+    if #commanderCards == 0 then
+        return deckDat, nil
+    end
+
+    return buildDeckFromCards(deckDat, mainCards, "\n[i]Maindeck[/i]"),
+        buildDeckFromCards(deckDat, commanderCards, "\n[i]Commanders[/i]"),
+        #commanderCards
+end
+
 function importDeck()
     if lock then
         printErr("Error: Deck import started while importer locked.")
@@ -110,14 +203,29 @@ function importDeck()
             return
         end
 
-        local spawnPos = self.positionToWorld(MAINDECK_POSITION_OFFSET)
-        spawnObjectData({
-            data = deckDat,
-            position = spawnPos,
-            rotation = self.getRotation()
-        })
+        local maindeckDat, commanderDat, commanderCount = splitPreconDeck(deckDat)
+        local rotation = self.getRotation()
+
+        if maindeckDat then
+            spawnObjectData({
+                data = maindeckDat,
+                position = self.positionToWorld(MAINDECK_POSITION_OFFSET),
+                rotation = rotation
+            })
+        end
+
+        if commanderDat then
+            spawnObjectData({
+                data = commanderDat,
+                position = self.positionToWorld(COMMANDER_POSITION_OFFSET),
+                rotation = rotation
+            })
+        end
 
         printInfo("Backend precon import complete!")
+        if commanderCount and commanderCount > 0 then
+            printInfo("Separated " .. tostring(commanderCount) .. " commander card(s).")
+        end
         if deckDat.Nickname and deckDat.Nickname ~= "" then
             printInfo("Loaded: " .. deckDat.Nickname)
         end

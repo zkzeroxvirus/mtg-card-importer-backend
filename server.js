@@ -975,6 +975,10 @@ function buildDeckCustomObject(ttsCards, hand) {
       AltLookAngle: ttsCard?.AltLookAngle || { x: 0, y: 0, z: 0 }
     };
 
+    if (typeof ttsCard?._preconSection === 'string' && ttsCard._preconSection) {
+      containedCard._preconSection = ttsCard._preconSection;
+    }
+
     if (stateTwo?.CustomDeck) {
       const stateDeckNum = ttsCards.length + deckNum;
       const stateCardId = stateDeckNum * 100;
@@ -1181,7 +1185,9 @@ async function buildArchidektPreconDeckObject(deck, cardBack, hand) {
 
     for (let i = 0; i < entry.count; i += 1) {
       try {
-        ttsCards.push(scryfallLib.convertToTTSCard(card, cardBack));
+        const ttsCard = scryfallLib.convertToTTSCard(card, cardBack);
+        ttsCard._preconSection = entry.commander ? 'commander' : entry.sideboard ? 'sideboard' : 'maindeck';
+        ttsCards.push(ttsCard);
       } catch (error) {
         warnings.push(`Skipped ${entry.name || entry.scryfallId}: ${error.message}`);
       }

@@ -158,6 +158,7 @@ describe('Deck URL imports removal and image spawning', () => {
     expect(deck.Description).toContain('https://archidekt.com/commander-precons');
     expect(deck.Description).toContain('https://archidekt.com/decks/23426916');
     expect(deck.ContainedObjects).toHaveLength(1);
+    expect(deck.ContainedObjects[0]._preconSection).toBe('commander');
     expect(scryfallLib.getCardById).toHaveBeenCalledWith('sf-island');
   });
 
