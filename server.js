@@ -100,7 +100,7 @@ function normalizeScryfallImageUrl(urlString) {
     const firstShard = segments[2];
     const secondShard = segments[3];
     const fileName = segments[4] || '';
-    const idMatch = fileName.match(/^([0-9a-f-]{36})\.[a-z0-9]+$/i);
+    const idMatch = fileName.match(/^([0-9a-f-]{36})(?:\.[a-z0-9]+)?$/i);
 
     if (
       !idMatch ||

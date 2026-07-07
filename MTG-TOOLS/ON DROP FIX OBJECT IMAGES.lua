@@ -99,7 +99,11 @@ local function urlDecode(s)
   end
 
   return (s:gsub("%%(%x%x)", function(hex)
-    return string.char(tonumber(hex, 16))
+    local value = tonumber(hex, 16)
+    if value then
+      return string.char(value)
+    end
+    return string.format("%%%s", hex)
   end))
 end
 
@@ -113,18 +117,20 @@ local function stripQueryAndHash(url)
   return trimmed
 end
 
-local function stripKnownImageSuffix(url)
+local function stripProxyPathSuffix(url)
   if type(url) ~= "string" then
     return ""
   end
 
-  local cleaned = url
   local extensions = {"jpg", "jpeg", "png", "webp", "webm", "mp4"}
   for _, ext in ipairs(extensions) do
-    cleaned = cleaned:gsub("%." .. ext .. "$", "")
+    local cleaned = url:gsub("%." .. ext .. "$", "")
+    if cleaned ~= url then
+      return cleaned
+    end
   end
 
-  return cleaned
+  return url
 end
 
 local function getProxyFileExtension(url)
@@ -185,11 +191,17 @@ local function normalizePathProxySource(url)
   end
 
   encoded = encoded:gsub("[?#].*$", "")
-  encoded = stripKnownImageSuffix(encoded)
+  encoded = stripProxyPathSuffix(encoded)
 
   local decoded = urlDecode(encoded)
   if isScryfallImageURL(decoded) then
     return decoded
+  end
+
+  local id = decoded:match("([0-9a-fA-F%-]+)$")
+  if id and id:match("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") then
+    id = string.lower(id)
+    return "https://cards.scryfall.io/normal/front/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg"
   end
 
   return nil
@@ -219,12 +231,26 @@ local function getScryfallSourceURL(url)
   return nil
 end
 
-local function normalizeScryfallSize(url)
+local function normalizeScryfallImageURL(url)
   if type(url) ~= "string" then
     return url
   end
 
-  return url:gsub("(https?://cards%.scryfall%.io/)(large)(/)", "%1normal%3")
+  local prefix, imageKind, face, firstShard, secondShard, id, ext, query = url:match("^(https?://cards%.scryfall%.io/)([^/]+)/([^/]+)/([0-9a-fA-F])/([0-9a-fA-F])/([0-9a-fA-F%-]+)%.([A-Za-z0-9]+)(.*)$")
+  if not prefix or not id then
+    return url
+  end
+
+  if imageKind ~= "small" and imageKind ~= "normal" and imageKind ~= "large" and imageKind ~= "png" and imageKind ~= "art_crop" and imageKind ~= "border_crop" then
+    return url
+  end
+
+  if face ~= "front" and face ~= "back" then
+    return url
+  end
+
+  id = string.lower(id)
+  return prefix .. "normal/" .. face .. "/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg" .. (query or "")
 end
 
 local function proxyImageURL(url)
@@ -237,12 +263,10 @@ local function proxyImageURL(url)
     return url
   end
 
-  sourceUrl = stripQueryAndHash(sourceUrl)
+  sourceUrl = normalizeScryfallImageURL(sourceUrl)
   if sourceUrl == "" then
     return url
   end
-
-  sourceUrl = normalizeScryfallSize(sourceUrl)
 
   local ext = getProxyFileExtension(sourceUrl)
   return IMAGE_PROXY_BASE .. "/" .. urlEncode(sourceUrl) .. "." .. ext
