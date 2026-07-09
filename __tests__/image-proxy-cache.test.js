@@ -142,4 +142,44 @@ describe('Image Proxy Persistent Cache', () => {
     expect(response.body.toString('utf8')).toBe('path-style-image-bytes');
     expect(axios.get).toHaveBeenCalledWith(normalImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
   });
+
+  test('should recover the current versioned Scryfall image URL when an unversioned image 404s', async () => {
+    const unversionedImageUrl = 'https://cards.scryfall.io/normal/front/3/1/3199bea9-fef7-45fe-8777-2103d84a9347.jpg';
+    const versionedImageUrl = 'https://cards.scryfall.io/normal/front/3/1/3199bea9-fef7-45fe-8777-2103d84a9347.jpg?1782683974';
+
+    axios.get
+      .mockRejectedValueOnce({
+        message: 'Request failed with status code 404',
+        response: { status: 404 }
+      })
+      .mockResolvedValueOnce({
+        data: {
+          image_uris: {
+            normal: versionedImageUrl
+          }
+        },
+        headers: {
+          'content-type': 'application/json'
+        }
+      })
+      .mockResolvedValueOnce({
+        data: Buffer.from('versioned-image-bytes'),
+        headers: {
+          'content-type': 'image/jpeg',
+          'last-modified': 'Mon, 01 Jan 2024 00:00:00 GMT'
+        }
+      });
+
+    const app = require('../server');
+    const response = await request(app)
+      .get('/image-proxy/normal/front/3/1/3199bea9-fef7-45fe-8777-2103d84a9347.jpg');
+
+    expect(response.status).toBe(200);
+    expect(response.body.toString('utf8')).toBe('versioned-image-bytes');
+    expect(axios.get).toHaveBeenNthCalledWith(1, unversionedImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
+    expect(axios.get).toHaveBeenNthCalledWith(2, 'https://api.scryfall.com/cards/3199bea9-fef7-45fe-8777-2103d84a9347', expect.objectContaining({
+      headers: expect.objectContaining({ Accept: 'application/json' })
+    }));
+    expect(axios.get).toHaveBeenNthCalledWith(3, versionedImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
+  });
 });

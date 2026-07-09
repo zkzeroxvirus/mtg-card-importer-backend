@@ -598,6 +598,83 @@ async function getImageProxyCacheEntry(urlString) {
   return null;
 }
 
+function getScryfallImagePathInfo(urlString) {
+  if (!isProxyableScryfallImageUrl(urlString)) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(String(urlString || '').trim());
+    const segments = parsedUrl.pathname.split('/').filter(Boolean);
+    const idMatch = String(segments[4] || '').match(/^([0-9a-f-]{36})(?:\.[a-z0-9]+)?$/i);
+    if (
+      !idMatch ||
+      !['small', 'normal', 'large', 'png', 'art_crop', 'border_crop'].includes(segments[0]) ||
+      !['front', 'back'].includes(segments[1])
+    ) {
+      return null;
+    }
+
+    return {
+      parsedUrl,
+      imageKind: segments[0],
+      face: segments[1],
+      id: idMatch[1].toLowerCase()
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getImageUrisForFace(card, face) {
+  if (!card || typeof card !== 'object') {
+    return null;
+  }
+
+  if (face === 'front' && card.image_uris) {
+    return card.image_uris;
+  }
+
+  if (Array.isArray(card.card_faces)) {
+    const matchingFace = card.card_faces.find((cardFace) => {
+      const normalUrl = String(cardFace?.image_uris?.normal || '');
+      return normalUrl.includes(`/${face}/`);
+    });
+    if (matchingFace?.image_uris) {
+      return matchingFace.image_uris;
+    }
+
+    const fallbackIndex = face === 'back' ? 1 : 0;
+    return card.card_faces[fallbackIndex]?.image_uris || null;
+  }
+
+  return card.image_uris || null;
+}
+
+async function resolveVersionedScryfallImageUrl(urlString, requestSignal = null) {
+  const info = getScryfallImagePathInfo(urlString);
+  if (!info || info.parsedUrl.search) {
+    return null;
+  }
+
+  const response = await axios.get(`https://api.scryfall.com/cards/${info.id}`, {
+    timeout: IMAGE_PROXY_TIMEOUT_MS,
+    signal: requestSignal,
+    headers: {
+      'User-Agent': ARCHIDEKT_USER_AGENT,
+      Accept: 'application/json'
+    }
+  });
+
+  const imageUris = getImageUrisForFace(response.data, info.face);
+  const sourceUrl = imageUris?.normal || imageUris?.large || imageUris?.png || null;
+  if (!sourceUrl || !isProxyableScryfallImageUrl(sourceUrl)) {
+    return null;
+  }
+
+  return normalizeScryfallImageUrl(sourceUrl);
+}
+
 async function fetchAndCacheImageProxyEntry(urlString, requestSignal = null) {
   const cacheKey = String(urlString || '');
   const existing = imageProxyInFlight.get(cacheKey);
@@ -615,9 +692,20 @@ async function fetchAndCacheImageProxyEntry(urlString, requestSignal = null) {
       });
     } catch (error) {
       if (error?.response?.status === 404) {
-        cacheImageFailure(cacheKey, 404, 'Image not found');
+        const versionedUrl = await resolveVersionedScryfallImageUrl(urlString, requestSignal);
+        if (versionedUrl && versionedUrl !== urlString) {
+          response = await axios.get(versionedUrl, {
+            responseType: 'arraybuffer',
+            timeout: IMAGE_PROXY_TIMEOUT_MS,
+            signal: requestSignal
+          });
+        } else {
+          cacheImageFailure(cacheKey, 404, 'Image not found');
+          throw error;
+        }
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     const contentType = String(response.headers['content-type'] || '').toLowerCase();
