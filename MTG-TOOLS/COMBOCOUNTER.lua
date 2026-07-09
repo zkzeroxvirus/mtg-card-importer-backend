@@ -290,8 +290,10 @@ pendingRevertType  = nil
 pendingRevertEntry = nil
 
 -- Town action state
-pendingTownAction    = nil   -- {type, submittedAt} while host processes; persisted
-townResultCards      = nil   -- {type, cardGuids} result awaiting player choice; persisted
+pendingTownAction    = nil   -- legacy single pending action; migrated into pendingTownActions on load
+pendingTownActions   = {}    -- queued {requestId, type, submittedAt, costPaid, usedBonus} while host processes
+townResultCards      = nil   -- active {requestId, type, cardGuids} result awaiting player choice; persisted
+townResultQueue      = {}    -- additional host results waiting behind the active result screen
 pendingTownCardObj   = nil   -- card object staged for Upgrade/Augment confirm
 pendingTownActionType = nil  -- "upgrade" or "augment" during confirm step
 townNoteValue        = ""    -- live value of the optional-note input field
@@ -346,6 +348,93 @@ function isTownActionBlocked(actionType)
     end
   end
   return false, nil
+end
+
+function compactTownQueueList(list)
+  local out = {}
+  if type(list) ~= "table" then return out end
+  local keyed = {}
+  for key, entry in pairs(list) do
+    if type(entry) == "table" then
+      local index = tonumber(key)
+      keyed[#keyed + 1] = {index = index or (#keyed + 1), entry = entry}
+    end
+  end
+  table.sort(keyed, function(a, b) return a.index < b.index end)
+  for _, item in ipairs(keyed) do
+    out[#out + 1] = item.entry
+  end
+  return out
+end
+
+function normalizeTownActionQueues()
+  pendingTownActions = compactTownQueueList(pendingTownActions)
+  townResultQueue = compactTownQueueList(townResultQueue)
+  if type(pendingTownAction) == "table" then
+    table.insert(pendingTownActions, pendingTownAction)
+    pendingTownAction = nil
+  end
+end
+
+function hasPendingTownAction()
+  normalizeTownActionQueues()
+  return #pendingTownActions > 0
+end
+
+function addPendingTownAction(entry)
+  normalizeTownActionQueues()
+  table.insert(pendingTownActions, entry)
+end
+
+function removePendingTownAction(requestId, actionType)
+  normalizeTownActionQueues()
+  local fallbackIndex = nil
+  for i, entry in ipairs(pendingTownActions) do
+    if requestId ~= nil and entry.requestId == requestId then
+      table.remove(pendingTownActions, i)
+      return entry
+    end
+    if fallbackIndex == nil and (actionType == nil or entry.type == actionType) then
+      fallbackIndex = i
+    end
+  end
+  if fallbackIndex then
+    local entry = pendingTownActions[fallbackIndex]
+    table.remove(pendingTownActions, fallbackIndex)
+    return entry
+  end
+  return nil
+end
+
+function getPendingTownActionSummary()
+  normalizeTownActionQueues()
+  local count = #pendingTownActions
+  if count <= 0 then return "No Town actions queued." end
+  local parts = {}
+  local maxShown = math.min(count, 3)
+  for i = 1, maxShown do
+    local entry = pendingTownActions[i]
+    local actionType = entry.type or "request"
+    table.insert(parts, actionType:sub(1,1):upper() .. actionType:sub(2))
+  end
+  local suffix = (count > maxShown) and (" +" .. tostring(count - maxShown) .. " more") or ""
+  return tostring(count) .. " Town action(s) queued: " .. table.concat(parts, ", ") .. suffix
+end
+
+function showNextTownResultOrShop()
+  normalizeTownActionQueues()
+  if not townResultCards and #townResultQueue > 0 then
+    townResultCards = table.remove(townResultQueue, 1)
+  end
+  if townResultCards then
+    if townResultCards.type == "cathedral" then
+      showCathedralResult()
+    else
+      showUpgradeResult()
+    end
+  else
+    showShopScreen()
+  end
 end
 
 function resetMerchantTownLocks()
@@ -587,8 +676,14 @@ function onLoad(saved)
         if type(data.pendingTownAction) == "table" then
           pendingTownAction = data.pendingTownAction
         end
+        if type(data.pendingTownActions) == "table" then
+          pendingTownActions = data.pendingTownActions
+        end
         if type(data.townResultCards) == "table" then
           townResultCards = data.townResultCards
+        end
+        if type(data.townResultQueue) == "table" then
+          townResultQueue = data.townResultQueue
         end
         if type(data.buildingUsesThisTown) == "table" then
           buildingUsesThisTown = {}
@@ -625,6 +720,7 @@ function onLoad(saved)
   end
   
   self.addTag(SPAWNER_TAG)
+  normalizeTownActionQueues()
 
   -- Restore town screens if we reloaded mid-flow; otherwise show shop
   if townResultCards then
@@ -633,10 +729,10 @@ function onLoad(saved)
     else
       Wait.frames(showUpgradeResult, 60)
     end
-  elseif pendingTownAction then
-    Wait.frames(showTownAwaitScreen, 60)
+  elseif townResultQueue and #townResultQueue > 0 then
+    Wait.frames(showNextTownResultOrShop, 60)
   else
-    showShopScreen()
+    showNextTownResultOrShop()
   end
 
   if localPlayerKey then
@@ -647,6 +743,7 @@ end
 function onSave()
   -- Unclaimed cards save nothing so a new player gets a clean slate.
   if not localPlayerKey then return "" end
+  normalizeTownActionQueues()
   return JSON.encode({
     xp                           = xp,
     settings                     = settings,
@@ -658,8 +755,10 @@ function onSave()
     essenceTab                   = essenceTab,
     essencePage                  = essencePage,
     equippedBuffs                = equippedBuffs,
-    pendingTownAction            = pendingTownAction,
+    pendingTownAction            = nil,
+    pendingTownActions           = pendingTownActions,
     townResultCards              = townResultCards,
+    townResultQueue              = townResultQueue,
     buildingUsesThisTown         = buildingUsesThisTown,
     bonusBuildingUsesGeneric     = bonusBuildingUsesGeneric,
     bonusBuildingUsesByKey       = bonusBuildingUsesByKey,
@@ -1721,7 +1820,6 @@ function click_xpCathedral()
     broadcastToAll("[" .. self.getName() .. "] Cathedral: No uses remaining this town.", {0.95, 0.45, 0.2})
     return
   end
-  if pendingTownAction then showTownAwaitScreen() return end
   showCathedralInput()
 end
 function click_xpBlacksmith()
@@ -1731,7 +1829,6 @@ function click_xpBlacksmith()
     broadcastToAll("[" .. self.getName() .. "] Cursed Pumpkins is active: Blacksmith actions are disabled.", {0.95, 0.45, 0.2})
     return
   end
-  if pendingTownAction then showTownAwaitScreen() return end
   showBlacksmithScreen()
 end
 function click_xpBazaar()
@@ -1739,7 +1836,6 @@ function click_xpBazaar()
     broadcastToAll("[" .. self.getName() .. "] Bazaar: No uses remaining this town.", {0.95, 0.45, 0.2})
     return
   end
-  if pendingTownAction then showTownAwaitScreen() return end
   showBazaarScreen()
 end
 function click_experienceBack() showShopScreen()     end
@@ -2329,11 +2425,9 @@ function showBlacksmithScreen()
 end
 function click_blacksmithBack()    showExperienceScreen()   end
 function click_blacksmithUpgrade()
-  if pendingTownAction then showTownAwaitScreen() return end
   showUpgradeInput("upgrade")
 end
 function click_blacksmithAugment()
-  if pendingTownAction then showTownAwaitScreen() return end
   showUpgradeInput("augment")
 end
 
@@ -3014,10 +3108,6 @@ end
 -- Hub screen ---------------------------------------------------------------
 function showTownScreen()
   activePack = nil
-  if pendingTownAction then
-    showTownAwaitScreen()
-    return
-  end
   local cathedralBlocked = isTownActionBlocked("cathedral")
   local upgradeBlocked = isTownActionBlocked("upgrade")
   local augmentBlocked = isTownActionBlocked("augment")
@@ -3139,7 +3229,6 @@ function click_cathedralSubmit()
     broadcastToAll("[" .. self.getName() .. "] Please enter a description before submitting.", {0.9, 0.6, 0.3})
     return
   end
-  decrementBuildingUse("Cathedral")
   submitTownAction("cathedral", cathedralTextValue, nil)
 end
 
@@ -3315,9 +3404,9 @@ function submitTownAction(actionType, text, cardGuid)
   end
 
   local paidCost = nil
+  local usedBonus = false
   if actionType == "upgrade" or actionType == "augment" then
     local cost, freeBonus = getTownActionCost(actionType)
-    local usedBonus = false
     if not freeBonus then
       local gamblerResult = tryGamblersNeverQuit(cost)
       if gamblerResult ~= nil then cost = gamblerResult end
@@ -3334,11 +3423,10 @@ function submitTownAction(actionType, text, cardGuid)
       recordXPTransaction(0, (actionType:sub(1,1):upper() .. actionType:sub(2)) .. " (Free)")
     end
     paidCost = cost
-    pendingTownAction = {type = actionType, submittedAt = getTimeStr(), costPaid = paidCost, usedBonus = usedBonus}
   end
 
-  pcall(function()
-    hostObj.call("submitAction", {
+  local submitted, requestId = pcall(function()
+    return hostObj.call("submitAction", {
       type        = actionType,
       spawnerGuid = self.getGUID(),
       spawnerName = claimedPlayerName or self.getName(),
@@ -3347,9 +3435,31 @@ function submitTownAction(actionType, text, cardGuid)
     })
   end)
 
-  if not pendingTownAction then
-    pendingTownAction = {type = actionType, submittedAt = getTimeStr(), costPaid = paidCost}
+  if not submitted then
+    if paidCost and paidCost > 0 then
+      refundXP(paidCost, (actionType:sub(1,1):upper() .. actionType:sub(2)) .. " Submit Refund")
+    end
+    if usedBonus then
+      local bonusKey = getBlacksmithBonusUseKey(actionType)
+      if bonusKey then
+        bonusBuildingUsesByKey[bonusKey] = (bonusBuildingUsesByKey[bonusKey] or 0) + 1
+      end
+    end
+    broadcastToAll("[" .. self.getName() .. "] Town action could not be queued with the host: " .. tostring(requestId), {0.9, 0.3, 0.3})
+    showExperienceScreen()
+    return
   end
+
+  if actionType == "cathedral" then
+    decrementBuildingUse("Cathedral")
+  end
+  addPendingTownAction({
+    requestId = requestId,
+    type = actionType,
+    submittedAt = getTimeStr(),
+    costPaid = paidCost,
+    usedBonus = usedBonus,
+  })
   townNoteValue     = ""
   cathedralTextValue = ""
   showTownAwaitScreen()
@@ -3358,13 +3468,9 @@ end
 -- Await screen (after submission) ------------------------------------------
 function showTownAwaitScreen()
   openScreen("town_await", nil, "Town")
-  local pending = pendingTownAction
-  local typeLabel = pending and (pending.type:sub(1,1):upper() .. pending.type:sub(2)) or "Request"
-  local timeStr   = pending and pending.submittedAt or ""
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = typeLabel .. " submitted" .. (timeStr ~= "" and ("  [" .. timeStr .. "]") or "")
-      .. "\n\nWaiting for host...",
+    label = getPendingTownActionSummary() .. "\n\nWaiting for host...",
     position = {0, 0.1, 0.0},
     width = 1700, height = 380, font_size = 70,
     color = {0.08, 0.14, 0.1}, font_color = {0.65, 1, 0.65},
@@ -3416,14 +3522,14 @@ end
 
 function click_cathedralKeep()
   townResultCards = nil
-  showShopScreen()
+  showNextTownResultOrShop()
 end
 
 function click_cathedralSacrifice()
   if not townResultCards or not townResultCards.cardGuids
       or #townResultCards.cardGuids == 0 then
     townResultCards = nil
-    showShopScreen()
+    showNextTownResultOrShop()
     return
   end
   local guid = townResultCards.cardGuids[1]
@@ -3432,14 +3538,14 @@ function click_cathedralSacrifice()
   if not card then
     broadcastToAll("[" .. self.getName() .. "] Cathedral card not found — keeping Essence.", {0.9, 0.6, 0.3})
     townResultCards = nil
-    showShopScreen()
+    showNextTownResultOrShop()
     return
   end
   lookupCardCMC(card, function(cmc)
     if not cmc then
       broadcastToAll("[" .. self.getName() .. "] Couldn't determine CMC — card kept instead.", {0.9, 0.6, 0.3})
       townResultCards = nil
-      showShopScreen()
+      showNextTownResultOrShop()
       return
     end
     local gain = cmc * 2
@@ -3448,7 +3554,7 @@ function click_cathedralSacrifice()
       .. gain .. " Essence (CMC " .. cmc .. ").", {0.7, 0.5, 1.0})
     pcall(function() card.destruct() end)
     townResultCards = nil
-    showShopScreen()
+    showNextTownResultOrShop()
   end)
 end
 
@@ -3529,7 +3635,7 @@ end
 
 function click_upgradeResultOK()
   townResultCards = nil
-  showShopScreen()
+  showNextTownResultOrShop()
 end
 
 function keepUpgradeCard(keptGuid, allGuids)
@@ -3542,14 +3648,20 @@ function keepUpgradeCard(keptGuid, allGuids)
   end
   townResultCards = nil
   broadcastToAll("[" .. self.getName() .. "] Card selected, others removed.", {0.7, 1, 0.7})
-  showShopScreen()
+  showNextTownResultOrShop()
 end
 
 -- Public API: called by HostTownActions ------------------------------------
 function receiveTownActionResult(params)
   if type(params) ~= "table" then return end
-  pendingTownAction = nil
-  townResultCards   = params
+  normalizeTownActionQueues()
+  removePendingTownAction(params.requestId, params.type)
+  if townResultCards then
+    table.insert(townResultQueue, params)
+    broadcastToAll("[" .. self.getName() .. "] Town result received and queued behind your current result.", {0.65, 1, 0.65})
+    return
+  end
+  townResultCards = params
 
   -- Cards are already fanned above the spawner by HostTownActions (no re-spread needed)
   if params.type == "cathedral" then
@@ -3561,11 +3673,13 @@ end
 
 function receiveTownActionCancelled(params)
   if type(params) ~= "table" then return end
+  normalizeTownActionQueues()
   local actionType = params.type or ""
+  local pendingAction = removePendingTownAction(params.requestId, actionType)
   if actionType == "upgrade" then
-    local refund = (pendingTownAction and pendingTownAction.costPaid) or applyTownCostModifiers(UPGRADE_COST)
+    local refund = (pendingAction and pendingAction.costPaid) or applyTownCostModifiers(UPGRADE_COST)
     refundXP(refund, "Upgrade Cancel Refund")
-    if pendingTownAction and pendingTownAction.usedBonus then
+    if pendingAction and pendingAction.usedBonus then
       local bonusKey = getBlacksmithBonusUseKey("upgrade")
       if bonusKey then
         bonusBuildingUsesByKey[bonusKey] = (bonusBuildingUsesByKey[bonusKey] or 0) + 1
@@ -3574,9 +3688,9 @@ function receiveTownActionCancelled(params)
     broadcastToAll("[" .. self.getName() .. "] Upgrade cancelled — "
       .. refund .. " XP refunded.", {0.9, 0.9, 0.5})
   elseif actionType == "augment" then
-    local refund = (pendingTownAction and pendingTownAction.costPaid) or applyTownCostModifiers(AUGMENT_COST)
+    local refund = (pendingAction and pendingAction.costPaid) or applyTownCostModifiers(AUGMENT_COST)
     refundXP(refund, "Augment Cancel Refund")
-    if pendingTownAction and pendingTownAction.usedBonus then
+    if pendingAction and pendingAction.usedBonus then
       local bonusKey = getBlacksmithBonusUseKey("augment")
       if bonusKey then
         bonusBuildingUsesByKey[bonusKey] = (bonusBuildingUsesByKey[bonusKey] or 0) + 1
@@ -3585,7 +3699,6 @@ function receiveTownActionCancelled(params)
     broadcastToAll("[" .. self.getName() .. "] Augment cancelled — "
       .. refund .. " XP refunded.", {0.9, 0.9, 0.5})
   end
-  pendingTownAction = nil
   showShopScreen()
 end
 
