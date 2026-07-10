@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.927'
+mod_name, version = 'Card Importer', '1.928'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -587,11 +587,25 @@ local STRUCTURED_RANDOM_QUERY_PREFIXES = {
   'banned', 'restricted', 'block', 'stamp', 'frame', 'border', 'has',
   'c', 'color', 'id', 'identity', 'cmc', 'mv', 'pow', 'power', 'tou', 'toughness',
   'loy', 'loyalty', 'm', 'mana', 'usd', 'eur', 'tix', 'year', 'date',
-  'otag', 'oracletag', 'function', 'atag', 'art', 'arttag'
+  'otag', 'oracletag', 'function', 'native', 'atag', 'art', 'arttag'
+}
+
+local TAGGER_RANDOM_QUERY_PREFIXES = {
+  'otag', 'oracletag', 'function', 'native', 'atag', 'art', 'arttag'
 }
 
 local function trimString(value)
   return tostring(value or ''):gsub('^%s+', ''):gsub('%s+$', '')
+end
+
+local function queryHasFilterPrefix(queryRaw, prefixes)
+  local query = tostring(queryRaw or ''):lower()
+  for _, prefix in ipairs(prefixes) do
+    if query:match('^%-?' .. prefix .. '[:=]') or query:match('[%s%(+]%-?' .. prefix .. '[:=]') then
+      return true
+    end
+  end
+  return false
 end
 
 local function extractRandomQueryFromInput(rawInput)
@@ -618,13 +632,7 @@ local function looksLikeStructuredRandomQuery(rawInput)
     return true
   end
 
-  for _, prefix in ipairs(STRUCTURED_RANDOM_QUERY_PREFIXES) do
-    if query:match('(^|[%s%(])%-?' .. prefix .. '[:=]') then
-      return true
-    end
-  end
-
-  return false
+  return queryHasFilterPrefix(query, STRUCTURED_RANDOM_QUERY_PREFIXES)
 end
 
 local function splitNDJSONLines(respText)
@@ -817,7 +825,7 @@ function applyTagCacheStatusHint(wr, qTbl)
 end
 
 function queryUsesTaggerFilter(queryRaw)
-  return tostring(queryRaw or ''):lower():match('(^|[%s%(+%-])(otag|atag|arttag|function):') ~= nil
+  return queryHasFilterPrefix(queryRaw, TAGGER_RANDOM_QUERY_PREFIXES)
 end
 
 local function dispatchRandomRequest(url, qTbl, count, queryRaw)
