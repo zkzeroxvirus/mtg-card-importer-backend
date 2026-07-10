@@ -443,25 +443,25 @@ end
 
 function fetchRandomCommander(spawnPos, count)
     local queryParts = {}
-    if Type != "" then
+    if Type ~= "" then
         table.insert(queryParts, "type"..typeToggle..Type)
     end
-    if Oracle != "" then
+    if Oracle ~= "" then
         table.insert(queryParts, "oracle"..oracleToggle..Oracle)
     end
-    if Color != "" then
+    if Color ~= "" then
         table.insert(queryParts, "color"..colorToggle..Color)
     end
-    if Id != "" then
+    if Id ~= "" then
         table.insert(queryParts, "id"..idToggle..Id)
     end
-    if ManaCost != "" then
+    if ManaCost ~= "" then
         table.insert(queryParts, "cmc"..manaCostToggle..ManaCost)
     end
-    if OTag != "" then
+    if OTag ~= "" then
         table.insert(queryParts, "otag"..otagToggle..OTag)
     end
-     if IS != "" then
+     if IS ~= "" then
         table.insert(queryParts, "is"..isToggle..IS)
     end
 
@@ -527,22 +527,23 @@ function fetchRandomCommander(spawnPos, count)
         return lines
     end
 
-    local function firstSpawnPayloadFromNDJSON(respText)
+    local function firstSpawnJSONFromNDJSON(respText)
         local issues = {}
         local lines = splitNDJSONLines(respText)
 
         for _, line in ipairs(lines) do
-            local parsed = JSONdecode(line)
-            if parsed then
-                if parsed.object == "warning" then
-                    table.insert(issues, parsed.warning or "warning")
-                elseif parsed.object == "error" then
-                    table.insert(issues, parsed.error or parsed.details or "error")
-                elseif parsed.Name == "DeckCustom" or parsed.ContainedObjects then
-                    return parsed, issues
-                else
-                    table.insert(issues, "unexpected payload")
+            local trimmed = tostring(line or ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if trimmed:match('^{"object"%s*:') then
+                local parsed = JSONdecode(trimmed)
+                if parsed then
+                    if parsed.object == "warning" then
+                        table.insert(issues, parsed.warning or "warning")
+                    elseif parsed.object == "error" then
+                        table.insert(issues, parsed.error or parsed.details or "error")
+                    end
                 end
+            elseif trimmed:find('"ContainedObjects"', 1, true) or trimmed:match('"Name"%s*:%s*"DeckCustom"') then
+                return trimmed, issues
             end
         end
 
@@ -566,8 +567,8 @@ function fetchRandomCommander(spawnPos, count)
             return
         end
 
-        local deckDat, issues = firstSpawnPayloadFromNDJSON(response.text)
-        if not deckDat then
+        local deckJson, issues = firstSpawnJSONFromNDJSON(response.text)
+        if not deckJson then
             if issues and #issues > 0 then
                 print("Error processing deck build response: " .. table.concat(issues, ", "))
             else
@@ -576,7 +577,7 @@ function fetchRandomCommander(spawnPos, count)
             return
         end
 
-        spawnObjectData({ data = deckDat, position = spawnPos, rotation = self.getRotation() })
+        spawnObjectJSON({ json = deckJson, position = spawnPos, rotation = self.getRotation() })
 
         if issues and #issues > 0 then
             print("Deck build warning: " .. table.concat(issues, ", "))

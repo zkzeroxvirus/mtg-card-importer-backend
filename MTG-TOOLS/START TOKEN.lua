@@ -263,22 +263,26 @@ spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
     local lines = splitLines(respText)
     local fallbackSpawnLines = {}
     local cardObjects = {}
-    local directDeck = nil
+    local directDeckJson = nil
     local issues = {}
 
     for _, line in ipairs(lines) do
-        local parsed = decodeNDJSONLine(line)
-        if parsed and parsed.object == 'warning' then
-            issues[#issues + 1] = parsed.warning or ((parsed.card_name or 'Card') .. ' was skipped')
-        elseif parsed and parsed.object == 'error' then
-            issues[#issues + 1] = parsed.error or parsed.details or 'Spawn error'
-        elseif parsed and parsed.Name == 'DeckCustom' and parsed.ContainedObjects and #parsed.ContainedObjects > 0 then
-            directDeck = parsed
-        elseif parsed and parsed.Name == 'Card' and parsed.CardID and parsed.CustomDeck then
-            cardObjects[#cardObjects + 1] = parsed
+        local trimmed = tostring(line or ''):gsub('^%s+', ''):gsub('%s+$', '')
+        if trimmed:match('^{"object"%s*:') then
+            local parsed = decodeNDJSONLine(trimmed)
+            if parsed and parsed.object == 'warning' then
+                issues[#issues + 1] = parsed.warning or ((parsed.card_name or 'Card') .. ' was skipped')
+            elseif parsed and parsed.object == 'error' then
+                issues[#issues + 1] = parsed.error or parsed.details or 'Spawn error'
+            end
+        elseif trimmed:find('"ContainedObjects"', 1, true) or trimmed:match('"Name"%s*:%s*"DeckCustom"') then
+            directDeckJson = trimmed
         else
-            if line and line ~= '' then
-                fallbackSpawnLines[#fallbackSpawnLines + 1] = line
+            local parsed = decodeNDJSONLine(trimmed)
+            if parsed and parsed.Name == 'Card' and parsed.CardID and parsed.CustomDeck then
+                cardObjects[#cardObjects + 1] = parsed
+            elseif trimmed ~= '' then
+                fallbackSpawnLines[#fallbackSpawnLines + 1] = trimmed
             end
         end
     end
@@ -289,27 +293,14 @@ spawnNDJSONQueue = function(respText, spawnPos, onDone, batchSize)
         printToAll('Spawn warnings: ' .. tostring(#issues) .. ' cards were skipped.', Color.Orange)
     end
 
-    if directDeck then
+    if directDeckJson then
         local selfRot = self.getRotation()
-        if not directDeck.Transform then
-            directDeck.Transform = {}
-        end
-        directDeck.Transform.posX = spawnPos and spawnPos.x or directDeck.Transform.posX or 0
-        directDeck.Transform.posY = spawnPos and spawnPos.y or directDeck.Transform.posY or 2
-        directDeck.Transform.posZ = spawnPos and spawnPos.z or directDeck.Transform.posZ or 0
-        directDeck.Transform.rotX = selfRot.x
-        directDeck.Transform.rotY = selfRot.y
-        directDeck.Transform.rotZ = 180
-        directDeck.Transform.scaleX = directDeck.Transform.scaleX or 1
-        directDeck.Transform.scaleY = directDeck.Transform.scaleY or 1
-        directDeck.Transform.scaleZ = directDeck.Transform.scaleZ or 1
-
-        spawnObjectData({
-            data = directDeck,
-            position = { directDeck.Transform.posX, directDeck.Transform.posY, directDeck.Transform.posZ },
-            rotation = { directDeck.Transform.rotX, directDeck.Transform.rotY, directDeck.Transform.rotZ }
+        spawnObjectJSON({
+            json = directDeckJson,
+            position = { spawnPos.x, spawnPos.y, spawnPos.z },
+            rotation = { selfRot.x, selfRot.y, 180 }
         })
-        cardsSpawned = #(directDeck.ContainedObjects or {})
+        cardsSpawned = totalCardsToSpawn
         updateSpawningIndicator()
         if onDone then
             onDone(cardsSpawned)

@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.926'
+mod_name, version = 'Card Importer', '1.927'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -658,22 +658,23 @@ local function decodeNDJSONLine(line)
   return parsed
 end
 
-local function firstSpawnPayloadFromNDJSON(respText)
+local function firstSpawnJSONFromNDJSON(respText)
   local issues = {}
   local lines = splitNDJSONLines(respText)
 
   for _, line in ipairs(lines) do
-    local parsed = decodeNDJSONLine(line)
-    if parsed then
-      if parsed.object == 'warning' then
-        table.insert(issues, parsed.warning or 'warning')
-      elseif parsed.object == 'error' then
-        table.insert(issues, parsed.error or parsed.details or 'error')
-      elseif parsed.Name == 'DeckCustom' or parsed.ContainedObjects then
-        return parsed, issues
-      else
-        table.insert(issues, 'unexpected payload')
+    local trimmed = tostring(line or ''):gsub('^%s+', ''):gsub('%s+$', '')
+    if trimmed:match('^{"object"%s*:') then
+      local parsed = decodeNDJSONLine(trimmed)
+      if parsed then
+        if parsed.object == 'warning' then
+          table.insert(issues, parsed.warning or 'warning')
+        elseif parsed.object == 'error' then
+          table.insert(issues, parsed.error or parsed.details or 'error')
+        end
       end
+    elseif trimmed:find('"ContainedObjects"', 1, true) or trimmed:match('"Name"%s*:%s*"DeckCustom"') then
+      return trimmed, issues
     end
   end
 
@@ -700,7 +701,7 @@ local function postNDJSON(url, payload, callback)
   )
 end
 
-local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
+local function requestRandomDeckFast(qTbl, queryRaw, count)
   if not qTbl or not queryRaw or queryRaw == '' or not count or count <= 1 then
     return false
   end
@@ -740,49 +741,30 @@ local function requestRandomDeckFast(qTbl, queryRaw, count, onFallback)
 
       if wr.is_error or (wr.response_code and wr.response_code >= 400) or not wr.text or wr.text == '' then
         safeStopTicker(0)
-        if onFallback then
-          onFallback()
-        else
-          handleWebError(wr, qTbl, 'Random deck failed')
-        end
+        handleWebError(wr, qTbl, 'Random deck failed')
         return
       end
 
-      local deckDat, issues = firstSpawnPayloadFromNDJSON(wr.text)
-      if not deckDat then
+      local deckJson, issues = firstSpawnJSONFromNDJSON(wr.text)
+      if not deckJson then
         safeStopTicker(0)
-        if onFallback then
-          onFallback()
-        else
-          local details = 'Backend returned no cards for random deck.'
-          if issues and #issues > 0 then
-            details = details .. ' (' .. table.concat(issues, '; ') .. ')'
-          end
-          Player[qTbl.color].broadcast(details,{1,0,0})
-          endLoop()
+        local details = 'Backend returned no cards for random deck.'
+        if issues and #issues > 0 then
+          details = details .. ' (' .. table.concat(issues, '; ') .. ')'
         end
-        return
-      end
-
-      if not deckDat.ContainedObjects then
-        safeStopTicker(0)
-        if onFallback then
-          onFallback()
-        else
-          Player[qTbl.color].broadcast('Invalid random deck payload from backend.',{1,0,0})
-          endLoop()
-        end
+        Player[qTbl.color].broadcast(details,{1,0,0})
+        endLoop()
         return
       end
 
       local spawnDat={
-        data=deckDat,
+        json=deckJson,
         position=qTbl.position or {0,2,0},
         rotation=Vector(0,Player[qTbl.color].getPointerRotation(),180)
       }
-      safeStopTicker(#deckDat.ContainedObjects)
-      spawnObjectData(spawnDat)
-      Player[qTbl.color].broadcast('All '..tostring(#deckDat.ContainedObjects)..' cards loaded!',{0.5,0.8,0.5})
+      safeStopTicker(count)
+      spawnObjectJSON(spawnDat)
+      Player[qTbl.color].broadcast('Random deck loaded!',{0.5,0.8,0.5})
       endLoop()
     end)
 
@@ -838,18 +820,6 @@ function queryUsesTaggerFilter(queryRaw)
   return tostring(queryRaw or ''):lower():match('(^|[%s%(+%-])(otag|atag|arttag|function):') ~= nil
 end
 
-local function fallbackRandomListRequest(url, qTbl, count)
-  local singleRequestUrl = url
-  if count and count > 1 then
-    local separator = singleRequestUrl:find('?', 1, true) and '&' or '?'
-    singleRequestUrl = singleRequestUrl .. separator .. 'count=' .. tostring(count)
-  end
-  WebRequest.get(singleRequestUrl, function(wr)
-    applyTagCacheStatusHint(wr, qTbl)
-    spawnList(wr, qTbl)
-  end)
-end
-
 local function dispatchRandomRequest(url, qTbl, count, queryRaw)
   if queryUsesTaggerFilter(queryRaw) and qTbl and qTbl.text then
     qTbl.text('Spawning here\nChecking tag cache...')
@@ -859,14 +829,13 @@ local function dispatchRandomRequest(url, qTbl, count, queryRaw)
     qTbl.deck = count
 
     if count > 1 then
-      local startedFast = requestRandomDeckFast(qTbl, queryRaw, count, function()
-        fallbackRandomListRequest(url, qTbl, count)
-      end)
+      local startedFast = requestRandomDeckFast(qTbl, queryRaw, count)
       if startedFast then
         return
       end
 
-      fallbackRandomListRequest(url, qTbl, count)
+      Player[qTbl.color].broadcast('Random deck build needs a valid query.',{1,0,0})
+      endLoop()
       return
     end
   end
@@ -952,7 +921,7 @@ Importer=setmetatable({
       encodedName = urlEncode(encodedName)
     end
     local function requestNameFallback()
-      WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=cards&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
+      WebRequest.get(BACKEND_URL..'/search?compact=spawn&unique=card&limit='..tostring(NAME_FALLBACK_LIMIT)..'&forceApi=true&q='..encodedName,function(wr)
         spawnList(wr,qTbl)
       end)
     end
