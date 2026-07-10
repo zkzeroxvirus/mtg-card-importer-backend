@@ -1884,7 +1884,7 @@ function extractPositiveTaggerTerms(query) {
 
 function stripTaggerTerms(query) {
   return String(query || '')
-    .replace(TAGGER_CLAUSE_CAPTURE_REGEX, '$1')
+    .replace(TAGGER_CLAUSE_CAPTURE_REGEX, ' ')
     .replace(/\+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

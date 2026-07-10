@@ -14,6 +14,7 @@ jest.mock('../lib/oracle-tags');
 const scryfallLib = require('../lib/scryfall');
 const bulkData = require('../lib/bulk-data');
 const oracleTags = require('../lib/oracle-tags');
+const tagCache = require('../lib/tag-cache');
 
 describe('Price Filter API Routing', () => {
   let app;
@@ -36,6 +37,7 @@ describe('Price Filter API Routing', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    tagCache.clear();
     
     // Setup default mocks
     bulkData.isLoaded.mockReturnValue(true);
@@ -58,6 +60,17 @@ describe('Price Filter API Routing', () => {
       { id: '9', oracle_id: 'oracle-9', name: 'Test Card 9', prices: { usd: '6.00' } },
       { id: '10', oracle_id: 'oracle-10', name: 'Test Card 10', prices: { usd: '7.00' } }
     ]);
+    bulkData.getPrintingsByOracleId.mockImplementation((oracleId) => ([
+      {
+        id: `${oracleId}-printing`,
+        oracle_id: oracleId,
+        name: `Bulk ${oracleId}`,
+        type_line: 'Artifact',
+        image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' },
+        games: ['paper']
+      }
+    ]));
+    bulkData.isNonPlayableCard.mockReturnValue(false);
     bulkData.getQueryExplain.mockReturnValue({
       mode: 'random',
       totalCards: 100,
@@ -71,6 +84,9 @@ describe('Price Filter API Routing', () => {
       const key = String(term || '').toLowerCase();
       if (key.includes('builddraw')) {
         return ['oracle-fn-1', 'oracle-fn-2'];
+      }
+      if (key.includes('manarock')) {
+        return ['oracle-manarock-1', 'oracle-manarock-2', 'oracle-manarock-3'];
       }
       if (key.includes('draw')) {
         return ['oracle-otag-1', 'oracle-otag-2', 'oracle-otag-3'];
@@ -153,16 +169,13 @@ describe('Price Filter API Routing', () => {
     });
 
     test('should use shared tag cache path for otag filters', async () => {
-      bulkData.searchCards.mockResolvedValueOnce([
-        { id: 'otag-bulk-1', oracle_id: 'oracle-otag-1', name: 'Otag Card 1', type_line: 'Sorcery', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
-      ]);
-
       const response = await request(app)
         .get('/search?q=otag:draw')
         .expect(200);
 
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
-      expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(bulkData.getPrintingsByOracleId).toHaveBeenCalled();
+      expect(bulkData.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
     });
   });
@@ -406,6 +419,37 @@ describe('Price Filter API Routing', () => {
       expect(response.headers['x-query-plan']).toBe('api:api_only_filter');
       expect(bulkData.getRandomCards).not.toHaveBeenCalled();
       expect(bulkData.searchCards).toHaveBeenCalled();
+      expect(scryfallLib.searchCards).not.toHaveBeenCalled();
+      expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
+    });
+
+    test('should strip otag terms before applying remaining filters for random/build count queries', async () => {
+      bulkData.searchCards.mockResolvedValueOnce([
+        { id: 'manarock-rare-1', oracle_id: 'oracle-manarock-1', name: 'Manarock Rare 1', type_line: 'Artifact', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
+        { id: 'manarock-rare-2', oracle_id: 'oracle-manarock-2', name: 'Manarock Rare 2', type_line: 'Artifact', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] },
+        { id: 'other-rare', oracle_id: 'oracle-other', name: 'Other Rare', type_line: 'Artifact', image_uris: { normal: 'https://cards.scryfall.io/normal/front/0/0/mock.jpg' }, games: ['paper'] }
+      ]);
+      scryfallLib.convertToTTSCard = jest.fn((card) => ({
+        Name: 'Card',
+        Nickname: card.name,
+        Memo: card.oracle_id,
+        CustomDeck: {
+          '1': {
+            FaceURL: card.image_uris.normal,
+            BackURL: 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+          }
+        }
+      }));
+
+      const response = await request(app)
+        .post('/random/build')
+        .set('Content-Type', 'application/json')
+        .send({ q: 'otag:manarock+id:r', count: 2, enforceCommander: true })
+        .expect(200);
+
+      expect(response.text).toContain('Manarock Rare');
+      expect(response.text).not.toContain('Other Rare');
+      expect(bulkData.searchCards).toHaveBeenCalledWith('id:r lang:en', Number.MAX_SAFE_INTEGER, true);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });
