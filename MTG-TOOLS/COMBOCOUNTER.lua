@@ -27,6 +27,7 @@ TTS_INPUT_ALIGN_RIGHT        = 3
 CAPTURE_BASE_COST  = 500
 CAPTURE_PRICE_STEP = 250
 DUPLICATE_REWARD_ESSENCE = 250
+CRYPT_BOSS_ESSENCE = 500
 
 LABEL_BG = {0.92, 0.88, 0.78}
 
@@ -5567,8 +5568,16 @@ function handleRewardDrop(obj)
 
   if ess_markHandledObjectOnce(obj) then return true end
 
+  local function awardCryptBossEssence()
+    if hit.category ~= "crypt" then return end
+    applyEssenceDeltaTracked(CRYPT_BOSS_ESSENCE, "Crypt Boss Clear: " .. hit.name)
+    broadcastToAll("[" .. self.getName() .. "] Crypt boss defeated: +"
+      .. tostring(CRYPT_BOSS_ESSENCE) .. " Essence", {0.7, 0.5, 1.0})
+  end
+
   if not item.repeatable and ess_isItemUnlocked(item) then
     applyEssenceDeltaTracked(DUPLICATE_REWARD_ESSENCE, "Duplicate Reward: " .. hit.name, true)
+    awardCryptBossEssence()
     print("[" .. self.getName() .. "] Duplicate reward converted to +" .. tostring(DUPLICATE_REWARD_ESSENCE)
       .. " Essence: " .. hit.name)
     ess_safeDestructObject(obj)
@@ -5580,6 +5589,7 @@ function handleRewardDrop(obj)
   end
 
   ess_incrementItemUnlock(item)
+  awardCryptBossEssence()
   print("[" .. self.getName() .. "] Unlocked " .. hit.category .. ": " .. hit.name)
   ess_safeDestructObject(obj)
   essenceTab = hit.category
