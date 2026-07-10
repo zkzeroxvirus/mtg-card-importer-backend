@@ -41,18 +41,25 @@ script="self.max_typed_number=999 function onNumberTyped(ply, int) enc = Global.
 function toggleProp(obj,ply)
   enc = Global.getVar('Encoder')
   if enc then
-    enc.call("APItoggleProperty",{obj=obj,propID=pID})
-    local enabled = enc.call("APIobjIsPropEnabled",{obj=obj,propID=pID})
+    if enc.call("APIobjectExists",{obj=obj}) == false then
+      enc.call("APIencodeObject",{obj=obj,skipBuild=true})
+    end
+
+    local wasEnabled = enc.call("APIobjIsPropEnabled",{obj=obj,propID=pID})
     local currentData = enc.call("APIobjGetValueData",{obj=obj,valueID='picounter'})
     local currentValue = currentData and currentData.picounter or 0
 
-    if enabled then
-      obj.setLuaScript(script)
-    else
+    if wasEnabled then
       obj.setLuaScript('')
       currentValue = 0
+      enc.call("APIobjDisableProp",{obj=obj,propID=pID})
       enc.call("APIobjSetValueData",{obj=obj,valueID='picounter',data={picounter=currentValue}})
+      enc.call("APIrebuildButtons",{obj=obj,immediate=true})
+      return
     end
+
+    enc.call("APIobjEnableProp",{obj=obj,propID=pID})
+    obj.setLuaScript(script)
 
     obj=obj.reload()
     Wait.condition(function()
@@ -60,15 +67,10 @@ function toggleProp(obj,ply)
         enc.call("APIencodeObject",{obj=obj,skipBuild=true})
       end
       enc.call("APIobjUpdateThis",{obj=obj})
-      if enabled then
-        enc.call("APIobjEnableProp",{obj=obj,propID=pID})
-      else
-        enc.call("APIobjDisableProp",{obj=obj,propID=pID})
-      end
+      enc.call("APIobjEnableProp",{obj=obj,propID=pID})
       enc.call("APIobjSetValueData",{obj=obj,valueID='picounter',data={picounter=currentValue}})
       enc.call("APIrebuildButtons",{obj=obj,immediate=true})
     end, function() return not(obj.spawning) end)
-
   end
 end
 
