@@ -12,6 +12,8 @@ stella.lifeless.space
 
 prop_id = "moon-mtg-equip"
 version = "1.0.0"
+local did_load = false
+local deck_ctx_var = "moon-mtg-equip-ctx"
 
 --[[--
 feel free to copy this snippet, it's *really* useful for encoder api stuff
@@ -64,6 +66,7 @@ local function register_module()
 end
 
 local function init_card(card)
+	if card == nil then return end
 	if card.tag ~= "Card" then return end
 	if card.getVar('noencode') ~= nil and card.getVar('noencode') == true then return end
 
@@ -81,6 +84,19 @@ local function init_card(card)
 	end
 end
 
+local function equip_data_for(card)
+	local enc = encoder()
+	if enc == nil then return nil end
+	if card == nil or not enc.objectExists { obj = card } then return nil end
+	if not enc.propertyExists { propID = prop_id } then return nil end
+
+	local data = enc.objGetPropData { obj = card, propID = prop_id } or {}
+	if type(data.moon_mtg_equip) ~= "table" then
+		data.moon_mtg_equip = {}
+	end
+	return data
+end
+
 local function equipped_offset(i)
 	local col = math.floor(i / 3)
 	local row = i % 3
@@ -91,10 +107,11 @@ local function equip_to(deck, to)
 	local enc = encoder()
 	if enc == nil then return end
 
-	local data = enc.objGetPropData { obj = to, propID = prop_id }
+	local data = equip_data_for(to)
+	if data == nil then return end
 	local origin, angles = to.getPosition(), to.getRotation()
 
-	while deck ~= nil and (deck.tag == "Card" or #deck.getObjects() > 0) do
+	while deck ~= nil and (deck.tag == "Card" or (deck.getObjects ~= nil and #deck.getObjects() > 0)) do
 		local card
 		if deck.tag == "Card" then
 			card = deck
@@ -114,16 +131,19 @@ local function equip_to(deck, to)
 		card.locked = true
 		to.addAttachment(card)
 
-		table.insert(data.moon_mtg_equip, #to.getAttachments())
+		local attachments = to.getAttachments() or {}
+		table.insert(data.moon_mtg_equip, #attachments)
 	end
 
     enc.objSetPropData { obj = to, propID = prop_id, data = data }
+	enc.rebuildButtons { obj = to, immediate = true }
 end
 
 -- a little odd way to ensure deduplication
 -- but hey, it works :tm:
 local function setup_deck_ctx(obj, force)
-	if obj.getVar("moon-mtg-equip-ctx") and not force then return end
+	if obj == nil then return end
+	if obj.getVar(deck_ctx_var) and not force then return end
 
 	obj.addContextMenuItem("equip all to top", function(plycol, objpos, deck)
 		if deck.tag ~= "Deck" then return end
@@ -138,7 +158,25 @@ local function setup_deck_ctx(obj, force)
 		equip_to(deck, card)
 	end)
 
-	obj.setVar("moon-mtg-equip-ctx", true)
+	obj.setVar(deck_ctx_var, true)
+end
+
+local function setup_all_deck_ctx(force)
+	for _, obj in pairs(getObjects()) do
+		if obj.tag == "Deck" then
+			setup_deck_ctx(obj, force)
+		end
+	end
+end
+
+local function clean_deck_ctx()
+	for _, obj in pairs(getObjects()) do
+		if obj.tag == "Deck" then
+			obj.clearContextMenu()
+			obj.setVar(deck_ctx_var, false)
+			setup_deck_ctx(obj, true)
+		end
+	end
 end
 
 -- api calls
@@ -150,7 +188,8 @@ function createButtons(params)
 	local flip = enc.getFlip { obj = params.obj } or 1
 	if flip == -1 then return end
 
-	local equipped = enc.objGetPropData { obj = params.obj, propID = prop_id }
+	local equipped = equip_data_for(params.obj)
+	if equipped == nil then return end
 	if #equipped.moon_mtg_equip == 0 then return end
 
 	params.obj.createButton {
@@ -177,43 +216,72 @@ function unequip_all(obj, ply)
 	local enc = encoder()
 	if enc == nil then return end
 
-	local equipped = enc.objGetPropData { obj = obj, propID = prop_id }
+	local equipped = equip_data_for(obj)
+	if equipped == nil then return end
 	if #equipped.moon_mtg_equip == 0 then return end
 
 	local origin = obj.getPosition()
 	obj.setPosition(origin + Vector(0, #equipped.moon_mtg_equip + 1, 0))
 
 	for i = #equipped.moon_mtg_equip, 1, -1 do
-		local new = obj.removeAttachment(equipped.moon_mtg_equip[i] - 1)
-		new.setPosition(origin + Vector(0, #equipped.moon_mtg_equip - i + 1, 0))
-		new.setScale({ 1, 1, 1 })
-		new.locked = false
+		local index = tonumber(equipped.moon_mtg_equip[i])
+		local new = index and obj.removeAttachment(index - 1) or nil
+		if new ~= nil then
+			new.setPosition(origin + Vector(0, #equipped.moon_mtg_equip - i + 1, 0))
+			new.setScale({ 1, 1, 1 })
+			new.locked = false
+		end
 	end
 
 	enc.objSetPropData { obj = obj, propID = prop_id, data = { moon_mtg_equip = {} } }
+	enc.rebuildButtons { obj = obj, immediate = true }
 end
 
 -- events
 
-function onload()
+local function load_module()
+	if did_load then return end
+	did_load = true
+
 	self.addContextMenuItem("Register Module", register_module)
+	self.addContextMenuItem("Clean Deck Equip Menus", clean_deck_ctx)
 	Wait.condition(register_module, function() return Global.getVar("Encoder") ~= nil end, 30)
 
-	for _, obj in pairs(getObjects()) do
-		if obj.tag == "Deck" then
-			setup_deck_ctx(obj, true)
-		end
-	end
+	setup_all_deck_ctx(false)
 end
 
-function onObjectDropped(ply, obj)
+function onLoad()
+	load_module()
+end
+
+function onload()
+	load_module()
+end
+
+local function handle_object_dropped(ply, obj)
 	init_card(obj)
 end
 
-function onObjectSpawn(obj)
-	if obj.tag ~= "Card" then return end
+function onObjectDrop(ply, obj)
+	handle_object_dropped(ply, obj)
+end
 
-	Wait.frames(function() setup_deck_ctx(obj, true) end, 10)
+function onObjectDropped(ply, obj)
+	handle_object_dropped(ply, obj)
+end
+
+function onObjectSpawn(obj)
+	if obj == nil then return end
+	if obj.tag ~= "Card" and obj.tag ~= "Deck" then return end
+
+	Wait.frames(function()
+		if obj == nil then return end
+		if obj.tag == "Card" then
+			init_card(obj)
+		elseif obj.tag == "Deck" then
+			setup_deck_ctx(obj, false)
+		end
+	end, 10)
 end
 
 function onObjectEnterContainer(container, obj)
@@ -227,7 +295,7 @@ function onObjectEnterZone(zone,obj)
 	if obj.getName():lower():find('planechase') then return end
 
 	if obj.tag == "Deck" then
-		Wait.frames(function() setup_deck_ctx(obj, true) end, 10)
+		Wait.frames(function() setup_deck_ctx(obj, false) end, 10)
 	end
 end
 
@@ -236,6 +304,6 @@ function onObjectLeaveZone(zone, obj)
 	if obj.getName():lower():find('planechase') then return end
 
 	if obj.tag == "Deck" then
-		Wait.frames(function() setup_deck_ctx(obj, true) end, 10)
+		Wait.frames(function() setup_deck_ctx(obj, false) end, 10)
 	end
 end

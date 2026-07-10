@@ -35,6 +35,18 @@ local function isObjectUsable(obj)
   return guid ~= nil and guid ~= ""
 end
 
+local function objectHasAttachments(obj)
+  if not isObjectUsable(obj) then
+    return false
+  end
+
+  local attachments = safeEval(function()
+    return obj.getAttachments()
+  end)
+
+  return type(attachments) == "table" and #attachments > 0
+end
+
 local function isObjectSettled(obj)
   if not isObjectUsable(obj) then
     return false
@@ -344,6 +356,13 @@ local function fixDroppedObjectInternal(obj, playerColor, allowRetry, options)
 
   if not isObjectUsable(obj) then
     notify("Drop an object onto this tool.", playerColor, {1, 0.6, 0.2})
+    return 0
+  end
+
+  if objectHasAttachments(obj) then
+    if not opts.silentNoChange then
+      notify("Unequip attached cards before running the image fixer.", playerColor, {1, 0.6, 0.2})
+    end
     return 0
   end
 

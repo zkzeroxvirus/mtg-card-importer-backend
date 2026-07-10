@@ -4028,15 +4028,15 @@ function drawOtagInput(z)
   trackButton({
     click_function = "xp_noop", function_owner = self,
     label = "OTAG", position = {-1.4, 0.1, z},
-    width = 600, height = 180, font_size = 90,
+    width = 500, height = 180, font_size = 90,
     color = {0.92, 0.88, 0.78}, font_color = {0, 0, 0},
   })
   trackInput({
     input_function = "otag_input", function_owner = self,
-    label = "e.g. ramp", value = packInput.otag,
+    label = "e.g. ramp or mana-rock", value = packInput.otag,
     alignment = TTS_INPUT_ALIGN_RIGHT, validation = TTS_INPUT_VALIDATION_NONE,
-    position = {1.0, 0.1, z},
-    width = 700, height = 180, font_size = 90,
+    position = {0.90, 0.1, z},
+    width = 1300, height = 180, font_size = 90,
     color = {1, 1, 1}, font_color = {0, 0, 0},
     char_limit = 0,
   })
@@ -4072,6 +4072,10 @@ function click_inputEnter()
   elseif activePack == "otag"   then q = buildOtagQuery() end
 
   if not q or q == "" then
+    if activePack == "otag" then
+      broadcastToAll("[" .. self.getName() .. "] Enter an OTAG before confirming.", {0.9, 0.6, 0.3})
+      return
+    end
     attemptPurchase(activePack)
     return
   end
@@ -4165,11 +4169,42 @@ function buildMythicQuery()
   return table.concat(parts, "+")
 end
 
+function normalizeOtagTerm(value)
+  local s = tostring(value or "")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  if s == "" then return "" end
+
+  local prefix = "otag"
+  local rawPrefix, rest = s:match("^%-?%s*([%a]+)%s*[:=]%s*(.+)$")
+  if rawPrefix then
+    local p = rawPrefix:lower()
+    if p == "otag" or p == "oracletag" or p == "function" then
+      prefix = p
+      s = rest
+    end
+  end
+
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  s = s:gsub("^[\"']+", ""):gsub("[\"']+$", "")
+  s = s:gsub("[_+]+", " ")
+  s = s:gsub("%s+", " ")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  if s == "" then return "" end
+
+  s = s:lower()
+  if s:find("%s") then
+    s = "\"" .. s:gsub("\"", "") .. "\""
+  end
+  return prefix .. ":" .. s
+end
+
 function buildOtagQuery()
   local parts = {}
   local c = colorString()
   -- Keep OTAG first: Scryfall OTAG matching can under-return when OTAG is not the first clause.
-  if packInput.otag ~= "" then table.insert(parts, "otag:" .. packInput.otag) end
+  local otagTerm = normalizeOtagTerm(packInput.otag)
+  if otagTerm == "" then return "" end
+  table.insert(parts, otagTerm)
   if c ~= "" then table.insert(parts, "id" .. (packInput.colorOp or ":") .. c) end
   table.insert(parts, "f:c")
   return table.concat(parts, "+")
@@ -4375,7 +4410,10 @@ function spawnMysteryPack(refundCost, packName)
 end
 
 function spawnParameterizedPack(query, count, refundCost, packName)
-  local isOtagQuery = type(query) == "string" and query:match("otag:") ~= nil
+  local lowerQuery = tostring(query or ""):lower()
+  local isOtagQuery = lowerQuery:find("otag:", 1, true) ~= nil
+    or lowerQuery:find("oracletag:", 1, true) ~= nil
+    or lowerQuery:find("function:", 1, true) ~= nil
 
   local function refundWithMessage(message, reason)
     broadcastToAll(message, {0.9, 0.3, 0.3})

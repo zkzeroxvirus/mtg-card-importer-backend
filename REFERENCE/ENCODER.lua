@@ -196,9 +196,12 @@ function onLoad(saved_data)
           EncodedObjects[i] = JSON.decode(v)
           EncodedObjects[i].this = getObjectFromGUID(i)
           if EncodedObjects[i].this == nil then
-            EncodedObjects[i] = nil
+            if EncodedObjects[i].inContainer ~= true then
+              EncodedObjects[i] = nil
+            end
           else
             local o = EncodedObjects[i].this
+            EncodedObjects[i].inContainer = nil
             Wait.frames(function() queueRebuildButtons(o) end,2)
           end
         end
@@ -303,7 +306,7 @@ function onSave()
   for i,v in pairs(EncodedObjects) do
     --Removing Object reference before encoding.
     EncodedObjects[i].this = getObjectFromGUID(i)
-    if EncodedObjects[i].this ~= nil then
+    if EncodedObjects[i].this ~= nil or EncodedObjects[i].inContainer == true then
       local tempThis = EncodedObjects[i].this
       EncodedObjects[i].this = ""
       data_to_save["cards"][i] = JSON.encode(EncodedObjects[i])
@@ -488,6 +491,7 @@ end
 function onObjectLeaveContainer(ctr,obj)
   if EncodedObjects[obj.getGUID()] ~= nil then
     EncodedObjects[obj.getGUID()].this = getObjectFromGUID(obj.getGUID())
+    EncodedObjects[obj.getGUID()].inContainer = nil
     if obj.use_hands == true then
       Wait.condition( function()
       Wait.condition(
@@ -496,6 +500,14 @@ function onObjectLeaveContainer(ctr,obj)
       ) end,
       function() return not obj.resting end)
     end
+  end
+end
+function onObjectEnterContainer(ctr,obj)
+  if obj == nil then return end
+  local guid = obj.getGUID()
+  if EncodedObjects[guid] ~= nil then
+    EncodedObjects[guid].this = nil
+    EncodedObjects[guid].inContainer = true
   end
 end
 function handleObjectDestroyed(obj)
@@ -520,7 +532,12 @@ function handleObjectDestroyed(obj)
       end
     end
   else
-    removeEncodedObject(obj)
+    local guid = obj.getGUID()
+    if EncodedObjects[guid] ~= nil and EncodedObjects[guid].inContainer == true then
+      EncodedObjects[guid].this = nil
+    else
+      removeEncodedObject(obj)
+    end
   end
 end
 
@@ -643,7 +660,13 @@ function encodeObject(o, skipBuild)
   if o.getVar('noencode') == true then
     return false
   end
-  if EncodedObjects[o.getGUID()] == nil and o ~= self then
+  local guid = o.getGUID()
+  if EncodedObjects[guid] ~= nil and o ~= self then
+    EncodedObjects[guid].this = o
+    EncodedObjects[guid].inContainer = nil
+    return false
+  end
+  if EncodedObjects[guid] == nil and o ~= self then
     EncodedObjects[o.getGUID()] = {
     this = o,
     oName = o.getName(),
@@ -653,7 +676,8 @@ function encodeObject(o, skipBuild)
     menus = {},
     editing = nil,
     flip = 1,
-    disable = false
+    disable = false,
+    inContainer = nil
     }
     if skipBuild ~= true then
       queueRebuildButtons(o)
@@ -1589,7 +1613,7 @@ end
 function garbageCollect()
   for k,v in pairs(EncodedObjects) do
     if v.this == nil then
-      if getObjectFromGUID(k) == nil then
+      if getObjectFromGUID(k) == nil and v.inContainer ~= true then
         EncodedObjects[k] = nil
       end
     end
