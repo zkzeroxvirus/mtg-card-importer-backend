@@ -97,7 +97,8 @@ newText=setmetatable({
   end})
 
 --[[Variables]]
-local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new('https://i.stack.imgur.com/787gj.png',{})
+local DEFAULT_CARD_BACK_URL = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
+local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new(DEFAULT_CARD_BACK_URL,{})
 local NAME_FALLBACK_LIMIT = 16
 local TOKEN_RELATED_CACHE_MAX = 300
 local tokenRelatedPartsCache = {}
@@ -202,7 +203,7 @@ local function spawnImageOnlyCard(qTbl)
     return
   end
 
-  local backUrl = Back[qTbl.player] or Back.___ or 'https://i.stack.imgur.com/787gj.png'
+  local backUrl = Back[qTbl.player] or Back.___ or DEFAULT_CARD_BACK_URL
   local cardSeed = math.random(100, 999)
   local displayName = qTbl.name or ''
   if displayName == '' or displayName == 'blank card' or displayName == 'blank%20card' then
@@ -864,12 +865,6 @@ Importer=setmetatable({
     WebRequest.get(searchUrl,function(wr)
         spawnList(wr,qTbl)end)end,
 
-  Back=function(qTbl)
-    if qTbl.target then qTbl.url=qTbl.target.getJSON():match('BackURL": "([^"]*)"')end
-    Back[qTbl.player]=qTbl.url
-    Player[qTbl.color].broadcast('Card Backs set to\n'..qTbl.url,{0.9,0.9,0.9})
-    endLoop()end,
-
   Format=function(qTbl)
     if not qTbl.color or not Player[qTbl.color] or not Player[qTbl.color].host then
       Player[qTbl.color].broadcast('Only the host can change format enforcement.',{1,0.6,0.2})
@@ -1442,11 +1437,6 @@ Importer=setmetatable({
     endLoop()
   end,
 
-  Booster=function(qTbl)
-    Player[qTbl.color].broadcast('Booster mode has been removed from this importer.',{1,0.6,0.2})
-    endLoop()
-  end,
-
   Random=function(qTbl)
     local url,q1=BACKEND_URL..'/random?compact=spawn','&q=is:hires'
     local directQueryRaw = nil
@@ -1602,9 +1592,6 @@ local Usage = [[━━━━━━━━━━━━━━━━━━━━━�
 
 [b][0077ff]Scryfall clear queue[/b]
    → Cancel pending requests & reload importer
-
-[b][0077ff]Scryfall clear back[/b]
-   → Reset custom card backs to default
 
 [b][0077ff]Scryfall format on|off|toggle|status[/b]
   → Host-only table toggle for commander format enforcement
@@ -1860,7 +1847,7 @@ function ensureRegisterModule()
 end
 
 --[[Tabletop Callbacks]]
-function onSave()self.script_state=JSON.encode(Back)end
+function onSave()self.script_state=''end
 function onLoad(data)
   -- Reset registration guard on load
   isRegistered = false
@@ -1898,15 +1885,7 @@ function onLoad(data)
 
   ensureRegisterModule()
   
-  -- Load saved card back settings
-  if data ~= '' then
-    Back = JSON.decode(data)
-  end
-  if not Back or type(Back) ~= 'table' then
-    Back = {}
-  end
-  Back.___ = Back.___ or 'https://i.stack.imgur.com/787gj.png'
-  Back = TBL.new(Back)
+  Back = TBL.new(DEFAULT_CARD_BACK_URL, {})
   
   -- Create UI buttons
   self.createButton({
@@ -1949,7 +1928,6 @@ function onLoad(data)
   -- Registration happens in uVersion() after update check, or above if auto-update is disabled
   startTimeoutMonitor()
 
-  onChat('Scryfall clear back')
 end
 function onDestroy()
   -- Stop the timeout monitor to prevent orphaned callbacks
@@ -2005,12 +1983,6 @@ function onChat(msg,p)
       -- Clear the queue by reloading the object
       p.print('[b][00CCFF]♻️ Respawning Importer...[/b]',SMC)
       self.reload()
-    elseif a=='clear back'then
-      self.script_state=string.gsub([[{}]],'\n','')
-
-			-- Card back default (matches backend default); per-player overrides stored in script_state
-			Back=TBL.new('https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/',JSON.decode(self.script_state))
-
     elseif a then
       -- Parse command: support custom image proxy
       -- Syntax: "scryfall cardname https://custom-image-url"
@@ -2145,7 +2117,7 @@ function registerModule()
     return
   end
 
-  buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Set Sleeve','Reverse Card'}
+  buttons={'Respawn','Oracle','Rulings','Emblem\nAnd Tokens','Printings','Reverse Card'}
 
   local function versionToNumber(value)
     if value == nil then
@@ -2179,8 +2151,8 @@ function registerModule()
     enc.call('APIregisterProperty',prop)
   end
 
-  function eEmblemAndTokens(o,p)ENC(o,p,'Token')end function eOracle(o,p)ENC(o,p,'Text')end function eRulings(o,p)ENC(o,p,'Rules')end function ePrintings(o,p)ENC(o,p,'Print')end function eRespawn(o,p)ENC(o,p,'Spawn')end function eSetSleeve(o,p)ENC(o,p,'Back')end
-  function eReverseCard(o,p)ENC(o,p)spawnObjectJSON({json=o.getJSON():gsub('BackURL','FaceURL'):gsub('FaceURL','BackURL',1)})
+  function eEmblemAndTokens(o,p)ENC(o,p,'Token')end function eOracle(o,p)ENC(o,p,'Text')end function eRulings(o,p)ENC(o,p,'Rules')end function ePrintings(o,p)ENC(o,p,'Print')end function eRespawn(o,p)ENC(o,p,'Spawn')end
+  function eReverseCard(o,p)ENC(o,p)spawnObjectJSON({json=o.getJSON():gsub('BackURL','FaceURL'):gsub('FaceURL','BackURL',1)})end
 
   isRegistered = true
 end
@@ -2188,7 +2160,7 @@ end
 function ENC(o,p,m)
   enc.call('APIrebuildButtons',{obj=o})
   if m then
-    if o.getName()=='' and m~='Back' then
+    if o.getName()=='' then
       Player[p].broadcast('Card has no name!',{1,0,1})
     else
       local oracleid=nil
@@ -2218,5 +2190,4 @@ Button=setmetatable({label='UNDEFINED',click_function='eOracle',function_owner=s
       o.createButton(t)
       t.height=400
       if i%2==1 then t.position[3]=t.position[3]+0.1625 end end})
-  end      
 --EOF

@@ -4884,6 +4884,31 @@ function ess_serializeCaptures(captures)
   return JSON.encode(captures or {})
 end
 
+function ess_sanitizeCaptureBagData(data)
+  if type(data) ~= "table" then return nil end
+
+  if data._schema == "capture_payload_v2" then
+    return data
+  end
+
+  if hasContainedCardPayload(data) then
+    local containedList = normalizeContainedObjectsList(data.ContainedObjects)
+    local first = containedList[1]
+    if type(first) ~= "table" then return nil end
+
+    local compact = buildCapturePayloadFromSingleCardData(first)
+    if not compact then return nil end
+    if type(data.CustomMesh) == "table" and data.CustomMesh.DiffuseURL and data.CustomMesh.DiffuseURL ~= "" then
+      compact.bagDiffuseURL = tostring(data.CustomMesh.DiffuseURL)
+    elseif compact.bagDiffuseURL == "" and compact.card and compact.card.faceURL then
+      compact.bagDiffuseURL = tostring(compact.card.faceURL)
+    end
+    return compact
+  end
+
+  return buildCapturePayloadFromSingleCardData(data)
+end
+
 function ess_normalizeCapturesTable(captures)
   local out = {}
   if type(captures) ~= "table" then return out end
@@ -4894,8 +4919,10 @@ function ess_normalizeCapturesTable(captures)
         local id = item.id or ess_toId(name)
         local url = item.url or item.imageUrl or item.image or ""
         local desc = item.desc or ("Capture ticket for " .. name .. ".")
-        local bagData = item.bagData or item.bag_data
-        if type(bagData) ~= "table" then bagData = nil end
+        local bagData = ess_sanitizeCaptureBagData(item.bagData or item.bag_data)
+        if url == "" and bagData then
+          url = extractCaptureFaceUrlFromPayload(bagData)
+        end
         out[id] = {
           id       = id,
           name     = name,
@@ -6022,94 +6049,13 @@ end
 function buildCapturePayloadFromObjectData(data, fallbackName, fallbackUrl)
   if type(data) ~= "table" then return nil, fallbackUrl or "" end
 
-  -- Best case: preserve the full Infinite Bag payload exactly enough for TTS
-  -- to respawn it as Custom_Model_Infinite_Bag with its contained card intact.
-  if data.Name == "Custom_Model_Infinite_Bag" and hasContainedCardPayload(data) then
-    local payload = JSON.decode(JSON.encode(data))
-    payload.GUID = ""
-    payload.Nickname = buildCaptureTicketName(fallbackName)
-    local faceUrl = extractCaptureFaceUrlFromPayload(payload)
-    if faceUrl == "" then faceUrl = fallbackUrl or "" end
-    payload.GMNotes = buildCaptureNotes(fallbackName, faceUrl)
-    if payload.CustomMesh and (not payload.CustomMesh.DiffuseURL or payload.CustomMesh.DiffuseURL == "") then
-      payload.CustomMesh.DiffuseURL = faceUrl
-    end
-    return payload, faceUrl
+  local payload = ess_sanitizeCaptureBagData(data)
+  local faceUrl = extractCaptureFaceUrlFromPayload(payload)
+  if faceUrl == "" then faceUrl = fallbackUrl or "" end
+  if payload and payload._schema == "capture_payload_v2" and faceUrl ~= "" and (not payload.bagDiffuseURL or payload.bagDiffuseURL == "") then
+    payload.bagDiffuseURL = faceUrl
   end
-
-  -- If someone drops a single card instead of the ticket bag, keep enough card data
-  -- to rebuild a one-card Infinite Bag from it later.
-  if data.Name == "Card" and type(data.CustomDeck) == "table" then
-    local cardId = tonumber(data.CardID) or 100
-    local deckSlot = math.floor(cardId / 100)
-    if deckSlot < 1 then deckSlot = 1 end
-    local deckEntry = data.CustomDeck[tostring(deckSlot)] or data.CustomDeck[deckSlot]
-    if not deckEntry then
-      for _, entry in pairs(data.CustomDeck) do
-        if type(entry) == "table" then deckEntry = entry break end
-      end
-    end
-    if type(deckEntry) == "table" then
-      local faceUrl = tostring(deckEntry.FaceURL or fallbackUrl or "")
-      local cardPayload = {
-        _schema = "capture_payload_v2",
-        bagDiffuseURL = faceUrl,
-        card = {
-          nickname = data.Nickname or fallbackName or "",
-          description = data.Description or "",
-          gmNotes = data.GMNotes or "",
-          memo = data.Memo or "",
-          cardID = cardId,
-          deckSlot = deckSlot,
-          faceURL = faceUrl,
-          backURL = deckEntry.BackURL or CAPTURE_DEFAULT_BACK_URL,
-          numWidth = deckEntry.NumWidth or 1,
-          numHeight = deckEntry.NumHeight or 1,
-          backIsHidden = deckEntry.BackIsHidden ~= false,
-          uniqueBack = deckEntry.UniqueBack == true,
-          deckType = deckEntry.Type or 0,
-          hideWhenFaceDown = data.HideWhenFaceDown ~= false,
-          hands = data.Hands ~= false,
-          sideways = data.SidewaysCard == true,
-        }
-      }
-      if type(data.States) == "table" and type(data.States[2]) == "table" then
-        local st = data.States[2]
-        local stId = tonumber(st.CardID) or 200
-        local stSlot = math.floor(stId / 100)
-        if stSlot < 1 then stSlot = 2 end
-        local stDeck = st.CustomDeck and (st.CustomDeck[tostring(stSlot)] or st.CustomDeck[stSlot])
-        if not stDeck and type(st.CustomDeck) == "table" then
-          for _, entry in pairs(st.CustomDeck) do
-            if type(entry) == "table" then stDeck = entry break end
-          end
-        end
-        if type(stDeck) == "table" then
-          cardPayload.card.stateTwo = {
-            nickname = st.Nickname or "",
-            description = st.Description or "",
-            gmNotes = st.GMNotes or "",
-            memo = st.Memo or "",
-            cardID = stId,
-            deckSlot = stSlot,
-            faceURL = stDeck.FaceURL or "",
-            backURL = stDeck.BackURL or CAPTURE_DEFAULT_BACK_URL,
-            numWidth = stDeck.NumWidth or 1,
-            numHeight = stDeck.NumHeight or 1,
-            backIsHidden = stDeck.BackIsHidden ~= false,
-            uniqueBack = stDeck.UniqueBack == true,
-            deckType = stDeck.Type or 0,
-            hideWhenFaceDown = st.HideWhenFaceDown ~= false,
-            hands = st.Hands ~= false,
-            sideways = st.SidewaysCard == true,
-          }
-        end
-      end
-      return cardPayload, faceUrl
-    end
-  end
-
-  return nil, fallbackUrl or ""
+  return payload, faceUrl
 end
 
 function commitCapturePurchase(obj, name, captureUrl, bagData)
@@ -6662,6 +6608,54 @@ function findRewardDescByName(reward_name)
     return nil
 end
 
+function getFirstCustomDeckInfo(customDeck)
+    if type(customDeck) ~= "table" then return nil end
+    local slots = {}
+    for slotKey, deck in pairs(customDeck) do
+        if type(deck) == "table" then
+            local deckSlot = tonumber(slotKey)
+            if deckSlot and deckSlot >= 1 then
+                deckSlot = math.floor(deckSlot)
+                slots[#slots + 1] = { slot = deckSlot, deck = deck }
+            end
+        end
+    end
+
+    table.sort(slots, function(a, b) return a.slot < b.slot end)
+    if #slots > 0 then
+        local deckSlot = slots[1].slot
+        local deck = slots[1].deck
+        return {
+            deckSlot = deckSlot,
+            deckKey = tostring(deckSlot),
+            faceURL = tostring(deck.FaceURL or ""),
+            backURL = tostring(deck.BackURL or ""),
+            numWidth = tonumber(deck.NumWidth) or 1,
+            numHeight = tonumber(deck.NumHeight) or 1,
+            backIsHidden = (deck.BackIsHidden ~= false),
+            uniqueBack = (deck.UniqueBack == true),
+            deckType = tonumber(deck.Type) or 0,
+        }
+    end
+
+    for _, deck in pairs(customDeck) do
+        if type(deck) == "table" then
+            return {
+                deckSlot = 1,
+                deckKey = "1",
+                faceURL = tostring(deck.FaceURL or ""),
+                backURL = tostring(deck.BackURL or ""),
+                numWidth = tonumber(deck.NumWidth) or 1,
+                numHeight = tonumber(deck.NumHeight) or 1,
+                backIsHidden = (deck.BackIsHidden ~= false),
+                uniqueBack = (deck.UniqueBack == true),
+                deckType = tonumber(deck.Type) or 0,
+            }
+        end
+    end
+    return nil
+end
+
 function normalizeContainedObjectsList(contained)
     local out = {}
     if type(contained) ~= "table" then return out end
@@ -6700,6 +6694,71 @@ function hasContainedCardPayload(data)
     if type(first.CustomDeck) == "table" then return true end
     if first.Name == "Card" then return true end
     return false
+end
+
+function buildCapturePayloadFromSingleCardData(data)
+    if type(data) ~= "table" then return nil end
+    if type(data.CustomDeck) ~= "table" then return nil end
+
+    local deckInfo = getFirstCustomDeckInfo(data.CustomDeck)
+    if not deckInfo or deckInfo.faceURL == "" then return nil end
+
+    local stateTwoCompact = nil
+    if type(data.States) == "table" then
+        local rawStateTwo = data.States[2] or data.States["2"]
+        if type(rawStateTwo) == "table" and type(rawStateTwo.CustomDeck) == "table" then
+            local stateDeckInfo = getFirstCustomDeckInfo(rawStateTwo.CustomDeck)
+            if stateDeckInfo and stateDeckInfo.faceURL ~= "" then
+                stateTwoCompact = {
+                    nickname = tostring(rawStateTwo.Nickname or ""),
+                    description = tostring(rawStateTwo.Description or ""),
+                    gmNotes = tostring(rawStateTwo.GMNotes or ""),
+                    memo = tostring(rawStateTwo.Memo or ""),
+                    cardID = tonumber(rawStateTwo.CardID) or ((stateDeckInfo.deckSlot or 2) * 100),
+                    hideWhenFaceDown = (rawStateTwo.HideWhenFaceDown ~= false),
+                    hands = (rawStateTwo.Hands ~= false),
+                    sideways = (rawStateTwo.SidewaysCard == true),
+                    faceURL = stateDeckInfo.faceURL,
+                    backURL = stateDeckInfo.backURL,
+                    numWidth = stateDeckInfo.numWidth or 1,
+                    numHeight = stateDeckInfo.numHeight or 1,
+                    backIsHidden = (stateDeckInfo.backIsHidden ~= false),
+                    uniqueBack = (stateDeckInfo.uniqueBack == true),
+                    deckType = stateDeckInfo.deckType or 0,
+                    deckSlot = stateDeckInfo.deckSlot or 2,
+                }
+            end
+        end
+    end
+
+    local compactPayload = {
+        _schema = "capture_payload_v2",
+        bagDiffuseURL = deckInfo.faceURL,
+        card = {
+            nickname = tostring(data.Nickname or ""),
+            description = tostring(data.Description or ""),
+            gmNotes = tostring(data.GMNotes or ""),
+            memo = tostring(data.Memo or ""),
+            cardID = tonumber(data.CardID) or ((deckInfo.deckSlot or 1) * 100),
+            hideWhenFaceDown = (data.HideWhenFaceDown ~= false),
+            hands = (data.Hands ~= false),
+            sideways = (data.SidewaysCard == true),
+            faceURL = deckInfo.faceURL,
+            backURL = deckInfo.backURL,
+            numWidth = deckInfo.numWidth or 1,
+            numHeight = deckInfo.numHeight or 1,
+            backIsHidden = (deckInfo.backIsHidden ~= false),
+            uniqueBack = (deckInfo.uniqueBack == true),
+            deckType = deckInfo.deckType or 0,
+            deckSlot = deckInfo.deckSlot or 1,
+        }
+    }
+
+    if stateTwoCompact then
+        compactPayload.card.stateTwo = stateTwoCompact
+    end
+
+    return compactPayload
 end
 
 function extractCaptureFaceUrlFromPayload(payload)
