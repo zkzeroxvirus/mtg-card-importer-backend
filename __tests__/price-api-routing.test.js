@@ -449,7 +449,7 @@ describe('Price Filter API Routing', () => {
 
       expect(response.text).toContain('Manarock Rare');
       expect(response.text).not.toContain('Other Rare');
-      expect(bulkData.searchCards).toHaveBeenCalledWith('id:r lang:en', Number.MAX_SAFE_INTEGER, true);
+      expect(bulkData.searchCards).toHaveBeenCalledWith('id:r lang:en f:commander', Number.MAX_SAFE_INTEGER, true);
       expect(scryfallLib.searchCards).not.toHaveBeenCalled();
       expect(scryfallLib.getRandomCard).not.toHaveBeenCalled();
     });

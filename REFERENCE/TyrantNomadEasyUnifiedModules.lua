@@ -1899,7 +1899,7 @@ function UpdateEncoderDataValue (dataTable)
 
     encData["tyrantUnified"] = objectData
     dataTable.encoder.call("APIobjSetPropData",{obj = dataTable.target, propID = pID, data = encData})
-    enc.call("APIrebuildButtons",{obj = dataTable.target})
+    enc.call("APIrebuildButtons",{obj = dataTable.target, immediate = true})
 end
 
 function ToggleDisplayCounter (tar, ply, alt)
@@ -2665,6 +2665,12 @@ function HasKeywordOrNamedCounter(nameLine, description)
 end
 
 --Auto Functions
+encodingQueue = {}
+encodingQueued = {}
+encodingQueueActive = false
+encodingBatchSize = 3
+encodingQueueDelay = 0.1
+
 function onObjectDropped (playerColor, object)
     if autoActivateModule == false or (autoActivatePlayerSettings[Player[playerColor].steam_id] ~= nil and autoActivatePlayerSettings[Player[playerColor].steam_id] == false) then return end
     TryTimedEncoding(object)
@@ -2686,12 +2692,58 @@ function TryTimedEncoding(object)
     if object.tag ~= "Card" then return end
     if object.getVar('noencode') ~= nil and object.getVar('noencode') == true then return end
 
+    local guid = object.getGUID()
+    if encodingQueued[guid] ~= true then
+        encodingQueued[guid] = true
+        table.insert(encodingQueue, object)
+    end
+
+    if encodingQueueActive ~= true then
+        encodingQueueActive = true
+        Timer.destroy("easyModulesEncodingQueue")
+        Timer.create({
+            identifier = "easyModulesEncodingQueue",
+            function_name = "ProcessEncodingQueue",
+            function_owner = self,
+            delay = encodingQueueDelay
+        })
+    end
+end
+
+function ProcessEncodingQueue()
+    local processed = 0
+    while processed < encodingBatchSize and #encodingQueue > 0 do
+        local object = table.remove(encodingQueue, 1)
+        if object ~= nil then
+            encodingQueued[object.getGUID()] = nil
+            EncodeCardNow(object)
+        end
+        processed = processed + 1
+    end
+
+    if #encodingQueue > 0 then
+        Timer.destroy("easyModulesEncodingQueue")
+        Timer.create({
+            identifier = "easyModulesEncodingQueue",
+            function_name = "ProcessEncodingQueue",
+            function_owner = self,
+            delay = encodingQueueDelay
+        })
+    else
+        encodingQueueActive = false
+    end
+end
+
+function EncodeCardNow(object)
+    if object == nil or object.tag ~= "Card" then return end
+    if object.getVar('noencode') ~= nil and object.getVar('noencode') == true then return end
+
     local enc = Global.getVar('Encoder')
     if enc == nil then return end
 
     if enc.call("APIobjectExists",{obj=object}) == false then
         --noencode doesn't exist
-        enc.call("APIencodeObject",{obj=object})
+        enc.call("APIencodeObject",{obj=object, skipBuild=true})
     end
 
     if enc.call("APIpropertyExists",{propID = pID}) == false then return end

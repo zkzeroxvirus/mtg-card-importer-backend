@@ -47,6 +47,11 @@ basicstyleTableDefault = {
 
 --Use the API to access these.
 local EncodedObjects = {}
+local RebuildQueue = {}
+local RebuildQueued = {}
+local rebuildQueueActive = false
+local rebuildBatchSize = 4
+local rebuildQueueDelay = 0.1
 --[[
 Object Structure
 EncodedObjects[objID] = {
@@ -194,7 +199,7 @@ function onLoad(saved_data)
             EncodedObjects[i] = nil
           else
             local o = EncodedObjects[i].this
-            Wait.frames(function() buildButtons(o) end,2)
+            Wait.frames(function() queueRebuildButtons(o) end,2)
           end
         end
       end
@@ -493,13 +498,15 @@ function onObjectLeaveContainer(ctr,obj)
     end
   end
 end
-function onObjectDestroyed(obj)
+function handleObjectDestroyed(obj)
   if obj == self then
     for i,v in pairs(EncodedObjects) do
       EncodedObjects[i].this = getObjectFromGUID(i)
-      v.this.clearButtons()
-      v.this.setName(v.name)
-      v.this.clearContextMenu()
+      if v.this ~= nil then
+        v.this.clearButtons()
+        v.this.setName(v.oName)
+        v.this.clearContextMenu()
+      end
     end
 		for k,v in pairs(Player.getColors()) do
 			if v ~= "Grey" then
@@ -512,8 +519,19 @@ function onObjectDestroyed(obj)
         o.destruct()
       end
     end
+  else
+    removeEncodedObject(obj)
   end
 end
+
+function onObjectDestroyed(obj)
+  handleObjectDestroyed(obj)
+end
+
+function onObjectDestroy(obj)
+  handleObjectDestroyed(obj)
+end
+
 function onObjectDropped(c,obj)
   local ver = versionComp(Global.getVar('Encoder').getVar('version'),version)
   if ver == version and mod_name == 'Encoder' or Global.getVar('Encoder') == nil then
@@ -557,8 +575,71 @@ function createEncoderButtons()
   end
 end
 
+function queueRebuildButtons(o, immediate)
+  if o == nil then return end
+  local guid = o.getGUID()
+  if EncodedObjects[guid] == nil then return end
+
+  if immediate == true then
+    buildButtons(o)
+    return
+  end
+
+  if RebuildQueued[guid] ~= true then
+    RebuildQueued[guid] = true
+    table.insert(RebuildQueue, o)
+  end
+
+  if rebuildQueueActive ~= true then
+    rebuildQueueActive = true
+    Timer.destroy("encoderRebuildQueue")
+    Timer.create({
+      identifier = "encoderRebuildQueue",
+      function_name = "ProcessRebuildQueue",
+      function_owner = self,
+      delay = rebuildQueueDelay
+    })
+  end
+end
+
+function ProcessRebuildQueue()
+  local processed = 0
+  while processed < rebuildBatchSize and #RebuildQueue > 0 do
+    local obj = table.remove(RebuildQueue, 1)
+    if obj ~= nil then
+      local guid = obj.getGUID()
+      RebuildQueued[guid] = nil
+      if EncodedObjects[guid] ~= nil then
+        buildButtons(obj)
+      end
+    end
+    processed = processed + 1
+  end
+
+  if #RebuildQueue > 0 then
+    Timer.destroy("encoderRebuildQueue")
+    Timer.create({
+      identifier = "encoderRebuildQueue",
+      function_name = "ProcessRebuildQueue",
+      function_owner = self,
+      delay = rebuildQueueDelay
+    })
+  else
+    rebuildQueueActive = false
+  end
+end
+
+function removeEncodedObject(obj)
+  if obj == nil or obj == self then return end
+  local guid = obj.getGUID()
+  if EncodedObjects[guid] ~= nil then
+    RebuildQueued[guid] = nil
+    EncodedObjects[guid] = nil
+  end
+end
+
 -- If the encoder is deleted, make sure to cleanup.
-function encodeObject(o)
+function encodeObject(o, skipBuild)
   if o.getVar('noencode') == true then
     return false
   end
@@ -574,7 +655,9 @@ function encodeObject(o)
     flip = 1,
     disable = false
     }
-    buildButtons(o)
+    if skipBuild ~= true then
+      queueRebuildButtons(o)
+    end
     -- buildContextMenu(o)
     return true
   end
@@ -639,6 +722,7 @@ function buildButtons(o,h)
     h = handCheck(o)
   end
   if o==nil then return end
+  if EncodedObjects[o.getGUID()] == nil then return end
   if EncodedObjects[o.getGUID()].disable ~= true then
     o.clearButtons()
     o.clearInputs()
@@ -1085,7 +1169,7 @@ end
 --OBJECT FUNCTIONS
 --registers a new object to be encoded.
 function APIencodeObject(p)
-  encodeObject(p.obj)
+  return encodeObject(p.obj, p.skipBuild == true or p.deferButtons == true)
 end
 --checks if a given object is encoded, returns BOOL
 function APIobjectExists(p)
@@ -1435,7 +1519,7 @@ end
 --Builds the card buttons for all enabled properties.
 function APIrebuildButtons(p)
   if p.obj ~= nil then
-    buildButtons(p.obj)
+    queueRebuildButtons(p.obj, p.immediate == true)
   else
     updateXML(p.ply)
   end

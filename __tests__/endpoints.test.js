@@ -327,7 +327,7 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:emblem lang:en');
   });
 
-  test('GET /random should bypass commander legality for otag queries when enforceCommander=true', async () => {
+  test('GET /random should enforce commander legality for otag queries when enforceCommander=true', async () => {
     scryfallLib.getRandomCard.mockClear();
 
     const randomResponse = await request(app)
@@ -335,10 +335,10 @@ describe('Server Endpoints - Random Card', () => {
       .query({ q: 'otag:draw', count: 1, enforceCommander: 'true' });
 
     expect(randomResponse.status).toBe(200);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander');
   });
 
-  test('GET /random should bypass commander legality for native queries when enforceCommander=true', async () => {
+  test('GET /random should enforce commander legality for native queries when enforceCommander=true', async () => {
     scryfallLib.getRandomCard.mockClear();
 
     const randomResponse = await request(app)
@@ -346,10 +346,10 @@ describe('Server Endpoints - Random Card', () => {
       .query({ q: 'native:elf', count: 1, enforceCommander: 'true' });
 
     expect(randomResponse.status).toBe(200);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('native:elf lang:en');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('native:elf lang:en f:commander');
   });
 
-  test('GET /random should normalize function= queries and bypass commander legality', async () => {
+  test('GET /random should normalize function= queries and enforce commander legality', async () => {
     scryfallLib.getRandomCard.mockClear();
 
     const randomResponse = await request(app)
@@ -358,7 +358,7 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(randomResponse.status).toBe(200);
     expect(randomResponse.headers['x-query-warning']).toContain('Normalized query operators');
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en f:commander');
   });
 
   test('GET /random should keep retrying otag random until count is satisfied when duplicates are returned', async () => {
@@ -404,7 +404,7 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.body.total_cards).toBe(3);
     expect(scryfallLib.getRandomCard).toHaveBeenCalledTimes(4);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander', true);
   });
 
   test('GET /random should use per-card random draws for set filters', async () => {
@@ -432,7 +432,7 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.body.total_cards).toBe(15);
     expect(scryfallLib.searchCards).not.toHaveBeenCalled();
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id:r+otag:strive lang:en', true);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id:r+otag:strive lang:en f:commander', true);
   });
 
   test('GET /random should enforce commander legality in multi-card query mode', async () => {
@@ -761,7 +761,7 @@ describe('Server Endpoints - Random Card', () => {
     expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('t:vanguard lang:en');
   });
 
-  test('POST /random/build should bypass commander legality for otag queries when enforceCommander is true', async () => {
+  test('POST /random/build should enforce commander legality for otag queries when enforceCommander is true', async () => {
     scryfallLib.getRandomCard.mockResolvedValueOnce({
       id: 'id-otag-slot',
       oracle_id: 'oracle-otag-slot',
@@ -777,10 +777,10 @@ describe('Server Endpoints - Random Card', () => {
       .send({ q: 'otag:draw', count: 1, enforceCommander: true });
 
     expect(response.status).toBe(200);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander');
   });
 
-  test('POST /random/build should normalize function= queries and bypass commander legality', async () => {
+  test('POST /random/build should normalize function= queries and enforce commander legality', async () => {
     scryfallLib.getRandomCard.mockResolvedValueOnce({
       id: 'id-function-slot',
       oracle_id: 'oracle-function-slot',
@@ -797,7 +797,7 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers['x-query-warning']).toContain('Normalized query operators');
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en');
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('function:draw lang:en f:commander');
   });
 
   test('POST /random/build should keep retrying otag random until count is satisfied when duplicates are returned', async () => {
@@ -846,7 +846,7 @@ describe('Server Endpoints - Random Card', () => {
     expect(response.text).toContain('Build Otag B');
     expect(response.text).toContain('Build Otag C');
     expect(scryfallLib.getRandomCard).toHaveBeenCalledTimes(4);
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en', true);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('otag:draw lang:en f:commander', true);
   });
 
   test('POST /random/build should keep using per-card random draws for large otag queries', async () => {
@@ -861,7 +861,7 @@ describe('Server Endpoints - Random Card', () => {
 
     expect(response.text).toContain('DeckCustom');
     expect(scryfallLib.searchCards).not.toHaveBeenCalled();
-    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id:r+otag:strive lang:en', true);
+    expect(scryfallLib.getRandomCard).toHaveBeenCalledWith('id:r+otag:strive lang:en f:commander', true);
   });
 
   test('POST /random/build should normalize c=c query to id=c', async () => {

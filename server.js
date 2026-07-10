@@ -916,12 +916,6 @@ function shouldBypassCommanderForTypeQuery(rawQuery) {
     return false;
   }
 
-  // Some random-only filters (like otag) are not commander-legality aware.
-  // Appending f:commander silently excludes many valid matches.
-  if (TAGGER_FILTER_REGEX.test(query)) {
-    return true;
-  }
-
   return /\b(?:t|type):\s*"?(?:token|emblem|vanguard|conspiracy)\b/i.test(query);
 }
 
