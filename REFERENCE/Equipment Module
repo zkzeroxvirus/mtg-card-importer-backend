@@ -13,7 +13,9 @@ stella.lifeless.space
 prop_id = "moon-mtg-equip"
 version = "1.0.0"
 local did_load = false
-local deck_ctx_var = "moon-mtg-equip-ctx"
+local pending_card_init = {}
+local pending_deck_ctx = {}
+local hub_registered = false
 
 --[[--
 feel free to copy this snippet, it's *really* useful for encoder api stuff
@@ -63,6 +65,21 @@ local function register_module()
 		desc = "who up describing they values (when are these ever used)",
 		default = {},
 	}
+
+	hub_registered = enc.registerModule {
+		moduleID = prop_id,
+		propID = prop_id,
+		owner = self,
+		events = {
+			"objectDropped",
+			"objectSpawn",
+			"objectEnterContainer",
+			"objectEnterZone",
+			"objectLeaveZone",
+		},
+		eventHandler = "handleEncoderEvent",
+		methods = {"refreshCard", "refreshDeck"},
+	} == true
 end
 
 local function init_card(card)
@@ -73,7 +90,7 @@ local function init_card(card)
 	local enc = encoder()
 	if enc == nil then return end
 
-	if not enc.objectExists { obj = card } then enc.encodeObject { obj = card } end
+	if not enc.objectExists { obj = card } then enc.encodeObject { obj = card, skipBuild = true } end
 
 	if not enc.propertyExists { propID = prop_id } then return end
 
@@ -136,14 +153,14 @@ local function equip_to(deck, to)
 	end
 
     enc.objSetPropData { obj = to, propID = prop_id, data = data }
-	enc.rebuildButtons { obj = to, immediate = true }
+	enc.rebuildButtons { obj = to }
 end
 
 -- a little odd way to ensure deduplication
 -- but hey, it works :tm:
 local function setup_deck_ctx(obj, force)
 	if obj == nil then return end
-	if obj.getVar(deck_ctx_var) and not force then return end
+	if obj.getVar("moon-mtg-equip-ctx") and not force then return end
 
 	obj.addContextMenuItem("equip all to top", function(plycol, objpos, deck)
 		if deck.tag ~= "Deck" then return end
@@ -158,25 +175,31 @@ local function setup_deck_ctx(obj, force)
 		equip_to(deck, card)
 	end)
 
-	obj.setVar(deck_ctx_var, true)
+	obj.setVar("moon-mtg-equip-ctx", true)
 end
 
-local function setup_all_deck_ctx(force)
-	for _, obj in pairs(getObjects()) do
-		if obj.tag == "Deck" then
-			setup_deck_ctx(obj, force)
-		end
-	end
+local function schedule_card_init(card, frames)
+	if card == nil or card.tag ~= "Card" then return end
+	local guid = card.getGUID()
+	if guid == nil or pending_card_init[guid] then return end
+	pending_card_init[guid] = true
+	Wait.frames(function()
+		pending_card_init[guid] = nil
+		if card == nil or card.tag ~= "Card" then return end
+		init_card(card)
+	end, frames or 1)
 end
 
-local function clean_deck_ctx()
-	for _, obj in pairs(getObjects()) do
-		if obj.tag == "Deck" then
-			obj.clearContextMenu()
-			obj.setVar(deck_ctx_var, false)
-			setup_deck_ctx(obj, true)
-		end
-	end
+local function schedule_deck_ctx(deck, force, frames)
+	if deck == nil or deck.tag ~= "Deck" then return end
+	local guid = deck.getGUID()
+	if guid == nil or pending_deck_ctx[guid] then return end
+	pending_deck_ctx[guid] = true
+	Wait.frames(function()
+		pending_deck_ctx[guid] = nil
+		if deck == nil or deck.tag ~= "Deck" then return end
+		setup_deck_ctx(deck, force)
+	end, frames or 1)
 end
 
 -- api calls
@@ -234,7 +257,7 @@ function unequip_all(obj, ply)
 	end
 
 	enc.objSetPropData { obj = obj, propID = prop_id, data = { moon_mtg_equip = {} } }
-	enc.rebuildButtons { obj = obj, immediate = true }
+	enc.rebuildButtons { obj = obj }
 end
 
 -- events
@@ -244,10 +267,13 @@ local function load_module()
 	did_load = true
 
 	self.addContextMenuItem("Register Module", register_module)
-	self.addContextMenuItem("Clean Deck Equip Menus", clean_deck_ctx)
 	Wait.condition(register_module, function() return Global.getVar("Encoder") ~= nil end, 30)
 
-	setup_all_deck_ctx(false)
+	for _, obj in pairs(getObjects()) do
+		if obj.tag == "Deck" then
+			setup_deck_ctx(obj, true)
+		end
+	end
 end
 
 function onLoad()
@@ -259,51 +285,93 @@ function onload()
 end
 
 local function handle_object_dropped(ply, obj)
-	init_card(obj)
+	schedule_card_init(obj, 1)
+end
+
+function handleEncoderEvent(params)
+	if params == nil then return end
+	local event = params.event
+	local obj = params.obj
+	if event == "objectDropped" then
+		schedule_card_init(obj, 1)
+	elseif event == "objectSpawn" then
+		if obj == nil then return end
+		if obj.tag == "Card" then
+			schedule_card_init(obj, 10)
+		elseif obj.tag == "Deck" then
+			schedule_deck_ctx(obj, true, 10)
+		end
+	elseif event == "objectEnterContainer" then
+		local container = params.container
+		if container ~= nil and obj ~= nil and container.tag == "Deck" and obj.tag == "Card" then
+			schedule_deck_ctx(container, false, 1)
+		end
+	elseif event == "objectEnterZone" or event == "objectLeaveZone" then
+		if obj == nil or obj.tag ~= "Deck" then return end
+		local name = obj.getName() or ""
+		if name:lower():find("planechase") then return end
+		schedule_deck_ctx(obj, true, 10)
+	end
+end
+
+function refreshCard(params)
+	if params == nil then return end
+	schedule_card_init(params.obj, params.frames or 1)
+end
+
+function refreshDeck(params)
+	if params == nil then return end
+	schedule_deck_ctx(params.obj, params.force == true, params.frames or 1)
 end
 
 function onObjectDrop(ply, obj)
+	if hub_registered then return end
 	handle_object_dropped(ply, obj)
 end
 
 function onObjectDropped(ply, obj)
+	if hub_registered then return end
 	handle_object_dropped(ply, obj)
 end
 
 function onObjectSpawn(obj)
+	if hub_registered then return end
 	if obj == nil then return end
 	if obj.tag ~= "Card" and obj.tag ~= "Deck" then return end
 
 	Wait.frames(function()
 		if obj == nil then return end
 		if obj.tag == "Card" then
-			init_card(obj)
+			schedule_card_init(obj, 1)
 		elseif obj.tag == "Deck" then
-			setup_deck_ctx(obj, false)
+			schedule_deck_ctx(obj, true, 1)
 		end
 	end, 10)
 end
 
 function onObjectEnterContainer(container, obj)
+	if hub_registered then return end
 	if container.tag ~= "Deck" or obj.tag ~= "Card" then return end
 
-	setup_deck_ctx(container)
+	schedule_deck_ctx(container, false, 1)
 end
 
 function onObjectEnterZone(zone,obj)
+	if hub_registered then return end
 	if obj == nil or not (obj.tag == "Card" or obj.tag == "Deck") then return end
 	if obj.getName():lower():find('planechase') then return end
 
 	if obj.tag == "Deck" then
-		Wait.frames(function() setup_deck_ctx(obj, false) end, 10)
+		schedule_deck_ctx(obj, true, 10)
 	end
 end
 
 function onObjectLeaveZone(zone, obj)
+	if hub_registered then return end
 	if obj == nil or not (obj.tag == "Card" or obj.tag == "Deck") then return end
 	if obj.getName():lower():find('planechase') then return end
 
 	if obj.tag == "Deck" then
-		Wait.frames(function() setup_deck_ctx(obj, false) end, 10)
+		schedule_deck_ctx(obj, true, 10)
 	end
 end
