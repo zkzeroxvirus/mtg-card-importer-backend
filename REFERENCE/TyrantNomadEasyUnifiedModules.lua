@@ -1899,7 +1899,7 @@ function UpdateEncoderDataValue (dataTable)
 
     encData["tyrantUnified"] = objectData
     dataTable.encoder.call("APIobjSetPropData",{obj = dataTable.target, propID = pID, data = encData})
-    enc.call("APIrebuildButtons",{obj = dataTable.target, immediate = true})
+    enc.call("APIrebuildButtons",{obj = dataTable.target})
 end
 
 function ToggleDisplayCounter (tar, ply, alt)
@@ -2235,7 +2235,7 @@ function SetExactCopyData (dataTable)
     dataTable.enc.call("APIencodeObject",{obj=dataTable.copiedCard})
     dataTable.enc.call("APIobjSetAllData",{obj=dataTable.copiedCard, data = dataTable.valueData})
     dataTable.enc.call("APIobjSetProps",{obj=dataTable.copiedCard, data = dataTable.moduleData})
-    if dataTable.flipData < 0 then enc.call("APIFlip", {obj = dataTable.copiedCard}) end
+    if dataTable.flipData < 0 then dataTable.enc.call("APIFlip", {obj = dataTable.copiedCard}) end
     dataTable.enc.call("APIrebuildButtons",{obj=dataTable.copiedCard})
 
     dataTable.copiedCard.setLock(false)
