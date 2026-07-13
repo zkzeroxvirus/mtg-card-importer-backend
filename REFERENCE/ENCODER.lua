@@ -4,7 +4,7 @@
 -- https://steamcommunity.com/sharedfiles/filedetails/?id=828894732
 -- I will not provide support for my version -- I honestly don't remember what I changed to get it to work for me the way I needed
 -- just in case, I might have it set to non-interactable to filter out folks who can't script at all
-
+-- Sirin here Further modified this thingy for his own needs
 
 --By Tipsy Hobbit
 mod_name = "Encoder"
@@ -49,9 +49,17 @@ basicstyleTableDefault = {
 local EncodedObjects = {}
 local RebuildQueue = {}
 local RebuildQueued = {}
+local PendingDestroyRemoval = {}
+local ModuleRegistry = {}
+local ModuleEventSubscribers = {}
+local ModuleEventQueue = {}
+local ModuleEventQueued = {}
 local rebuildQueueActive = false
-local rebuildBatchSize = 4
-local rebuildQueueDelay = 0.1
+local rebuildBatchSize = 2
+local rebuildQueueDelay = 0.05
+local moduleEventQueueActive = false
+local moduleEventBatchSize = 6
+local moduleEventQueueDelay = 0.03
 --[[
 Object Structure
 EncodedObjects[objID] = {
@@ -482,14 +490,17 @@ function onObjectEnterZone(zone, obj)
     --log("Object has entered zone: "..Zones[zone.getGUID()].name)
     self.call(Zones[zone.getGUID()].func_enter,{obj})
   end
+  queueModuleEvent("objectEnterZone", {obj = obj, zone = zone, zoneGUID = zone.getGUID()})
 end
 function onObjectLeaveZone(zone, obj)
   if Zones[zone.getGUID()] ~= nil then
     self.call(Zones[zone.getGUID()].func_leave,{obj})
   end
+  queueModuleEvent("objectLeaveZone", {obj = obj, zone = zone, zoneGUID = zone.getGUID()})
 end
 function onObjectLeaveContainer(ctr,obj)
   if EncodedObjects[obj.getGUID()] ~= nil then
+    PendingDestroyRemoval[obj.getGUID()] = nil
     EncodedObjects[obj.getGUID()].this = getObjectFromGUID(obj.getGUID())
     EncodedObjects[obj.getGUID()].inContainer = nil
     if obj.use_hands == true then
@@ -501,15 +512,42 @@ function onObjectLeaveContainer(ctr,obj)
       function() return not obj.resting end)
     end
   end
+  queueModuleEvent("objectLeaveContainer", {obj = obj, container = ctr, containerGUID = ctr.getGUID()})
 end
 function onObjectEnterContainer(ctr,obj)
   if obj == nil then return end
   local guid = obj.getGUID()
   if EncodedObjects[guid] ~= nil then
+    PendingDestroyRemoval[guid] = nil
     EncodedObjects[guid].this = nil
     EncodedObjects[guid].inContainer = true
   end
+  queueModuleEvent("objectEnterContainer", {obj = obj, container = ctr, containerGUID = ctr.getGUID()})
 end
+
+function onObjectSpawn(obj)
+  queueModuleEvent("objectSpawn", {obj = obj})
+end
+
+function scheduleEncodedObjectRemoval(guid)
+  if guid == nil or EncodedObjects[guid] == nil then return end
+  if PendingDestroyRemoval[guid] == true then return end
+  PendingDestroyRemoval[guid] = true
+  Wait.frames(function()
+    PendingDestroyRemoval[guid] = nil
+    if EncodedObjects[guid] == nil then return end
+    local obj = getObjectFromGUID(guid)
+    if obj ~= nil then
+      EncodedObjects[guid].this = obj
+      EncodedObjects[guid].inContainer = nil
+      queueRebuildButtons(obj)
+    elseif EncodedObjects[guid].inContainer ~= true then
+      EncodedObjects[guid] = nil
+      RebuildQueued[guid] = nil
+    end
+  end, 30)
+end
+
 function handleObjectDestroyed(obj)
   if obj == self then
     for i,v in pairs(EncodedObjects) do
@@ -536,16 +574,18 @@ function handleObjectDestroyed(obj)
     if EncodedObjects[guid] ~= nil and EncodedObjects[guid].inContainer == true then
       EncodedObjects[guid].this = nil
     else
-      removeEncodedObject(obj)
+      scheduleEncodedObjectRemoval(guid)
     end
   end
 end
 
 function onObjectDestroyed(obj)
+  queueModuleEvent("objectDestroyed", {obj = obj})
   handleObjectDestroyed(obj)
 end
 
 function onObjectDestroy(obj)
+  queueModuleEvent("objectDestroyed", {obj = obj})
   handleObjectDestroyed(obj)
 end
 
@@ -565,6 +605,7 @@ function onObjectDropped(c,obj)
   if obj.getVar("pID") ~= nil then
     obj.call("registerModule")
   end
+  queueModuleEvent("objectDropped", {obj = obj, color = c})
 end
 --Use a raycast to check if an object is resting in a hand or not.
 --Currently has a problem with tables that have multiple points of
@@ -597,14 +638,13 @@ function queueRebuildButtons(o, immediate)
   local guid = o.getGUID()
   if EncodedObjects[guid] == nil then return end
 
-  if immediate == true then
-    buildButtons(o)
-    return
-  end
-
   if RebuildQueued[guid] ~= true then
     RebuildQueued[guid] = true
-    table.insert(RebuildQueue, o)
+    if immediate == true then
+      table.insert(RebuildQueue, 1, o)
+    else
+      table.insert(RebuildQueue, o)
+    end
   end
 
   if rebuildQueueActive ~= true then
@@ -627,7 +667,7 @@ function ProcessRebuildQueue()
       local guid = obj.getGUID()
       RebuildQueued[guid] = nil
       if EncodedObjects[guid] ~= nil then
-        buildButtons(obj)
+        pcall(function() buildButtons(obj) end)
       end
     end
     processed = processed + 1
@@ -646,10 +686,94 @@ function ProcessRebuildQueue()
   end
 end
 
+function normalizeModuleEvents(events)
+  local out = {}
+  if type(events) == "table" then
+    for k,v in pairs(events) do
+      if type(k) == "number" then
+        out[v] = true
+      elseif v == true then
+        out[k] = true
+      end
+    end
+  elseif type(events) == "string" then
+    out[events] = true
+  end
+  return out
+end
+
+function moduleEventKey(eventName, params)
+  local guid = nil
+  if params ~= nil and params.obj ~= nil then
+    local ok, value = pcall(function() return params.obj.getGUID() end)
+    if ok then guid = value end
+  end
+  return tostring(eventName or "").."|"..tostring(guid or "").."|"..tostring(params and params.zoneGUID or "").."|"..tostring(params and params.containerGUID or "")
+end
+
+function queueModuleEvent(eventName, params)
+  if eventName == nil or ModuleEventSubscribers[eventName] == nil then return false end
+  if params == nil then params = {} end
+  params.event = eventName
+  local key = moduleEventKey(eventName, params)
+  if ModuleEventQueued[key] ~= true then
+    ModuleEventQueued[key] = true
+    table.insert(ModuleEventQueue, {key = key, event = eventName, params = params})
+  end
+
+  if moduleEventQueueActive ~= true then
+    moduleEventQueueActive = true
+    Timer.destroy("encoderModuleEventQueue")
+    Timer.create({
+      identifier = "encoderModuleEventQueue",
+      function_name = "ProcessModuleEventQueue",
+      function_owner = self,
+      delay = moduleEventQueueDelay
+    })
+  end
+  return true
+end
+
+function callModuleEventHandler(moduleID, eventName, params)
+  local mod = ModuleRegistry[moduleID]
+  if mod == nil or mod.owner == nil then return false end
+  local handler = mod.eventHandlers and mod.eventHandlers[eventName] or mod.eventHandler or "handleEncoderEvent"
+  if handler == nil or handler == "" then return false end
+  return safeModuleCall(mod.owner, handler, params)
+end
+
+function ProcessModuleEventQueue()
+  local processed = 0
+  while processed < moduleEventBatchSize and #ModuleEventQueue > 0 do
+    local entry = table.remove(ModuleEventQueue, 1)
+    if entry ~= nil then
+      ModuleEventQueued[entry.key] = nil
+      local subscribers = ModuleEventSubscribers[entry.event] or {}
+      for moduleID,_ in pairs(subscribers) do
+        callModuleEventHandler(moduleID, entry.event, entry.params)
+      end
+    end
+    processed = processed + 1
+  end
+
+  if #ModuleEventQueue > 0 then
+    Timer.destroy("encoderModuleEventQueue")
+    Timer.create({
+      identifier = "encoderModuleEventQueue",
+      function_name = "ProcessModuleEventQueue",
+      function_owner = self,
+      delay = moduleEventQueueDelay
+    })
+  else
+    moduleEventQueueActive = false
+  end
+end
+
 function removeEncodedObject(obj)
   if obj == nil or obj == self then return end
   local guid = obj.getGUID()
   if EncodedObjects[guid] ~= nil then
+    PendingDestroyRemoval[guid] = nil
     RebuildQueued[guid] = nil
     EncodedObjects[guid] = nil
   end
@@ -741,6 +865,12 @@ end
 
 --Calls the menus/property modules createButtons funciton
 --  when updating a given object.
+function safeModuleCall(owner, functionName, params)
+  if owner == nil or functionName == nil then return false end
+  local ok = pcall(function() owner.call(functionName, params) end)
+  return ok
+end
+
 function buildButtons(o,h)
   if h == nil then
     h = handCheck(o)
@@ -760,9 +890,9 @@ function buildButtons(o,h)
             v.visible_in_hand = 0
           end
           if h==true and v.visible_in_hand>=1 then
-            v.funcOwner.call(v.activateFunc,{obj=o})
+            safeModuleCall(v.funcOwner, v.activateFunc, {obj=o})
           elseif h~=true and v.visible_in_hand<=1 then
-            v.funcOwner.call(v.activateFunc,{obj=o})
+            safeModuleCall(v.funcOwner, v.activateFunc, {obj=o})
           end
         else
           --log(v.funcOwner,"Missing module for menu "..k,'missing_module')
@@ -774,16 +904,16 @@ function buildButtons(o,h)
             Properties[k].visible_in_hand = 0
           end
           if h==true and Properties[k].visible_in_hand>=1 then
-            Properties[k].funcOwner.call("createButtons",{obj=o})
+            safeModuleCall(Properties[k].funcOwner, "createButtons", {obj=o})
           elseif h~=true and Properties[k].visible_in_hand<=1 then
-            Properties[k].funcOwner.call("createButtons",{obj=o})
+            safeModuleCall(Properties[k].funcOwner, "createButtons", {obj=o})
           end
         end
       end
     else
       k = EncodedObjects[o.getGUID()].editing
       if Properties[k]~=nil and Properties[k].funcOwner~= nil then
-        Properties[k].funcOwner.call("createButtons",{obj=o})
+        safeModuleCall(Properties[k].funcOwner, "createButtons", {obj=o})
       end
       flip = EncodedObjects[o.getGUID()].flip
       temp = " X "
@@ -958,6 +1088,92 @@ function APIregisterProperty(p)
   --buildPropFunction(p.propID)
 	--updateUI()
 end
+
+function APIregisterModule(p)
+  if p == nil then return false end
+  local moduleID = p.moduleID or p.propID or p.name
+  local owner = p.owner or p.funcOwner
+  if moduleID == nil or owner == nil then return false end
+
+  local old = ModuleRegistry[moduleID]
+  if old ~= nil and old.events ~= nil then
+    for eventName,_ in pairs(old.events) do
+      if ModuleEventSubscribers[eventName] ~= nil then
+        ModuleEventSubscribers[eventName][moduleID] = nil
+      end
+    end
+  end
+
+  local events = normalizeModuleEvents(p.events)
+  ModuleRegistry[moduleID] = {
+    moduleID = moduleID,
+    propID = p.propID,
+    owner = owner,
+    events = events,
+    methods = p.methods or {},
+    eventHandler = p.eventHandler,
+    eventHandlers = p.eventHandlers or {}
+  }
+
+  for eventName,_ in pairs(events) do
+    if ModuleEventSubscribers[eventName] == nil then ModuleEventSubscribers[eventName] = {} end
+    ModuleEventSubscribers[eventName][moduleID] = true
+  end
+
+  return true
+end
+
+function APIlistModules()
+  local data = {}
+  for moduleID,mod in pairs(ModuleRegistry) do
+    data[moduleID] = {
+      moduleID = moduleID,
+      propID = mod.propID,
+      events = deepcopy(mod.events or {}),
+      methods = deepcopy(mod.methods or {})
+    }
+  end
+  return data
+end
+
+function APIcallModule(p)
+  if p == nil or p.moduleID == nil or p.method == nil then return nil end
+  local mod = ModuleRegistry[p.moduleID]
+  if mod == nil or mod.owner == nil then return nil end
+  local ok, result = pcall(function()
+    return mod.owner.call(p.method, p.params or {})
+  end)
+  if ok then return result end
+  return nil
+end
+
+function APIemitEvent(p)
+  if p == nil or p.event == nil then return false end
+  return queueModuleEvent(p.event, p.params or p)
+end
+
+function APIbroadcastModules(p)
+  return APIemitEvent(p)
+end
+
+function APIqueueObjectUpdate(p)
+  if p == nil or p.obj == nil then return false end
+  queueRebuildButtons(p.obj, p.immediate == true)
+  return true
+end
+
+function APIgetModuleState(p)
+  if p == nil or p.obj == nil or p.propID == nil then return nil end
+  return APIobjGetPropData({obj = p.obj, propID = p.propID})
+end
+
+function APIsetModuleState(p)
+  if p == nil or p.obj == nil or p.propID == nil or p.data == nil then return false end
+  APIobjSetPropData({obj = p.obj, propID = p.propID, data = p.data})
+  if p.rebuild ~= false then queueRebuildButtons(p.obj) end
+  return true
+end
+
 --Lists currently registered properties.
 function APIgetPropsList(p)
   tags = {}
@@ -1260,7 +1476,7 @@ end
 function APIobjGetProps(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil then
-    return EncodedObjects[target].encoded
+    return deepcopy(EncodedObjects[target].encoded)
   end
 end
 --Set a prop to active or not: {obj=obj,data={propID=bool}}
@@ -1321,7 +1537,7 @@ function APIobjGetValueData(p)
     end
     val = EncodedObjects[target].values[p.valueID]
     data = {}
-    data[p.valueID]=val
+    data[p.valueID]=deepcopy(val)
     return data
   end
 end
@@ -1347,7 +1563,7 @@ function APIobjGetPropData(p)
       if EncodedObjects[target].values[v] == nil and  Values[v] ~= nil then
         EncodedObjects[target].values[v] = Values[v].default
       end
-      data[v]=EncodedObjects[target].values[v]
+      data[v]=deepcopy(EncodedObjects[target].values[v])
     end
     return data
   end
@@ -1367,7 +1583,7 @@ end
 function APIobjGetAllData(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil then
-   return EncodedObjects[target].values
+   return deepcopy(EncodedObjects[target].values)
   end
 end
 --{obj=obj,data={valueID=value}}
