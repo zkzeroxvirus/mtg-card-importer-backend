@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.928'
+mod_name, version = 'Card Importer', '1.929'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -98,7 +98,7 @@ newText=setmetatable({
 
 --[[Variables]]
 local DEFAULT_CARD_BACK_URL = 'https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/'
-local Deck,Tick,Test,Quality,Back=1,0.2,false,TBL.new('normal',{}),TBL.new(DEFAULT_CARD_BACK_URL,{})
+local Deck,Tick,Test,Quality=1,0.2,false,TBL.new('normal',{})
 local NAME_FALLBACK_LIMIT = 16
 local TOKEN_RELATED_CACHE_MAX = 300
 local tokenRelatedPartsCache = {}
@@ -203,7 +203,7 @@ local function spawnImageOnlyCard(qTbl)
     return
   end
 
-  local backUrl = Back[qTbl.player] or Back.___ or DEFAULT_CARD_BACK_URL
+  local backUrl = DEFAULT_CARD_BACK_URL
   local cardSeed = math.random(100, 999)
   local displayName = qTbl.name or ''
   if displayName == '' or displayName == 'blank card' or displayName == 'blank%20card' then
@@ -237,7 +237,7 @@ end
 local Card=setmetatable({n=1,image=false},
   {__call=function(t,c,qTbl)
     local success,errorMSG=pcall(function()
-      c.face,c.oracle,c.back='','',Back[qTbl.player] or Back.___
+      c.face,c.oracle,c.back='','',DEFAULT_CARD_BACK_URL
       local n,state,qual,imgSuffix=t.n,false,Quality[qTbl.player],''
       t.n=n+1
 
@@ -718,7 +718,7 @@ local function requestRandomDeckFast(qTbl, queryRaw, count)
   local payload = {
     q = queryRaw,
     count = count,
-    back = Back[qTbl.player] or Back.___,
+    back = DEFAULT_CARD_BACK_URL,
     enforceCommander = isCommanderFormatEnforcedForTable()
   }
 
@@ -1432,11 +1432,6 @@ Importer=setmetatable({
     end)
   end,
 
-  Mystery=function(qTbl)
-    Player[qTbl.color].broadcast('Mystery booster mode has been removed from this importer.',{1,0.6,0.2})
-    endLoop()
-  end,
-
   Random=function(qTbl)
     local url,q1=BACKEND_URL..'/random?compact=spawn','&q=is:hires'
     local directQueryRaw = nil
@@ -1592,6 +1587,7 @@ local Usage = [[━━━━━━━━━━━━━━━━━━━━━�
 
 [b][0077ff]Scryfall clear queue[/b]
    → Cancel pending requests & reload importer
+
 
 [b][0077ff]Scryfall format on|off|toggle|status[/b]
   → Host-only table toggle for commander format enforcement
@@ -1885,8 +1881,6 @@ function onLoad(data)
 
   ensureRegisterModule()
   
-  Back = TBL.new(DEFAULT_CARD_BACK_URL, {})
-  
   -- Create UI buttons
   self.createButton({
     label = "+",
@@ -2152,7 +2146,7 @@ function registerModule()
   end
 
   function eEmblemAndTokens(o,p)ENC(o,p,'Token')end function eOracle(o,p)ENC(o,p,'Text')end function eRulings(o,p)ENC(o,p,'Rules')end function ePrintings(o,p)ENC(o,p,'Print')end function eRespawn(o,p)ENC(o,p,'Spawn')end
-  function eReverseCard(o,p)ENC(o,p)spawnObjectJSON({json=o.getJSON():gsub('BackURL','FaceURL'):gsub('FaceURL','BackURL',1)})end
+  function eReverseCard(o,p)ENC(o,p)spawnObjectJSON({json=o.getJSON():gsub('BackURL','FaceURL'):gsub('FaceURL','BackURL',1)})
 
   isRegistered = true
 end
@@ -2190,4 +2184,5 @@ Button=setmetatable({label='UNDEFINED',click_function='eOracle',function_owner=s
       o.createButton(t)
       t.height=400
       if i%2==1 then t.position[3]=t.position[3]+0.1625 end end})
+  end      
 --EOF
