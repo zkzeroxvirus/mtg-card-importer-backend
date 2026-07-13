@@ -36,7 +36,7 @@ function registerModule()
   end
 end
 
-script="self.max_typed_number=999 function onNumberTyped(ply, int) enc = Global.getVar('Encoder') if enc ~= nil then enc.call('APIobjSetValueData',{obj=self,valueID='picounter',data={picounter=int}}) enc.call('APIrebuildButtons',{obj=self,immediate=true}) return true end end"
+script="self.max_typed_number=999 function onNumberTyped(ply, int) enc = Global.getVar('Encoder') if enc ~= nil then enc.call('APIobjSetValueData',{obj=self,valueID='picounter',data={picounter=int}}) enc.call('APIrebuildButtons',{obj=self}) return true end end"
 
 function toggleProp(obj,ply)
   enc = Global.getVar('Encoder')
@@ -54,7 +54,7 @@ function toggleProp(obj,ply)
       currentValue = 0
       enc.call("APIobjDisableProp",{obj=obj,propID=pID})
       enc.call("APIobjSetValueData",{obj=obj,valueID='picounter',data={picounter=currentValue}})
-      enc.call("APIrebuildButtons",{obj=obj,immediate=true})
+      enc.call("APIrebuildButtons",{obj=obj})
       return
     end
 
@@ -69,7 +69,7 @@ function toggleProp(obj,ply)
       enc.call("APIobjUpdateThis",{obj=obj})
       enc.call("APIobjEnableProp",{obj=obj,propID=pID})
       enc.call("APIobjSetValueData",{obj=obj,valueID='picounter',data={picounter=currentValue}})
-      enc.call("APIrebuildButtons",{obj=obj,immediate=true})
+      enc.call("APIrebuildButtons",{obj=obj})
     end, function() return not(obj.spawning) end)
   end
 end
@@ -145,7 +145,7 @@ function add_subtract(obj,color,alt)
   if picounter ~= new_value then
     picounter = new_value
     enc.call("APIobjSetValueData",{obj=obj,valueID='picounter',data={picounter=picounter}})
-    enc.call("APIrebuildButtons",{obj=obj,immediate=true})
+    enc.call("APIrebuildButtons",{obj=obj})
   end
 end
 
