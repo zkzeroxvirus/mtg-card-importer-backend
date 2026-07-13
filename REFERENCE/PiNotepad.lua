@@ -192,7 +192,11 @@ function onObjectLeaveContainer(container, obj)
   if obj == nil or obj.type ~= "Card" then return end
   if readPersistedNote(obj) == nil then return end
   Wait.condition(
-    function() restorePersistedNote(obj) end,
+    function()
+      restorePersistedNote(obj)
+      local enc = Global.getVar('Encoder')
+      if enc ~= nil then enc.call("APIrebuildButtons",{obj=obj}) end
+    end,
     function() return obj == nil or not obj.spawning end,
     2
   )
