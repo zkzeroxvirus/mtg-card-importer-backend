@@ -40,6 +40,7 @@ heightOffset = 0
 
 XP_MIN = 0
 SPAWNER_TAG = "MTGSpawner"
+PLAYER_SPAWNER_TAG = "MTGPlayerSpawner"
 MASTER_TAG = "MTGMasterController"
 MASTER_REFRESH_HOOKS = {"spawnerXPChanged", "spawnerEssenceChanged", "refreshSlots", "refreshSpawners"}
 
@@ -499,22 +500,38 @@ function grantBonusBuildingUse(params)
   end
 end
 
+function isTraderSellSessionActive()
+  return type(pendingSell) == "table" and tonumber(pendingSell.maxCards) ~= nil
+end
+
+function getTraderSellRemaining()
+  if not isTraderSellSessionActive() then return 0 end
+  local sold = math.max(0, math.floor(tonumber(pendingSell.cardsToSell) or 0))
+  local maxCards = math.max(0, math.floor(tonumber(pendingSell.maxCards) or 0))
+  return math.max(0, maxCards - sold)
+end
+
 function enterSellMode()
-  pendingSell = {cardsToSell = 0, maxCards = 2}
-  pendingSellXPEarned = 0
+  if not isTraderSellSessionActive() or getTraderSellRemaining() <= 0 then
+    pendingSell = {cardsToSell = 0, maxCards = 2}
+    pendingSellXPEarned = 0
+  end
+  pendingSellCard = nil
+  pendingSellCMC = nil
   pendingSellIsDeck = false
   currentScreen = "sell_confirm"
   openScreen("sell_confirm", nil, "Sell Cards for XP")
+  local remaining = getTraderSellRemaining()
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Drop single cards (max 2) or a 2-card deck.\nGain = 2 × total CMC",
+    label = "Drop single cards or a 2-card deck.\nGain = 2x total CMC in XP | Remaining: " .. remaining,
     position = {0, 0.1, 0.0},
     width = 1600, height = 300, font_size = 70,
     color = {0.2, 0.2, 0.15}, font_color = {0.9, 0.9, 0.5},
   })
   trackButton({
     click_function = "click_sellModeCancel", function_owner = self,
-    label = "Exit Sell Mode", position = {0, 0.1, 1.2},
+    label = "Leave Sell Mode", position = {0, 0.1, 1.2},
     width = 900, height = 200, font_size = 80,
     color = {0.5, 0.15, 0.15}, font_color = {1, 1, 1},
   })
@@ -610,6 +627,43 @@ end
 
 function getMerchantPackCost(packKey)
   return applyMerchantCostModifiers(PACK_COSTS[packKey] or 0)
+end
+
+function isMTGPlayerSpawner()
+  return true
+end
+
+function isClaimedPlayerToken()
+  return type(localPlayerKey) == "string" and localPlayerKey ~= ""
+end
+
+function getPlayerKey()
+  return localPlayerKey
+end
+
+function hasMTGSpawnerMethod(params)
+  local methodName = ""
+  if type(params) == "table" then
+    methodName = tostring(params.name or params.method or "")
+  else
+    methodName = tostring(params or "")
+  end
+
+  return ({
+    receiveXP = true,
+    receiveEssence = true,
+    getXP = true,
+    getEssence = true,
+    getPlayerDisplayName = true,
+    isClaimedPlayerToken = true,
+    getPlayerKey = true,
+    resetTownActions = true,
+    applyTownCostModifiers = true,
+    grantBonusBuildingUse = true,
+    grantBasicLandAdds = true,
+    enterSellMode = true,
+    receiveTravelerEffect = true,
+  })[methodName] == true
 end
 
 --==============================================================================
@@ -721,6 +775,7 @@ function onLoad(saved)
   end
   
   self.addTag(SPAWNER_TAG)
+  self.addTag(PLAYER_SPAWNER_TAG)
   normalizeTownActionQueues()
 
   -- Restore town screens if we reloaded mid-flow; otherwise show shop
@@ -1063,11 +1118,15 @@ function getXP()
 end
 
 function receiveXP(params)
-  local amt, bypass = 0, false
+  local amt, bypass, suppressMasterHistory, historySource = 0, false, false, nil
+  local description = nil
   if type(params) == "number" then amt = params
   elseif type(params) == "table" and type(params.amount) == "number" then
     amt = params.amount
     bypass = params.bypassBuff == true
+    suppressMasterHistory = params.suppressMasterHistory == true
+    historySource = params.historySource or params.source
+    description = params.description or params.reason
   end
   local bonus = 0
   if not bypass then
@@ -1088,7 +1147,7 @@ function receiveXP(params)
     end
   end
   xp = math.max(XP_MIN, math.floor(xp + amt + bonus))
-  recordXPTransaction(math.floor(amt + bonus), bypass and "Reverted XP" or "Received XP")
+  recordXPTransaction(math.floor(amt + bonus), description or (bypass and "Reverted XP" or "Received XP"), suppressMasterHistory, historySource)
   refreshXPDisplay()
   notifyMasters()
   return xp
@@ -1103,6 +1162,37 @@ function notifyMasters()
   end
 end
 
+function notifyMasterCommunicationChanged()
+  local masters = getObjectsWithTag(MASTER_TAG) or {}
+  for _, m in ipairs(masters) do
+    pcall(function() m.call("invalidateCommunicationCache", {spawner = self}) end)
+  end
+end
+
+function notifyMasterHistoryEvent(htype, amount, balanceAfter, description, source, suppress)
+  if suppress == true then return end
+  if type(amount) ~= "number" then return end
+  local masters = getObjectsWithTag(MASTER_TAG) or {}
+  local guid = self.getGUID()
+  local playerName = getPlayerDisplayName()
+  for _, m in ipairs(masters) do
+    pcall(function()
+      m.call("recordHistoryEvent", {
+        htype = htype,
+        spawnerGuid = guid,
+        playerName = playerName,
+        amount = amount,
+        rawAmount = amount,
+        finalAmount = amount,
+        balanceBefore = balanceAfter - amount,
+        balanceAfter = balanceAfter,
+        reason = description,
+        source = source or "Custom Token",
+      })
+    end)
+  end
+end
+
 function xp_noop() end
 
 function getTimeStr()
@@ -1110,21 +1200,23 @@ function getTimeStr()
   return string.format("%02d:%02d:%02d", t.hour, t.min, t.sec)
 end
 
-function recordXPTransaction(amount, description)
+function recordXPTransaction(amount, description, suppressMasterHistory, source)
   table.insert(xpHistory, 1, {amount=amount, balance=xp, time=getTimeStr(), description=description})
   if #xpHistory > 100 then table.remove(xpHistory) end
+  notifyMasterHistoryEvent("xp", amount, xp, description, source, suppressMasterHistory)
 end
 
-function recordEssenceTransaction(amount, description)
+function recordEssenceTransaction(amount, description, suppressMasterHistory, source)
   table.insert(essenceHistory, 1, {amount=amount, balance=essence, time=getTimeStr(), description=description})
   if #essenceHistory > 100 then table.remove(essenceHistory) end
+  notifyMasterHistoryEvent("essence", amount, essence, description, source, suppressMasterHistory)
 end
 
-function applyEssenceDeltaTracked(amt, description, bypassBuff)
+function applyEssenceDeltaTracked(amt, description, bypassBuff, suppressMasterHistory, source)
   local before = essence
   applyEssenceDelta(amt, bypassBuff)
   local actual = essence - before
-  if actual ~= 0 then recordEssenceTransaction(actual, description) end
+  if actual ~= 0 then recordEssenceTransaction(actual, description, suppressMasterHistory, source) end
 end
 
 --==============================================================================
@@ -1549,6 +1641,7 @@ end
 function showShopScreen()
   activePack = nil
   openScreen("shop", nil, getPlayerDisplayName())
+  local canResumeTraderSell = isTraderSellSessionActive() and getTraderSellRemaining() > 0
   trackButton({
     click_function = "click_shopCashout", function_owner = self,
     label = "Redeem Cashout",
@@ -1577,13 +1670,22 @@ function showShopScreen()
     width = 600, height = 320, font_size = 100,
     color = {0.2, 0.2, 0.2}, font_color = {1, 1, 1},
   })
+  if canResumeTraderSell then
+    trackButton({
+      click_function = "click_resumeTraderSell", function_owner = self,
+      label = "Resume Trader Sell\n" .. getTraderSellRemaining() .. " left",
+      position = {-0.75, 0.1, 1.05},
+      width = 850, height = 230, font_size = 72,
+      color = {0.25, 0.35, 0.15}, font_color = {0.9, 1, 0.85},
+    })
+  end
   trackButton({
     click_function = "click_endSession", function_owner = self,
     label = "End Session",
-    position = {0, 0.1, 1.05},
-    width = 1800, height = 230, font_size = 85,
+    position = canResumeTraderSell and {0.75, 0.1, 1.05} or {0, 0.1, 1.05},
+    width = canResumeTraderSell and 850 or 1800, height = 230, font_size = canResumeTraderSell and 72 or 85,
     color = {0.45, 0.15, 0.15}, font_color = {1, 0.85, 0.85},
-    tooltip = "Convert XP to Essence, then count your deck's CMC",
+    tooltip = "Convert XP to Essence, then count your deck  and sideboard's CMC",
   })
 end
 
@@ -1594,6 +1696,7 @@ function click_shopSettings()    showSettingsScreen()   end
 function click_shopBuy()         showExperienceScreen() end
 function click_shopXPShop()      showExperienceScreen() end
 function click_shopEssenceShop() showEssenceScreen()    end
+function click_resumeTraderSell() enterSellMode() end
 
 function click_endSession() showEndSessionConfirm() end
 
@@ -1616,8 +1719,8 @@ function showEndSessionConfirm()
   })
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Then place deck to add CMC to Essence",
-    position = {0, 0.1, 0.55}, width = 1300, height = 150, font_size = 62,
+    label = "Then place deck and sideboard to add CMC to Essence",
+    position = {0, 0.1, 0.55}, width = 1450, height = 150, font_size = 62,
     color = {0.15, 0.15, 0.2}, font_color = {0.75, 0.75, 0.9},
   })
   trackButton({
@@ -2206,7 +2309,7 @@ function lookupCardCMC(obj, callback)
 end
 
 function showSellConfirm(displayName, cmc)
-  openScreen("sell_confirm", nil, "Sell for Essence?")
+  openScreen("sell_confirm", nil, "Sell for XP?")
   trackButton({
     click_function = "xp_noop", function_owner = self,
     label = displayName,
@@ -2216,7 +2319,7 @@ function showSellConfirm(displayName, cmc)
   })
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Gain " .. (cmc * 2) .. " Essence   (CMC: " .. cmc .. ")",
+    label = "Gain " .. (cmc * 2) .. " XP   (CMC: " .. cmc .. ")",
     position = {0, 0.1, 0.2},
     width = 1700, height = 200, font_size = 80,
     color = {0.15, 0.1, 0.2}, font_color = {0.7, 1.0, 0.8},
@@ -2290,7 +2393,6 @@ function click_sellModeCancel()
   if pendingSellXPEarned > 0 then
     showTraderSellSummary()
   else
-    pendingSell = nil
     currentScreen = nil
     showShopScreen()
   end
@@ -2321,7 +2423,9 @@ function showTraderSellSummary()
 end
 
 function click_tradeSellSummaryOK()
-  pendingSell = nil
+  if not isTraderSellSessionActive() or getTraderSellRemaining() <= 0 then
+    pendingSell = nil
+  end
   pendingSellXPEarned = 0
   currentScreen = nil
   showShopScreen()
@@ -5242,6 +5346,7 @@ function onPickUp(player_color)
     localPlayerKey    = keyBase .. "_Essence"
     claimedPlayerName = pname or keyBase
     self.setName(claimedPlayerName)
+    notifyMasterCommunicationChanged()
     if currentScreen == "shop" then showShopScreen() end
   end
 
@@ -5253,13 +5358,17 @@ end
 function getEssence() return essence end
 
 function receiveEssence(params)
-  local amt, bypass = 0, false
+  local amt, bypass, suppressMasterHistory, historySource = 0, false, false, nil
+  local description = nil
   if type(params) == "number" then amt = params
   elseif type(params) == "table" and type(params.amount) == "number" then
     amt = params.amount
     bypass = params.bypassBuff == true
+    suppressMasterHistory = params.suppressMasterHistory == true
+    historySource = params.historySource or params.source
+    description = params.description or params.reason
   end
-  applyEssenceDeltaTracked(amt, bypass and "Reverted Essence" or "Received Essence", bypass)
+  applyEssenceDeltaTracked(amt, description or (bypass and "Reverted Essence" or "Received Essence"), bypass, suppressMasterHistory, historySource)
   return essence
 end
 
@@ -5614,10 +5723,10 @@ function handleRewardDrop(obj)
   end
 
   if not item.repeatable and ess_isItemUnlocked(item) then
-    applyEssenceDeltaTracked(DUPLICATE_REWARD_ESSENCE, "Duplicate Reward: " .. hit.name, true)
+    applyEssenceDeltaTracked(DUPLICATE_REWARD_ESSENCE, "Duplicate Reward: " .. hit.name)
+    broadcastToAll("[" .. self.getName() .. "] Duplicate reward converted to +"
+      .. tostring(DUPLICATE_REWARD_ESSENCE) .. " Essence: " .. hit.name, {0.8, 0.6, 1.0})
     awardCryptBossEssence()
-    print("[" .. self.getName() .. "] Duplicate reward converted to +" .. tostring(DUPLICATE_REWARD_ESSENCE)
-      .. " Essence: " .. hit.name)
     ess_safeDestructObject(obj)
     essenceTab = hit.category
     if currentScreen == "essence" then showEssenceScreen() end
@@ -6070,7 +6179,7 @@ function showCapturePromptScreen()
   openScreen("capture_prompt", "capture_cancel", "Add Capture")
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Drop the Capture card\nonto this card to save it.",
+    label = "Drop the Capture Ticket\nonto this card to save it.",
     position = {0, 0.1, -0.2},
     width = 1800, height = 320, font_size = 80,
     color = {0.18, 0.18, 0.28}, font_color = {1, 1, 1},
@@ -6292,7 +6401,7 @@ function onObjectDropped(player_color, dropped_object)
     return
   end
 
-  if currentScreen == "sell_confirm" then
+  if currentScreen == "sell_confirm" and isTraderSellSessionActive() then
     handleSellModeDrop(dropped_object)
     return
   end
