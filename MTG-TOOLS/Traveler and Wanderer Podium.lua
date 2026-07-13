@@ -2,6 +2,7 @@
 -- Detect tagged objects, show a temporary button, and apply XP effects through MTGSpawner APIs.
 
 SPAWNER_TAG = "MTGSpawner"
+PLAYER_SPAWNER_TAG = "MTGPlayerSpawner"
 MASTER_TAG = "MTGMasterController"
 
 DETECTION_TAGS = {
@@ -19,6 +20,7 @@ TRAVELER_RESET_COOLDOWN_SECONDS = 10
 
 activeWandererGuid = nil
 activeWandererName = nil
+activeEncounterType = "Wanderer"
 activeConfig = nil
 pressedPlayers = {}
 bardLastUsedAt = 0
@@ -27,6 +29,7 @@ spawnerScriptCache = {}
 collidingTaggedGuids = {}
 giantIceToadXPInput = {}
 voteEligibleColors = {}
+voteEligibleSpawners = {}
 voteSelections = {}
 activeSillyJesterGuids = {}
 
@@ -42,6 +45,11 @@ end
 local function trimName(name)
 if type(name) ~= "string" or name == "" then return "Unknown Wanderer" end
 return name
+end
+
+local function getActiveEncounterType()
+if activeEncounterType == "Traveler" then return "Traveler" end
+return "Wanderer"
 end
 
 local function isSillyJesterName(name)
@@ -78,6 +86,7 @@ local lowered = safeLower(description)
 if string.find(lowered, "any amount of experience", 1, true) then return nil end
 
 local amount = string.match(lowered, "pay%s+(%d+)%s*xp")
+or string.match(lowered, "pay%s+(%d+)%s+experience")
 if amount then
 return -tonumber(amount)
 end
@@ -106,6 +115,18 @@ return script
 end
 
 local function spawnerHasFunction(obj, functionName)
+if obj and functionName then
+local okSpawner, hasSpawnerMethod = pcall(function()
+return obj.call("hasMTGSpawnerMethod", { name = functionName })
+end)
+if okSpawner and type(hasSpawnerMethod) == "boolean" then return hasSpawnerMethod end
+
+local okMaster, hasMasterMethod = pcall(function()
+return obj.call("hasMTGMasterMethod", { name = functionName })
+end)
+if okMaster and type(hasMasterMethod) == "boolean" then return hasMasterMethod end
+end
+
 local script = getSpawnerScript(obj)
 if script == "" then return false end
 
@@ -117,6 +138,8 @@ end
 
 local function isXPSpawner(obj)
 if not obj or obj == self then return false end
+local okTagged, tagged = pcall(function() return obj.hasTag(PLAYER_SPAWNER_TAG) end)
+if okTagged and tagged then return true end
 return spawnerHasFunction(obj, "receiveXP") or spawnerHasFunction(obj, "receiveEssence")
 end
 
@@ -190,22 +213,72 @@ end
 return displayName .. " moves on."
 end
 
+local KNOWN_WANDERER_CONFIGS = {
+{ match = "bearded grunt", label = "Bearded Grunt Vote", mode = "vote", resource = "xp", delta = 0 },
+{ match = "bullywug royal", label = "Use (-50XP)", mode = "single", resource = "xp", delta = -50 },
+{ match = "card copier", label = "Use (-25XP)", mode = "single", resource = "xp", delta = -25 },
+{ match = "card-eating ogre", label = "Use (-35XP)", mode = "single", resource = "xp", delta = -35 },
+{ match = "cartographer", label = "Hire (-10XP)", mode = "single", resource = "xp", delta = -10 },
+{ match = "cats in a coat", skip = true },
+{ match = "centaur scouter", label = "Use (-35XP)", mode = "single", resource = "xp", delta = -35 },
+{ match = "centepoid warrior", label = "Use (-25XP)", mode = "single", resource = "xp", delta = -25 },
+{ match = "centipede warrior", label = "Use (-25XP)", mode = "single", resource = "xp", delta = -25 },
+{ match = "commander mimic", label = "Use (-25XP)", mode = "single", resource = "xp", delta = -25 },
+{ match = "dwarven artificer", skip = true },
+{ match = "elven demonologist", label = "Use (-25XP)", mode = "single", resource = "xp", delta = -25 },
+{ match = "fungal lich", skip = true },
+{ match = "lich lord", skip = true },
+{ match = "giff bandito", label = "Use (-15XP)", mode = "single", resource = "xp", delta = -15 },
+{ match = "giant ice toad", label = "Transmute XP", mode = "giant_ice_toad", resource = "xp", delta = 0 },
+{ match = "hell's librarian", label = "Use (-50XP)", mode = "single", resource = "xp", delta = -50 },
+{ match = "wayfarer", label = "Destroy (+5XP)", mode = "single", resource = "xp", delta = 5 },
+{ match = "veiled trinket broker", label = "Hire (-40XP)", mode = "single", resource = "xp", delta = -40 },
+{ match = "essence broker", label = "Hire (+10 Essence)", mode = "single", resource = "essence", delta = 10 },
+{ match = "wandering bard", label = "Dance (+5XP)", mode = "bard", resource = "xp", delta = 5 },
+{ match = "kimi the cat", skip = true },
+{ match = "silly, the jester", label = "Silly, the Jester", mode = "silly_jester", resource = "xp", delta = 0 },
+{ match = "silly the jester", label = "Silly, the Jester", mode = "silly_jester", resource = "xp", delta = 0 },
+{ match = "hollyphant", label = "Hollyphant", mode = "hollyphant", resource = "xp", delta = 0 },
+{ match = "the trader", label = "The Trader Vote", mode = "vote_trader", resource = "xp", delta = 0 },
+{ match = "vanguard mercenaries", label = "Use (-50XP)", mode = "single", resource = "xp", delta = -50 },
+{ match = "wandering card merchant", skip = true },
+{ match = "zorbo", label = "Use (-50XP)", mode = "single", resource = "xp", delta = -50 },
+}
+
+local function copyKnownConfig(template, hasTravelerTag)
+if not template then return nil end
+local cfg = {
+label = template.label,
+mode = template.mode,
+resource = template.resource,
+delta = template.delta,
+}
+cfg.applyTownTravelerReduction = hasTravelerTag and cfg.mode == "single"
+and cfg.resource == "xp" and type(cfg.delta) == "number" and cfg.delta < 0
+return cfg
+end
+
+local function getKnownWandererConfig(loweredName, hasTravelerTag)
+for _, template in ipairs(KNOWN_WANDERER_CONFIGS) do
+if string.find(loweredName, template.match, 1, true) then
+if template.skip then return true, nil end
+return true, copyKnownConfig(template, hasTravelerTag)
+end
+end
+return false, nil
+end
+
 local function getWandererConfig(obj)
 local displayName = getDetectionDisplayName(obj)
 local n = safeLower(displayName)
-local description = getObjectDescription(obj)
-local parsedXPDelta = parseFixedXPCost(description)
 local hasTravelerTag = false
 pcall(function() hasTravelerTag = obj.hasTag("Traveler") end)
 
-if string.find(n, "bearded grunt", 1, true) then
-return {
-label = "Bearded Grunt Vote",
-mode = "vote",
-resource = "xp",
-delta = 0,
-}
-end
+local hasKnownConfig, knownConfig = getKnownWandererConfig(n, hasTravelerTag)
+if hasKnownConfig then return knownConfig end
+
+local description = getObjectDescription(obj)
+local parsedXPDelta = parseFixedXPCost(description)
 
 local cfg = nil
 if parsedXPDelta ~= nil then
@@ -226,50 +299,7 @@ resource = "xp",
 }
 end
 
-if string.find(n, "cartographer", 1, true) then
-cfg.label = "Hire (-10XP)"
-cfg.delta = -10
-elseif string.find(n, "giant ice toad", 1, true) then
-cfg.label = "Transmute XP"
-cfg.mode = "giant_ice_toad"
-cfg.delta = 0
-cfg.resource = "xp"
-elseif string.find(n, "wayfarer", 1, true) then
-cfg.label = "Destroy (+5XP)"
-cfg.delta = 5
-elseif string.find(n, "veiled trinket broker", 1, true) then
-cfg.label = "Hire (-40XP)"
-cfg.delta = -40
-elseif string.find(n, "essence broker", 1, true) then
-cfg.label = "Hire (+10 Essence)"
-cfg.delta = 10
-cfg.resource = "essence"
-elseif string.find(n, "wandering bard", 1, true) then
-cfg.label = "Dance (+5XP)"
-cfg.mode = "bard"
-cfg.delta = 5
-elseif isSillyJesterName(n) then
-return {
-label = "Silly, the Jester",
-mode = "silly_jester",
-resource = "xp",
-delta = 0,
-}
-elseif string.find(n, "hollyphant", 1, true) then
-return {
-label = "Hollyphant",
-mode = "hollyphant",
-resource = "xp",
-delta = 0,
-}
-elseif string.find(n, "the trader", 1, true) then
-return {
-label = "The Trader Vote",
-mode = "vote_trader",
-resource = "xp",
-delta = 0,
-}
-elseif string.find(n, "traveler", 1, true) and parsedXPDelta == nil then
+if string.find(n, "traveler", 1, true) and parsedXPDelta == nil then
 return nil
 elseif parsedXPDelta == nil then
 -- For Traveler-tagged objects without a fixed XP cost, skip button generation.
@@ -291,6 +321,12 @@ table.insert(out, color)
 end
 end
 return out
+end
+
+local function getPlayerSteamName(playerColor)
+local p = Player[playerColor]
+if p and p.steam_name then return safeLower(p.steam_name) end
+return ""
 end
 
 local function getTaggedSpawners()
@@ -325,7 +361,7 @@ lastTravelerResetAt = now
 local master = getMasterController()
 if not master then return false end
 if spawnerHasFunction(master, "resetTownActions") then
-return pcall(function() master.call("resetTownActions") end)
+return pcall(function() master.call("resetTownActions", { silent = true, skipUi = true }) end)
 end
 if spawnerHasFunction(master, "click_resetTownActions") then
 return pcall(function() master.call("click_resetTownActions") end)
@@ -380,7 +416,67 @@ end
 return fallback
 end
 
-local function applyResourceToSpawner(spawner, resourceType, delta)
+local function isClaimedCustomToken(spawner)
+if not spawner or not spawnerHasFunction(spawner, "isClaimedPlayerToken") then return false end
+local ok, claimed = pcall(function() return spawner.call("isClaimedPlayerToken") end)
+return ok and claimed == true
+end
+
+local function claimedTokenMatchesColor(spawner, color)
+local desiredName = getPlayerSteamName(color)
+if desiredName == "" then return false end
+
+if spawnerHasFunction(spawner, "getPlayerDisplayName") then
+local okName, dispName = pcall(function() return spawner.call("getPlayerDisplayName") end)
+if okName and type(dispName) == "string" and safeLower(dispName) == desiredName then
+return true
+end
+end
+
+if spawnerHasFunction(spawner, "getPlayerKey") then
+local okKey, playerKey = pcall(function() return spawner.call("getPlayerKey") end)
+if okKey and type(playerKey) == "string" then
+local keyName = safeLower(playerKey:gsub("_Essence$", ""))
+if keyName == desiredName then return true end
+end
+end
+
+return false
+end
+
+local function findClaimedCustomTokenForColor(color, spawners)
+for _, spawner in ipairs(spawners or getTaggedSpawners()) do
+if isClaimedCustomToken(spawner) and claimedTokenMatchesColor(spawner, color) then
+return spawner
+end
+end
+return nil
+end
+
+local function getVoteSpawnerForColor(color)
+return voteEligibleSpawners[color]
+end
+
+local function getClaimedPlayerTokensFromMaster(force)
+local master = getMasterController()
+if not master or not spawnerHasFunction(master, "getClaimedPlayerTokens") then return nil end
+local ok, players = pcall(function()
+return master.call("getClaimedPlayerTokens", { force = force == true })
+end)
+if ok and type(players) == "table" then return players end
+return nil
+end
+
+local function getEncounterHistoryReason(fallback)
+local encounterType = getActiveEncounterType()
+local encounterName = (activeWandererName and activeWandererName ~= "") and activeWandererName or fallback
+if encounterName and encounterName ~= "" then
+return encounterType .. ": " .. tostring(encounterName)
+end
+return encounterType
+end
+
+local function applyResourceToSpawner(spawner, resourceType, delta, history)
 if not spawner then return false, 0 end
 local receiveMethod = (resourceType == "essence") and "receiveEssence" or "receiveXP"
 local getterMethod = (resourceType == "essence") and "getEssence" or "getXP"
@@ -394,8 +490,17 @@ before = beforeVal
 end
 end
 
+local payload = { amount = delta }
+if type(history) == "table" then
+payload.description = history.description or history.reason
+payload.reason = history.reason or history.description
+payload.source = history.source
+payload.historySource = history.historySource or history.source
+payload.suppressMasterHistory = history.suppressMasterHistory == true
+end
+
 local okCall = pcall(function()
-spawner.call(receiveMethod, { amount = delta })
+spawner.call(receiveMethod, payload)
 end)
 if not okCall then
 return false, 0
@@ -410,6 +515,22 @@ end
 end
 
 return true, applied
+end
+
+local function getSpawnerResourceBalance(spawner, resourceType)
+if not spawner then return nil end
+local getterMethod = (resourceType == "essence") and "getEssence" or "getXP"
+if not spawnerHasFunction(spawner, getterMethod) then return nil end
+local ok, value = pcall(function() return spawner.call(getterMethod) end)
+if ok and type(value) == "number" then return math.floor(value) end
+return nil
+end
+
+local function canPayResourceDelta(spawner, resourceType, delta)
+if type(delta) ~= "number" or delta >= 0 then return true, nil end
+local balance = getSpawnerResourceBalance(spawner, resourceType)
+if type(balance) ~= "number" then return false, nil end
+return balance >= math.floor(-delta), balance
 end
 
 local function getTravelerAdjustedDelta(spawner, delta)
@@ -474,7 +595,23 @@ printToColor("Town reduction applied: " .. tostring(baseCost) .. " -> " .. tostr
 end
 end
 
-local ok, applied = applyResourceToSpawner(spawner, resourceType, requestedDelta)
+local canPay, balance = canPayResourceDelta(spawner, resourceType, requestedDelta)
+if not canPay then
+local unit = (resourceType == "essence") and "Essence" or "XP"
+local needed = math.floor(math.max(0, -requestedDelta))
+if type(balance) == "number" then
+printToColor("Not enough " .. unit .. " for this " .. getActiveEncounterType() .. ". Need " .. tostring(needed) .. ", have " .. tostring(balance) .. ".", playerColor, {1, 0.3, 0.3})
+else
+printToColor("Could not verify your " .. unit .. " balance for this " .. getActiveEncounterType() .. ".", playerColor, {1, 0.3, 0.3})
+end
+return false
+end
+
+local historyReason = getEncounterHistoryReason("Encounter")
+local ok, applied = applyResourceToSpawner(spawner, resourceType, requestedDelta, {
+reason = historyReason,
+source = getActiveEncounterType(),
+})
 if not ok then
 printToColor("Could not contact XP system for " .. tostring(playerColor) .. ".", playerColor, {1, 0.3, 0.3})
 return false
@@ -484,13 +621,14 @@ local unit = (resourceType == "essence") and "Essence" or "XP"
 
 if applied ~= requestedDelta then
 if requestedDelta < 0 then
-printToColor("Not enough " .. unit .. " for this Wanderer.", playerColor, {1, 0.3, 0.3})
+printToColor("Not enough " .. unit .. " for this " .. getActiveEncounterType() .. ".", playerColor, {1, 0.3, 0.3})
+return false
 else
-printToColor("Wanderer applied partial " .. unit .. " change: " .. tostring(applied) .. ".", playerColor, {1, 0.8, 0.3})
+printToColor(getActiveEncounterType() .. " applied partial " .. unit .. " change: " .. tostring(applied) .. ".", playerColor, {1, 0.8, 0.3})
 end
 else
 local sign = (requestedDelta >= 0) and "+" or ""
-printToColor("Wanderer effect applied: " .. sign .. tostring(requestedDelta) .. " " .. unit, playerColor, {0.55, 1, 0.55})
+printToColor(getActiveEncounterType() .. " effect applied: " .. sign .. tostring(requestedDelta) .. " " .. unit, playerColor, {0.55, 1, 0.55})
 end
 
 return true
@@ -507,7 +645,10 @@ local successCount = 0
 for _, color in ipairs(seated) do
 local spawner = findSpawnerForColor(color)
 if spawner then
-local ok = applyResourceToSpawner(spawner, "xp", 5)
+local ok = applyResourceToSpawner(spawner, "xp", 5, {
+reason = "Wandering Bard",
+source = "Wanderer",
+})
 if ok then successCount = successCount + 1 end
 end
 end
@@ -551,7 +692,10 @@ printToColor("You only have " .. tostring(xp) .. " XP.", playerColor, {1, 0.8, 0
 return false
 end
 
-local okSpend, appliedXP = applyResourceToSpawner(spawner, "xp", -requestedXP)
+local okSpend, appliedXP = applyResourceToSpawner(spawner, "xp", -requestedXP, {
+reason = "Giant Ice Toad: Transmute XP",
+source = "Traveler",
+})
 if not okSpend then
 printToColor("Giant Ice Toad could not spend your XP.", playerColor, {1, 0.3, 0.3})
 return false
@@ -567,7 +711,10 @@ return false
 end
 
 local essenceGain = math.floor(spentXP * 3)
-local okEssence = applyResourceToSpawner(spawner, "essence", essenceGain)
+local okEssence = applyResourceToSpawner(spawner, "essence", essenceGain, {
+reason = "Giant Ice Toad: Transmute XP",
+source = "Traveler",
+})
 if not okEssence then
 printToColor("XP was spent, but essence gain failed.", playerColor, {1, 0.3, 0.3})
 return false
@@ -610,9 +757,11 @@ end
 local function clearActiveDetectionState(clearButton)
 activeWandererGuid = nil
 activeWandererName = nil
+activeEncounterType = "Wanderer"
 activeConfig = nil
 pressedPlayers = {}
 voteEligibleColors = {}
+voteEligibleSpawners = {}
 voteSelections = {}
 giantIceToadXPInput = {}
 if clearButton then
@@ -730,12 +879,58 @@ end
 
 local function getVoteEligibleColors()
 local out = {}
+voteEligibleSpawners = {}
+
+local claimedPlayers = getClaimedPlayerTokensFromMaster(true)
+if claimedPlayers then
+for _, entry in ipairs(claimedPlayers) do
+if type(entry) == "table" and type(entry.color) == "string" then
+local spawner = entry.spawner
+if not spawner and type(entry.guid) == "string" and entry.guid ~= "" then
+pcall(function() spawner = getObjectFromGUID(entry.guid) end)
+end
+if spawner then
+voteEligibleSpawners[entry.color] = spawner
+table.insert(out, entry.color)
+end
+end
+end
+return out
+end
+
+local spawners = getTaggedSpawners()
 for _, color in ipairs(getSeatedColors()) do
-if findSpawnerForColor(color) then
+local spawner = findClaimedCustomTokenForColor(color, spawners)
+if spawner then
+voteEligibleSpawners[color] = spawner
 table.insert(out, color)
 end
 end
 return out
+end
+
+local function getVoteEligibleSpawnersSnapshot()
+local out = {}
+for _, color in ipairs(voteEligibleColors) do
+local spawner = getVoteSpawnerForColor(color)
+if spawner then table.insert(out, spawner) end
+end
+return out
+end
+
+local function applyVoteOutcome(spawners, applyFn, message, color, extraMessage, extraColor)
+if type(spawners) ~= "table" or type(applyFn) ~= "function" then return false end
+for i, spawner in ipairs(spawners) do
+local delayFrames = math.max(1, i - 1)
+Wait.frames(function()
+if spawner then applyFn(spawner) end
+end, delayFrames)
+end
+broadcastToAll(message, color)
+if extraMessage then
+broadcastToAll(extraMessage, extraColor or color)
+end
+return true
 end
 
 local function countSelectedVotes()
@@ -751,7 +946,10 @@ local outcomes = {
 xp = {
 message = "Bearded Grunt vote won: each player gains 15 XP.",
 apply = function(spawner)
-applyResourceToSpawner(spawner, "xp", 15)
+applyResourceToSpawner(spawner, "xp", 15, {
+reason = "Bearded Grunt Vote",
+source = "Wanderer Vote",
+})
 end,
 },
 building = {
@@ -771,18 +969,18 @@ end,
 local outcome = outcomes[choiceKey]
 if not outcome then return false end
 
-for _, color in ipairs(voteEligibleColors) do
-local spawner = findSpawnerForColor(color)
-if spawner then
-outcome.apply(spawner)
-end
-end
-
-broadcastToAll(outcome.message, {0.75, 0.9, 1})
+local spawners = getVoteEligibleSpawnersSnapshot()
 if choiceKey == "land" then
-broadcastToAll("All players should know: the Bearded Grunt land option won.", {0.85, 1, 0.85})
+return applyVoteOutcome(
+spawners,
+outcome.apply,
+outcome.message,
+{0.75, 0.9, 1},
+"All players should know: the Bearded Grunt land option won.",
+{0.85, 1, 0.85}
+)
 end
-return true
+return applyVoteOutcome(spawners, outcome.apply, outcome.message, {0.75, 0.9, 1})
 end
 
 local function finalizeBeardedGruntVote()
@@ -818,16 +1016,8 @@ end
 local function castBeardedGruntVote(playerColor, choiceKey)
 if not activeConfig or activeConfig.mode ~= "vote" then return end
 
-local eligible = false
-for _, color in ipairs(voteEligibleColors) do
-if color == playerColor then
-eligible = true
-break
-end
-end
-
-if not eligible then
-printToColor("You do not have a detected spawner for this vote.", playerColor, {1, 0.3, 0.3})
+if not getVoteSpawnerForColor(playerColor) then
+printToColor("You need a claimed Custom Token to vote.", playerColor, {1, 0.3, 0.3})
 return
 end
 
@@ -881,15 +1071,8 @@ end,
 local outcome = outcomes[choiceKey]
 if not outcome then return false end
 
-for _, color in ipairs(voteEligibleColors) do
-local spawner = findSpawnerForColor(color)
-if spawner then
-outcome.apply(spawner)
-end
-end
-
-broadcastToAll(outcome.message, {0.75, 1, 0.95})
-return true
+local spawners = getVoteEligibleSpawnersSnapshot()
+return applyVoteOutcome(spawners, outcome.apply, outcome.message, {0.75, 1, 0.95})
 end
 
 local function finalizeTraderVote()
@@ -925,16 +1108,8 @@ end
 local function castTraderVote(playerColor, choiceKey)
 if not activeConfig or activeConfig.mode ~= "vote_trader" then return end
 
-local eligible = false
-for _, color in ipairs(voteEligibleColors) do
-if color == playerColor then
-eligible = true
-break
-end
-end
-
-if not eligible then
-printToColor("You do not have a detected spawner for this vote.", playerColor, {1, 0.3, 0.3})
+if not getVoteSpawnerForColor(playerColor) then
+printToColor("You need a claimed Custom Token to vote.", playerColor, {1, 0.3, 0.3})
 return
 end
 
@@ -978,10 +1153,12 @@ activeConfig = getWandererConfig(obj)
 applyTravelerPreviewLabel(activeConfig)
 pressedPlayers = {}
 voteEligibleColors = {}
+voteEligibleSpawners = {}
 voteSelections = {}
 
 local isTravelerObject = false
 pcall(function() isTravelerObject = obj.hasTag("Traveler") end)
+activeEncounterType = isTravelerObject and "Traveler" or "Wanderer"
 if isTravelerObject then
 resetTownActionsViaMaster()
 end
@@ -992,10 +1169,10 @@ setSillyJesterDiscountEnabled(true)
 broadcastToAll(getEncounterMessage(obj, activeWandererName, true), {0.75, 0.9, 1})
 return
 elseif activeConfig.mode == "hollyphant" then
--- Auto-apply Hollyphant effect: grant Cathedral uses to all seated players
+-- Auto-apply Hollyphant effect for seated players with claimed Custom Tokens.
 local seatedColors = getVoteEligibleColors()
 for _, color in ipairs(seatedColors) do
-local spawner = findSpawnerForColor(color)
+local spawner = getVoteSpawnerForColor(color)
 if spawner then
 pcall(function() spawner.call("grantBonusBuildingUse", { buildingKey = "Cathedral", isGeneric = false }) end)
 end
@@ -1008,14 +1185,14 @@ if activeConfig.mode == "vote" then
 voteEligibleColors = getVoteEligibleColors()
 if #voteEligibleColors == 0 then
 clearActionButton()
-broadcastToAll("The Bearded Grunt has no detected spawners to vote.", {1, 0.3, 0.3})
+broadcastToAll("The Bearded Grunt has no claimed Custom Tokens to vote.", {1, 0.3, 0.3})
 return
 end
 elseif activeConfig.mode == "vote_trader" then
 voteEligibleColors = getVoteEligibleColors()
 if #voteEligibleColors == 0 then
 clearActionButton()
-broadcastToAll("The Trader has no detected spawners to vote.", {1, 0.3, 0.3})
+broadcastToAll("The Trader has no claimed Custom Tokens to vote.", {1, 0.3, 0.3})
 return
 end
 end
@@ -1040,8 +1217,10 @@ spawnerScriptCache = {}
 collidingTaggedGuids = {}
 giantIceToadXPInput = {}
 voteEligibleColors = {}
+voteEligibleSpawners = {}
 voteSelections = {}
 activeSillyJesterGuids = {}
+activeEncounterType = "Wanderer"
 lastTravelerResetAt = 0
 clearActionButton()
 end
@@ -1101,7 +1280,7 @@ return
 end
 
 if pressedPlayers[playerColor] then
-printToColor("You already used this Wanderer this spawn.", playerColor, {1, 0.8, 0.3})
+printToColor("You already used this " .. getActiveEncounterType() .. " this spawn.", playerColor, {1, 0.8, 0.3})
 return
 end
 
@@ -1133,7 +1312,7 @@ local resourceType = activeConfig.resource or "xp"
 local ok = applyToSinglePlayer(playerColor, resourceType, activeConfig.delta, activeConfig)
 if ok then
 pressedPlayers[playerColor] = true
-local who = (activeWandererName and activeWandererName ~= "") and activeWandererName or "Wanderer"
+local who = (activeWandererName and activeWandererName ~= "") and activeWandererName or getActiveEncounterType()
 printToColor("Used " .. who .. ".", playerColor, {0.55, 1, 0.55})
 end
 end
