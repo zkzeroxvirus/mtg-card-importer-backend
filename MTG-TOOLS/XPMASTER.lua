@@ -3,16 +3,24 @@
 ---------------------------------------------------------------------------
 
 SPAWNER_TAG   = "MTGSpawner"
+PLAYER_SPAWNER_TAG = "MTGPlayerSpawner"
 MASTER_TAG    = "MTGMasterController"
 MAX_PLAYERS   = 6
+COMM_CACHE_SECONDS = 3
+
+PLAYER_COLORS = {
+    "White", "Brown", "Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Purple", "Pink",
+}
 
 foundSpawners   = {}
+spawnerCapabilityCache = {}
+communicationCache = { at = 0, players = {}, byColor = {} }
 xpGrantAmount   = 1
 masterMode      = "xp"
 historyLog      = {}
 historyPage     = 1
 currentScreen   = "main"
-MAX_HISTORY        = 50
+MAX_HISTORY        = 150
 HISTORY_PAGE_SIZE  = 6
 gameplaySettings = {
     dragovokiaTownDiscountEnabled      = false,
@@ -73,12 +81,218 @@ local MODE_THEME = {
 
 local function theme() return MODE_THEME[masterMode] or MODE_THEME.xp end
 
+local function nowSeconds()
+    local ok, t = pcall(function() return Time.time end)
+    if ok and type(t) == "number" then return t end
+    return os.time() or 0
+end
+
+local function safeLower(v)
+    if type(v) ~= "string" then return "" end
+    return string.lower(v)
+end
+
+local function getPlayerSteamName(color)
+    local p = Player[color]
+    if p and p.steam_name then return safeLower(p.steam_name) end
+    return ""
+end
+
+local function objectGuid(obj)
+    local guid = ""
+    pcall(function() guid = obj.getGUID() or "" end)
+    return guid
+end
+
+local function hasSpawnerMethod(obj, methodName)
+    if not obj or not methodName then return false end
+    local ok, hasMethod = pcall(function()
+        return obj.call("hasMTGSpawnerMethod", { name = methodName })
+    end)
+    return ok and hasMethod == true
+end
+
+local function isClaimedPlayerToken(obj)
+    if not hasSpawnerMethod(obj, "isClaimedPlayerToken") then return false end
+    local ok, claimed = pcall(function() return obj.call("isClaimedPlayerToken") end)
+    return ok and claimed == true
+end
+
+local function claimedTokenMatchesColor(obj, color)
+    local desiredName = getPlayerSteamName(color)
+    if desiredName == "" then return false end
+
+    if hasSpawnerMethod(obj, "getPlayerDisplayName") then
+        local okName, displayName = pcall(function() return obj.call("getPlayerDisplayName") end)
+        if okName and type(displayName) == "string" and safeLower(displayName) == desiredName then
+            return true
+        end
+    end
+
+    if hasSpawnerMethod(obj, "getPlayerKey") then
+        local okKey, playerKey = pcall(function() return obj.call("getPlayerKey") end)
+        if okKey and type(playerKey) == "string" then
+            local keyName = safeLower(playerKey:gsub("_Essence$", ""))
+            if keyName == desiredName then return true end
+        end
+    end
+
+    return false
+end
+
+local function shallowCopyPlayers(players)
+    local out = {}
+    for i, entry in ipairs(players or {}) do
+        out[i] = entry
+    end
+    return out
+end
+
+local function refreshCommunicationCache(force)
+    local now = nowSeconds()
+    if not force and communicationCache.players and (now - (communicationCache.at or 0)) < COMM_CACHE_SECONDS then
+        return communicationCache
+    end
+
+    local cache = { at = now, players = {}, byColor = {} }
+    local taggedPlayers = getObjectsWithTag(PLAYER_SPAWNER_TAG) or {}
+
+    for _, color in ipairs(PLAYER_COLORS) do
+        local p = Player[color]
+        if p and p.seated then
+            for _, obj in ipairs(taggedPlayers) do
+                if obj ~= self and isClaimedPlayerToken(obj) and claimedTokenMatchesColor(obj, color) then
+                    local name = color
+                    pcall(function() name = obj.call("getPlayerDisplayName") or color end)
+                    local entry = {
+                        color = color,
+                        name = name,
+                        guid = objectGuid(obj),
+                        spawner = obj,
+                    }
+                    table.insert(cache.players, entry)
+                    cache.byColor[color] = entry
+                    break
+                end
+            end
+        end
+    end
+
+    communicationCache = cache
+    return communicationCache
+end
+
+function getClaimedPlayerTokens(params)
+    local force = type(params) == "table" and params.force == true
+    return shallowCopyPlayers(refreshCommunicationCache(force).players)
+end
+
+function getClaimedPlayerToken(params)
+    local color = ""
+    if type(params) == "table" then color = tostring(params.color or params.playerColor or "") end
+    if color == "" then return nil end
+    local force = type(params) == "table" and params.force == true
+    return refreshCommunicationCache(force).byColor[color]
+end
+
+function invalidateCommunicationCache()
+    communicationCache = { at = 0, players = {}, byColor = {} }
+end
+
+local function callClaimedPlayerToken(entry, methodName, args)
+    if type(entry) ~= "table" or not entry.spawner or type(methodName) ~= "string" or methodName == "" then
+        return false
+    end
+    if not hasSpawnerMethod(entry.spawner, methodName) then return false end
+    return pcall(function() entry.spawner.call(methodName, args) end)
+end
+
+function callClaimedPlayerTokens(params)
+    if type(params) ~= "table" or type(params.method) ~= "string" then return 0 end
+    local methodName = params.method
+    local args = params.args
+    local staggerFrames = math.max(1, math.floor(tonumber(params.staggerFrames) or 1))
+    local players = getClaimedPlayerTokens({ force = params.force == true })
+    local count = 0
+
+    for i, entry in ipairs(players) do
+        Wait.frames(function()
+            callClaimedPlayerToken(entry, methodName, args)
+        end, math.max(1, (i - 1) * staggerFrames))
+        count = count + 1
+    end
+
+    return count
+end
+
+local function isPlayerSpawner(obj)
+    if not obj or obj == self then return false end
+
+    local okTagged, tagged = pcall(function() return obj.hasTag(PLAYER_SPAWNER_TAG) end)
+    if okTagged and tagged then return true end
+
+    local guid = ""
+    pcall(function() guid = obj.getGUID() or "" end)
+    if guid ~= "" and spawnerCapabilityCache[guid] ~= nil then
+        return spawnerCapabilityCache[guid]
+    end
+
+    local script = ""
+    pcall(function() script = obj.getLuaScript() or "" end)
+    local isSpawner = string.find(script, "function%s+isMTGPlayerSpawner%s*%(") ~= nil
+        or (string.find(script, "function%s+getXP%s*%(") ~= nil
+            and string.find(script, "function%s+receiveXP%s*%(") ~= nil)
+
+    if guid ~= "" then spawnerCapabilityCache[guid] = isSpawner end
+    return isSpawner
+end
+
+local function getPlayerSpawnerObjects()
+    local taggedPlayers = getObjectsWithTag(PLAYER_SPAWNER_TAG) or {}
+    if #taggedPlayers > 0 then
+        local out = {}
+        for _, obj in ipairs(taggedPlayers) do
+            if obj ~= self then table.insert(out, obj) end
+        end
+        return out
+    end
+
+    local out = {}
+    for _, obj in ipairs(getObjectsWithTag(SPAWNER_TAG) or {}) do
+        if isPlayerSpawner(obj) then table.insert(out, obj) end
+    end
+    return out
+end
+
+function hasMTGMasterMethod(params)
+    local methodName = ""
+    if type(params) == "table" then
+        methodName = tostring(params.name or params.method or "")
+    else
+        methodName = tostring(params or "")
+    end
+
+    return ({
+        resetTownActions = true,
+        click_resetTownActions = true,
+        setSillyJesterMerchantDiscountEnabled = true,
+        getGameplaySettings = true,
+        getClaimedPlayerTokens = true,
+        getClaimedPlayerToken = true,
+        callClaimedPlayerTokens = true,
+        invalidateCommunicationCache = true,
+        recordHistoryEvent = true,
+    })[methodName] == true
+end
+
 ---------------------------------------------------------------------------
 -- Lifecycle
 ---------------------------------------------------------------------------
 
 function onLoad(saved_data)
     self.addTag(MASTER_TAG)
+    spawnerCapabilityCache = {}
+    communicationCache = { at = 0, players = {}, byColor = {} }
     if saved_data and saved_data ~= "" then
         local ok, state = pcall(JSON.decode, saved_data)
         if ok and state then
@@ -258,11 +472,8 @@ end
 function refreshSpawners()
     foundSpawners = {}
 
-    local tagged = getObjectsWithTag(SPAWNER_TAG)
-    for _, obj in ipairs(tagged) do
-        if obj ~= self then
-            table.insert(foundSpawners, obj)
-        end
+    for _, obj in ipairs(getPlayerSpawnerObjects()) do
+        table.insert(foundSpawners, obj)
     end
 
     table.sort(foundSpawners, function(a, b)
@@ -323,7 +534,7 @@ local function broadcastDelta(method, amount)
         local okBefore, beforeVal = pcall(function() return spawner.call(getter) end)
         if okBefore and type(beforeVal) == "number" then before = beforeVal end
 
-        pcall(function() spawner.call(method, { amount = amount }) end)
+        pcall(function() spawner.call(method, { amount = amount, suppressMasterHistory = true }) end)
 
         local applied = amount
         local okAfter, afterVal = pcall(function() return spawner.call(getter) end)
@@ -338,17 +549,19 @@ local function broadcastDelta(method, amount)
         if applied ~= amount then anyBuff = true end
     end
     if #targets > 0 then
-        table.insert(historyLog, 1, {
+        appendHistoryEntry({
             htype      = htype,
             isAll      = true,
             playerName = "All Players",
             rawAmount  = amount,
+            finalAmount = amount,
             targets    = targets,
             anyBuff    = anyBuff,
+            reason     = "Manual " .. (amount >= 0 and "Grant All" or "Remove All"),
+            source     = "XP Master",
             isReverted = false,
-            timestamp  = os.date("%H:%M"),
+            timestamp  = os.date("%H:%M:%S"),
         })
-        if #historyLog > MAX_HISTORY then table.remove(historyLog) end
     end
     Wait.frames(refreshSpawners, 45)
 end
@@ -379,7 +592,7 @@ function applyXP(index, amount)
     local okBefore, beforeVal = pcall(function() return spawner.call("getXP") end)
     if okBefore and type(beforeVal) == "number" then before = beforeVal end
 
-    pcall(function() spawner.call("receiveXP", { amount = amount }) end)
+    pcall(function() spawner.call("receiveXP", { amount = amount, suppressMasterHistory = true }) end)
 
     local applied = amount
     local okAfter, afterVal = pcall(function() return spawner.call("getXP") end)
@@ -400,7 +613,7 @@ function applyEssence(index, amount)
     local okBefore, beforeVal = pcall(function() return spawner.call("getEssence") end)
     if okBefore and type(beforeVal) == "number" then before = beforeVal end
 
-    pcall(function() spawner.call("receiveEssence", { amount = amount }) end)
+    pcall(function() spawner.call("receiveEssence", { amount = amount, suppressMasterHistory = true }) end)
 
     local applied = amount
     local okAfter, afterVal = pcall(function() return spawner.call("getEssence") end)
@@ -549,19 +762,23 @@ function click_toggleCursedPumpkins()   toggleSetting("cursedPumpkinsEnabled") e
 
 local function resetTownActionsForSpawners()
     local resetCount = 0
-    for _, obj in ipairs(getObjectsWithTag(SPAWNER_TAG) or {}) do
-        if obj ~= self then
-            local ok = pcall(function() obj.call("resetTownActions") end)
-            if ok then resetCount = resetCount + 1 end
-        end
+    for _, obj in ipairs(getPlayerSpawnerObjects()) do
+        local ok = pcall(function() obj.call("resetTownActions") end)
+        if ok then resetCount = resetCount + 1 end
     end
     return resetCount
 end
 
-function resetTownActions()
+function resetTownActions(params)
+    local silent = type(params) == "table" and params.silent == true
+    local skipUi = type(params) == "table" and params.skipUi == true
     local resetCount = resetTownActionsForSpawners()
-    broadcastToAll("[XP Master] Reset Town Actions applied to " .. tostring(resetCount) .. " spawner(s).", {0.95, 0.75, 0.35})
-    showSettingsScreen()
+    if not silent then
+        broadcastToAll("[XP Master] Reset Town Actions applied to " .. tostring(resetCount) .. " spawner(s).", {0.95, 0.75, 0.35})
+    end
+    if not skipUi and currentScreen == "settings" then
+        showSettingsScreen()
+    end
     return resetCount
 end
 
@@ -573,21 +790,71 @@ end
 -- History log helpers
 ---------------------------------------------------------------------------
 
+local function trimHistory()
+    while #historyLog > MAX_HISTORY do table.remove(historyLog) end
+end
+
+local function normalizeHistoryType(htype)
+    htype = tostring(htype or "xp")
+    if htype == "ess" or htype == "essence" then return "essence" end
+    return "xp"
+end
+
+function appendHistoryEntry(entry)
+    if type(entry) ~= "table" then return nil end
+    entry.htype = normalizeHistoryType(entry.htype)
+    entry.playerName = tostring(entry.playerName or "Unknown")
+    entry.reason = tostring(entry.reason or entry.description or "Adjustment")
+    entry.source = tostring(entry.source or "XP Master")
+    entry.timestamp = entry.timestamp or os.date("%H:%M:%S")
+    entry.isReverted = entry.isReverted == true
+    if type(entry.finalAmount) ~= "number" then
+        entry.finalAmount = tonumber(entry.amount or entry.rawAmount) or 0
+    end
+    if type(entry.rawAmount) ~= "number" then entry.rawAmount = entry.finalAmount end
+    table.insert(historyLog, 1, entry)
+    trimHistory()
+    self.script_state = onSave()
+    if currentScreen == "history" then showHistoryScreen() end
+    return entry
+end
+
+function recordHistoryEvent(params)
+    if type(params) ~= "table" then return false end
+    local entry = {
+        htype         = params.htype or params.type or params.resource,
+        spawnerGuid   = params.spawnerGuid,
+        playerName    = params.playerName,
+        rawAmount     = tonumber(params.rawAmount or params.amount),
+        finalAmount   = tonumber(params.finalAmount or params.applied or params.amount),
+        balanceBefore = tonumber(params.balanceBefore),
+        balanceAfter  = tonumber(params.balanceAfter or params.balance),
+        reason        = params.reason or params.description,
+        source        = params.source,
+        isExternal    = true,
+        isReverted    = false,
+        timestamp     = params.timestamp or os.date("%H:%M:%S"),
+    }
+    appendHistoryEntry(entry)
+    return true
+end
+
 function logHistoryEntry(spawner, htype, rawAmount, finalAmount, buffApplied)
     local name = ""
     local ok, n = pcall(function() return spawner.call("getPlayerDisplayName") end)
     if ok and type(n) == "string" and n ~= "" then name = n else name = spawner.getName() end
-    table.insert(historyLog, 1, {
+    appendHistoryEntry({
         htype       = htype,
         spawnerGuid = spawner.getGUID(),
         playerName  = name,
         rawAmount   = rawAmount,
         finalAmount = finalAmount,
         buffApplied = buffApplied,
+        reason      = "Manual " .. ((rawAmount or 0) >= 0 and "Grant" or "Remove"),
+        source      = "XP Master",
         isReverted  = false,
-        timestamp   = os.date("%H:%M"),
+        timestamp   = os.date("%H:%M:%S"),
     })
-    if #historyLog > MAX_HISTORY then table.remove(historyLog) end
 end
 
 function revertHistoryEntry(entryIdx)
@@ -601,7 +868,7 @@ function revertHistoryEntry(entryIdx)
                 if s.getGUID() == target.spawnerGuid then spawner = s; break end
             end
             if spawner then
-                pcall(function() spawner.call(method, { amount = -target.finalAmount, bypassBuff = true }) end)
+                pcall(function() spawner.call(method, { amount = -target.finalAmount, bypassBuff = true, suppressMasterHistory = true }) end)
             end
         end
     else
@@ -613,9 +880,20 @@ function revertHistoryEntry(entryIdx)
             broadcastToAll("Cannot revert: spawner for " .. entry.playerName .. " not found.")
             return
         end
-        pcall(function() spawner.call(method, { amount = -entry.finalAmount, bypassBuff = true }) end)
+        pcall(function() spawner.call(method, { amount = -entry.finalAmount, bypassBuff = true, suppressMasterHistory = true }) end)
     end
     entry.isReverted = true
+    appendHistoryEntry({
+        htype = entry.htype,
+        playerName = entry.isAll and "All Players" or entry.playerName,
+        spawnerGuid = entry.spawnerGuid,
+        rawAmount = -(entry.finalAmount or entry.rawAmount or 0),
+        finalAmount = -(entry.finalAmount or entry.rawAmount or 0),
+        reason = "Revert: " .. tostring(entry.reason or "Adjustment"),
+        source = "XP Master",
+        isRevertEntry = true,
+        isReverted = true,
+    })
     self.script_state = onSave()
     Wait.frames(showHistoryScreen, 15)
 end
@@ -692,11 +970,17 @@ function showHistoryScreen()
                 amtLabel   = sign .. e.finalAmount .. " " .. typeStr .. star
                 amtColor   = e.finalAmount >= 0 and {0.1, 0.35, 0.1} or {0.35, 0.1, 0.1}
             end
+            local reasonLabel = tostring(e.reason or e.source or "")
+            local nameFont = 70
+            if reasonLabel ~= "" then
+                nameLabel = nameLabel .. "\n" .. reasonLabel
+                nameFont = 48
+            end
             local revertLabel = e.isReverted and "Done" or "Revert"
             local revertColor = e.isReverted and {0.3, 0.3, 0.3} or {0.7, 0.4, 0.1}
 
             self.createButton({ label = nameLabel, click_function = "mc_noop", function_owner = self,
-                position = {-1.30, 0.1, z}, width = 900, height = 150, font_size = 70,
+                position = {-1.30, 0.1, z}, width = 900, height = 150, font_size = nameFont,
                 color = {0.92, 0.88, 0.78}, font_color = {0, 0, 0},
             })
             self.createButton({ label = amtLabel, click_function = "mc_noop", function_owner = self,
