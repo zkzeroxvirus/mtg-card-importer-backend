@@ -1990,12 +1990,23 @@ function ReceiveChangeActiveFace (tar, ply, alt, sel)
 
     if data["doubleFaceStates"] then
         local dfcStates = tar.getStates()
-        local tarScale = tar.getScale()
-        local newDFCobject = tar.setState(dfcStates[1]["id"])
-        newDFCobject.setScale(tarScale)
-        TryTimedEncoding(newDFCobject)
-        dataTable.encoder.call("APIrebuildButtons",{obj=newDFCobject})
-        return
+        local dfcState = dfcStates ~= nil and dfcStates[1] or nil
+
+        if dfcState ~= nil and dfcState["id"] ~= nil then
+            local tarScale = tar.getScale()
+            local stateChanged, newDFCobject = pcall(function() return tar.setState(dfcState["id"]) end)
+
+            if stateChanged and newDFCobject ~= nil then
+                newDFCobject.setScale(tarScale)
+                TryTimedEncoding(newDFCobject)
+                dataTable.encoder.call("APIrebuildButtons",{obj=newDFCobject})
+                return
+            end
+        end
+
+        data.doubleFaceStates = false
+        encData["tyrantUnified"] = data
+        dataTable.encoder.call("APIobjSetPropData",{obj = tar, propID = pID, data = encData})
     end
 
     if data["ownerColor"] ~= nil and data["ownerColor"] ~= "Grey" then
@@ -2393,7 +2404,8 @@ function ParseCardData(object, enc)
         pcall(function()
 
         local nameField = object.getName():gsub('%[.-%]',''):gsub('\n%d+CMC','')    -- pieHere, remove [hexcol] from names, and the CMC (if it has it's own line)
-        local stateBasedDFC = object.getStates() ~=  nil -- new DFC cards with states
+        local objectStates = object.getStates()
+        local stateBasedDFC = objectStates ~= nil and objectStates[1] ~= nil and objectStates[1]["id"] ~= nil -- new DFC cards with states
         local descriptionField
 
         --5 different importer standards on the wall
@@ -2403,7 +2415,7 @@ function ParseCardData(object, enc)
 
         if stateBasedDFC then
             data.doubleFaceStates = true
-            local dfcStates = object.getStates()
+            local dfcStates = objectStates
 
             local activeFaceDescription = object.getName():gsub('%[.-%]',''):gsub('\n%d+ ?CMC','').."\n"..object.getDescription()
             local inactiveFaceDescription = dfcStates[1]["name"]:gsub('%[.-%]',''):gsub('\n%d+ ?CMC','').."\n"..dfcStates[1]["description"]
