@@ -101,6 +101,35 @@ describe('Image Proxy Persistent Cache', () => {
     expect(axios.get).toHaveBeenCalledWith(normalImageUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
   });
 
+  test('should reuse one cache entry for versioned URLs of the same Scryfall image', async () => {
+    const firstVersionUrl = 'https://cards.scryfall.io/normal/front/4/a/4a1f905f-1d55-4d02-9d24-e58070793d3f.jpg?111';
+    const secondVersionUrl = 'https://cards.scryfall.io/large/front/4/a/4a1f905f-1d55-4d02-9d24-e58070793d3f.jpg?222';
+
+    axios.get.mockResolvedValueOnce({
+      data: Buffer.from('shared-image-bytes'),
+      headers: {
+        'content-type': 'image/jpeg',
+        'last-modified': 'Mon, 01 Jan 2024 00:00:00 GMT'
+      }
+    });
+
+    const app = require('../server');
+    const firstResponse = await request(app)
+      .get('/image-proxy')
+      .query({ url: firstVersionUrl });
+    const secondResponse = await request(app)
+      .get('/image-proxy')
+      .query({ url: secondVersionUrl });
+    const cacheFiles = await fs.readdir(process.env.IMAGE_PROXY_CACHE_DIR);
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(secondResponse.body.toString('utf8')).toBe('shared-image-bytes');
+    expect(axios.get).toHaveBeenCalledTimes(1);
+    expect(cacheFiles.filter(file => file.endsWith('.bin'))).toHaveLength(1);
+    expect(cacheFiles.filter(file => file.endsWith('.json'))).toHaveLength(1);
+  });
+
   test('should add jpg when repairing extensionless Scryfall image URLs', async () => {
     const extensionlessImageUrl = 'https://cards.scryfall.io/png/front/8/7/878b0159-6917-45d3-b9ea-562ac49f0b8f';
     const normalImageUrl = 'https://cards.scryfall.io/normal/front/8/7/878b0159-6917-45d3-b9ea-562ac49f0b8f.jpg';

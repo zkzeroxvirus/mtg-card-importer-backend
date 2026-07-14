@@ -317,8 +317,24 @@ function createImageEtag(buffer) {
   return `W/"${crypto.createHash('sha1').update(buffer).digest('hex')}"`;
 }
 
+function getImageProxyCacheIdentity(urlString) {
+  const normalized = normalizeScryfallImageUrl(urlString);
+  if (!isProxyableScryfallImageUrl(normalized)) {
+    return String(normalized || '');
+  }
+
+  try {
+    const parsedUrl = new URL(String(normalized || '').trim());
+    parsedUrl.search = '';
+    parsedUrl.hash = '';
+    return parsedUrl.toString();
+  } catch {
+    return String(normalized || '');
+  }
+}
+
 function getImageProxyCacheKey(urlString) {
-  return crypto.createHash('sha256').update(String(urlString || '')).digest('hex');
+  return crypto.createHash('sha256').update(getImageProxyCacheIdentity(urlString)).digest('hex');
 }
 
 function getImageProxyCachePaths(urlString) {
@@ -514,6 +530,8 @@ function getImageCacheStatsSnapshot() {
       path: IMAGE_PROXY_CACHE_DIR,
       bytes: disk.totalBytes,
       maxBytes: IMAGE_PROXY_DISK_MAX_BYTES,
+      cachedImages: disk.binFiles,
+      metadataFiles: disk.metaFiles,
       totalFiles: disk.totalFiles,
       binFiles: disk.binFiles,
       metaFiles: disk.metaFiles,
@@ -532,6 +550,7 @@ function getImageCacheStatsSnapshot() {
 }
 
 async function readImageProxyCacheFromDisk(urlString) {
+  const cacheIdentity = getImageProxyCacheIdentity(urlString);
   const { cacheKey, metaPath, filePath } = getImageProxyCachePaths(urlString);
   try {
     const [metaRaw, buffer] = await Promise.all([
@@ -551,7 +570,7 @@ async function readImageProxyCacheFromDisk(urlString) {
       expiresAt: Date.now() + IMAGE_PROXY_CACHE_TTL_MS,
       cacheKey
     };
-    cacheImageResponse(urlString, entry);
+    cacheImageResponse(cacheIdentity, entry);
     return entry;
   } catch {
     return null;
@@ -559,6 +578,7 @@ async function readImageProxyCacheFromDisk(urlString) {
 }
 
 async function writeImageProxyCacheToDisk(urlString, entry) {
+  const cacheIdentity = getImageProxyCacheIdentity(urlString);
   const { metaPath, filePath, tempPath } = getImageProxyCachePaths(urlString);
   await ensureImageProxyCacheDir();
   await fs.writeFile(tempPath, entry.buffer);
@@ -568,6 +588,7 @@ async function writeImageProxyCacheToDisk(urlString, entry) {
       etag: entry.etag,
       lastModified: entry.lastModified,
       sourceUrl: urlString,
+      cacheIdentity,
       cachedAt: new Date().toISOString()
     })),
     fs.rename(tempPath, filePath)
@@ -576,7 +597,7 @@ async function writeImageProxyCacheToDisk(urlString, entry) {
 }
 
 async function getImageProxyCacheEntry(urlString) {
-  const cacheKey = String(urlString || '');
+  const cacheKey = getImageProxyCacheIdentity(urlString);
   const failure = getCachedImageFailure(cacheKey);
   if (failure) {
     const error = new Error(failure.details);
@@ -676,7 +697,7 @@ async function resolveVersionedScryfallImageUrl(urlString, requestSignal = null)
 }
 
 async function fetchAndCacheImageProxyEntry(urlString, requestSignal = null) {
-  const cacheKey = String(urlString || '');
+  const cacheKey = getImageProxyCacheIdentity(urlString);
   const existing = imageProxyInFlight.get(cacheKey);
   if (existing) {
     return existing;
