@@ -48,6 +48,7 @@ const ALLOWED_IMAGE_PROXY_HOSTS = new Set(['cards.scryfall.io']);
 const imageProxyCache = new Map();
 const imageProxyFailureCache = new Map();
 const imageProxyInFlight = new Map();
+const imageProxyMigrationInFlight = new Map();
 let imageProxyCacheBytes = 0;
 let imageProxyLastDiskCleanupAt = 0;
 let imageProxyDiskCleanupInProgress = false;
@@ -370,7 +371,6 @@ function getImageProxyCachePaths(urlString) {
     shardDir,
     metaPath: path.join(shardDir, `${cacheKey}.json`),
     filePath: path.join(shardDir, `${cacheKey}.bin`),
-    tempPath: path.join(shardDir, `${cacheKey}.tmp`),
     legacyMetaPath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.json`),
     legacyFilePath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`)
   };
@@ -612,6 +612,7 @@ function getImageCacheStatsSnapshot() {
       statsError: disk.error || null
     },
     inFlightRequests: imageProxyInFlight.size,
+    inFlightMigrations: imageProxyMigrationInFlight.size,
     negativeCacheEntries: imageProxyFailureCache.size,
     warmer: { ...imageCacheWarmerStats }
   };
@@ -667,29 +668,52 @@ async function readImageProxyCacheFromDisk(urlString) {
 
 async function writeImageProxyCacheToDisk(urlString, entry) {
   const cacheIdentity = getImageProxyCacheIdentity(urlString);
-  const { shardDir, metaPath, filePath, tempPath } = getImageProxyCachePaths(urlString);
+  const { shardDir, metaPath, filePath } = getImageProxyCachePaths(urlString);
+  const tempPath = path.join(shardDir, `${path.basename(filePath)}.${process.pid}.${crypto.randomUUID()}.tmp`);
   await fs.mkdir(shardDir, { recursive: true });
-  await fs.writeFile(tempPath, entry.buffer);
-  await Promise.all([
-    fs.writeFile(metaPath, JSON.stringify({
-      contentType: entry.contentType,
-      etag: entry.etag,
-      lastModified: entry.lastModified,
-      sourceUrl: urlString,
-      cacheIdentity,
-      cachedAt: new Date().toISOString()
-    })),
-    fs.rename(tempPath, filePath)
-  ]);
+  try {
+    await fs.writeFile(tempPath, entry.buffer);
+    await Promise.all([
+      fs.writeFile(metaPath, JSON.stringify({
+        contentType: entry.contentType,
+        etag: entry.etag,
+        lastModified: entry.lastModified,
+        sourceUrl: urlString,
+        cacheIdentity,
+        cachedAt: new Date().toISOString()
+      })),
+      fs.rename(tempPath, filePath)
+    ]);
+  } finally {
+    await fs.unlink(tempPath).catch(() => {});
+  }
   await cleanupImageDiskCacheIfNeeded(false);
 }
 
 async function migrateLegacyImageProxyCacheEntry(urlString, entry, legacyPaths) {
-  await writeImageProxyCacheToDisk(urlString, entry);
-  await Promise.allSettled([
-    fs.unlink(legacyPaths.filePath),
-    fs.unlink(legacyPaths.metaPath)
-  ]);
+  const cacheKey = getImageProxyCacheKey(urlString);
+  const existing = imageProxyMigrationInFlight.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const migration = (async () => {
+    const { filePath } = getImageProxyCachePaths(urlString);
+    await writeImageProxyCacheToDisk(urlString, entry);
+    const migratedStat = await fs.stat(filePath);
+    if (!migratedStat.isFile() || migratedStat.size !== entry.buffer.length) {
+      throw new Error(`Sharded cache verification failed for ${cacheKey}`);
+    }
+    await Promise.allSettled([
+      fs.unlink(legacyPaths.filePath),
+      fs.unlink(legacyPaths.metaPath)
+    ]);
+  })().finally(() => {
+    imageProxyMigrationInFlight.delete(cacheKey);
+  });
+
+  imageProxyMigrationInFlight.set(cacheKey, migration);
+  return migration;
 }
 
 async function hasImageProxyCacheOnDisk(urlString) {
@@ -848,6 +872,10 @@ app.locals.imageCacheWarmer = {
   collectBulkImageUrls,
   hasImageProxyCacheOnDisk,
   getStats: () => ({ ...imageCacheWarmerStats })
+};
+app.locals.imageProxyCache = {
+  getPaths: getImageProxyCachePaths,
+  migrateLegacyEntry: migrateLegacyImageProxyCacheEntry
 };
 
 async function getImageProxyCacheEntry(urlString) {

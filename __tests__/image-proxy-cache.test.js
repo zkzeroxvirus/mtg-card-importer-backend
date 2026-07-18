@@ -143,6 +143,40 @@ describe('Image Proxy Persistent Cache', () => {
     await expect(fs.access(path.join(process.env.IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`))).rejects.toThrow();
   });
 
+  test('should deduplicate concurrent legacy migrations for the same cache key', async () => {
+    const concurrentUrl = 'https://cards.scryfall.io/normal/front/3/3/concurrent-legacy.jpg';
+    const app = require('../server');
+    const paths = app.locals.imageProxyCache.getPaths(concurrentUrl);
+    const legacyBuffer = Buffer.from('concurrent-legacy-bytes');
+    await fs.mkdir(process.env.IMAGE_PROXY_CACHE_DIR, { recursive: true });
+    await Promise.all([
+      fs.writeFile(paths.legacyFilePath, legacyBuffer),
+      fs.writeFile(paths.legacyMetaPath, JSON.stringify({ contentType: 'image/jpeg' }))
+    ]);
+
+    const entry = {
+      buffer: legacyBuffer,
+      contentType: 'image/jpeg',
+      etag: 'legacy-etag',
+      lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT'
+    };
+    await Promise.all([
+      app.locals.imageProxyCache.migrateLegacyEntry(concurrentUrl, entry, {
+        filePath: paths.legacyFilePath,
+        metaPath: paths.legacyMetaPath
+      }),
+      app.locals.imageProxyCache.migrateLegacyEntry(concurrentUrl, entry, {
+        filePath: paths.legacyFilePath,
+        metaPath: paths.legacyMetaPath
+      })
+    ]);
+
+    await expect(fs.readFile(paths.filePath)).resolves.toEqual(legacyBuffer);
+    await expect(fs.access(paths.legacyFilePath)).rejects.toThrow();
+    const cacheFiles = await listCacheFiles(process.env.IMAGE_PROXY_CACHE_DIR);
+    expect(cacheFiles.filter(file => file.endsWith('.tmp'))).toHaveLength(0);
+  });
+
   test('should cache upstream 404 image misses in memory', async () => {
     const missingImageUrl = 'https://cards.scryfall.io/normal/front/0/0/missing.jpg';
     axios.get.mockRejectedValueOnce({
