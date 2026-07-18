@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Version must be >=1.9 for TyrantEasyUnified; keep mod name stable for Encoder lookup
 -- Metadata
-mod_name, version = 'Card Importer', '1.929'
+mod_name, version = 'Card Importer', '1.930'
 self.setName('[854FD9]' .. mod_name .. ' [49D54F]' .. version)
 
 -- Author Information
@@ -24,9 +24,9 @@ lang = 'en'
 BACKEND_URL = 'http://api.mtginfo.org'
 --BACKEND_URL = 'http://localhost:3000'
 
--- Auto-update configuration (checks GitHub for newer version on load)
-AUTO_UPDATE_ENABLED = true
+-- Auto-update can overwrite local table-specific patches.
 --AUTO_UPDATE_ENABLED = false
+AUTO_UPDATE_ENABLED = true
 -- ============================================================================
 -- Classes and Utilities
 -- ============================================================================
@@ -1708,6 +1708,11 @@ function delay(fN,tbl)local timerParams={function_name=fN,identifier=fN..'Timer'
   Timer.destroy(timerParams.identifier)
   Timer.create(timerParams)
 end
+function ResetExactCopyOffset()
+end
+function clearLegacyExactCopyTimer()
+  pcall(function() Timer.destroy("ResetExactCopyOffsetTimer") end)
+end
 function uLog(a,b)if Test then log(a,b)end end
 function uNotebook(t,b,c)local p={index=-1,title=t,body=b or'',color=c or'Grey'}
   for i,v in ipairs(getNotebookTabs())do if v.title==p.title then p.index=i end end
@@ -1845,6 +1850,7 @@ end
 --[[Tabletop Callbacks]]
 function onSave()self.script_state=''end
 function onLoad(data)
+  clearLegacyExactCopyTimer()
   -- Reset registration guard on load
   isRegistered = false
   
