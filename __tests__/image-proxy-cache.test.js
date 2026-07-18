@@ -15,6 +15,15 @@ jest.mock('axios', () => ({
 
 const axios = require('axios');
 
+async function listCacheFiles(directory) {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(directory, entry.name);
+    return entry.isDirectory() ? listCacheFiles(entryPath) : [entryPath];
+  }));
+  return nested.flat();
+}
+
 describe('Image Proxy Persistent Cache', () => {
   const imageUrl = 'https://cards.scryfall.io/normal/front/0/0/mock.jpg';
 
@@ -57,6 +66,81 @@ describe('Image Proxy Persistent Cache', () => {
     expect(secondResponse.status).toBe(200);
     expect(secondResponse.body.toString('utf8')).toBe('image-bytes');
     expect(axios.get).not.toHaveBeenCalled();
+  });
+
+  test('should write new cache entries into two-level shard directories', async () => {
+    const shardedImageUrl = 'https://cards.scryfall.io/normal/front/1/1/sharded.jpg';
+    axios.get.mockResolvedValueOnce({
+      data: Buffer.from('sharded-image-bytes'),
+      headers: { 'content-type': 'image/jpeg' }
+    });
+
+    const app = require('../server');
+    const response = await request(app).get('/image-proxy').query({ url: shardedImageUrl });
+    const cacheFiles = await listCacheFiles(process.env.IMAGE_PROXY_CACHE_DIR);
+    const relativeFiles = cacheFiles.map(file => path.relative(process.env.IMAGE_PROXY_CACHE_DIR, file));
+
+    expect(response.status).toBe(200);
+    expect(relativeFiles).toHaveLength(2);
+    expect(relativeFiles.every(file => /^[0-9a-f]{2}[\\/][0-9a-f]{2}[\\/][0-9a-f]{64}\.(bin|json)$/i.test(file))).toBe(true);
+  });
+
+  test('should collect and normalize unique front and back image URLs from bulk cards', () => {
+    const app = require('../server');
+    const frontNormal = 'https://cards.scryfall.io/normal/front/4/a/4a1f905f-1d55-4d02-9d24-e58070793d3f.jpg?111';
+    const frontLarge = 'https://cards.scryfall.io/large/front/4/a/4a1f905f-1d55-4d02-9d24-e58070793d3f.jpg?111';
+    const backPng = 'https://cards.scryfall.io/png/back/8/7/878b0159-6917-45d3-b9ea-562ac49f0b8f.png?222';
+
+    const urls = app.locals.imageCacheWarmer.collectBulkImageUrls([
+      { image_uris: { normal: frontNormal } },
+      {
+        card_faces: [
+          { image_uris: { large: frontLarge } },
+          { image_uris: { png: backPng } }
+        ]
+      },
+      { image_uris: { normal: 'https://example.com/not-scryfall.jpg' } }
+    ]);
+
+    expect(urls).toEqual([
+      frontNormal,
+      'https://cards.scryfall.io/normal/back/8/7/878b0159-6917-45d3-b9ea-562ac49f0b8f.jpg?222'
+    ]);
+  });
+
+  test('should serve and lazily migrate legacy flat cache entries', async () => {
+    const crypto = require('crypto');
+    const legacyImageUrl = 'https://cards.scryfall.io/normal/front/2/2/legacy.jpg';
+    const cacheIdentity = legacyImageUrl;
+    const cacheKey = crypto.createHash('sha256').update(cacheIdentity).digest('hex');
+    await fs.mkdir(process.env.IMAGE_PROXY_CACHE_DIR, { recursive: true });
+    await Promise.all([
+      fs.writeFile(path.join(process.env.IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`), Buffer.from('legacy-image-bytes')),
+      fs.writeFile(path.join(process.env.IMAGE_PROXY_CACHE_DIR, `${cacheKey}.json`), JSON.stringify({
+        contentType: 'image/jpeg',
+        sourceUrl: legacyImageUrl
+      }))
+    ]);
+
+    const app = require('../server');
+    const response = await request(app).get('/image-proxy').query({ url: legacyImageUrl });
+
+    expect(response.status).toBe(200);
+    expect(response.body.toString('utf8')).toBe('legacy-image-bytes');
+    expect(axios.get).not.toHaveBeenCalled();
+
+    const shardedBin = path.join(process.env.IMAGE_PROXY_CACHE_DIR, cacheKey.slice(0, 2), cacheKey.slice(2, 4), `${cacheKey}.bin`);
+    let migratedBuffer = null;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        migratedBuffer = await fs.readFile(shardedBin);
+        break;
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+    expect(migratedBuffer?.toString('utf8')).toBe('legacy-image-bytes');
+    await expect(fs.access(path.join(process.env.IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`))).rejects.toThrow();
   });
 
   test('should cache upstream 404 image misses in memory', async () => {
@@ -120,7 +204,7 @@ describe('Image Proxy Persistent Cache', () => {
     const secondResponse = await request(app)
       .get('/image-proxy')
       .query({ url: secondVersionUrl });
-    const cacheFiles = await fs.readdir(process.env.IMAGE_PROXY_CACHE_DIR);
+    const cacheFiles = await listCacheFiles(process.env.IMAGE_PROXY_CACHE_DIR);
 
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(200);

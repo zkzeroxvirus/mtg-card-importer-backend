@@ -32,11 +32,18 @@ const IMAGE_PROXY_CACHE_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_CA
 const IMAGE_PROXY_TIMEOUT_MS = Math.max(parseInt(process.env.IMAGE_PROXY_TIMEOUT_MS || '15000', 10) || 15000, 1000);
 const RELATED_PART_RESOLVE_TIMEOUT_MS = Math.max(parseInt(process.env.RELATED_PART_RESOLVE_TIMEOUT_MS || '5000', 10) || 5000, 1000);
 const IMAGE_PROXY_CACHE_DIR = String(process.env.IMAGE_PROXY_CACHE_DIR || path.join(process.cwd(), 'data', 'image-cache')).trim();
-const IMAGE_PROXY_DISK_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_MAX_BYTES || '5368709120', 10) || 5368709120, 10485760);
+const IMAGE_PROXY_DISK_MAX_BYTES = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_MAX_BYTES || '21474836480', 10) || 21474836480, 10485760);
 const IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_DISK_CLEANUP_INTERVAL_MS || '300000', 10) || 300000, 10000);
 const IMAGE_PROXY_DISK_CLEANUP_TARGET_RATIO = 0.9;
 const IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_STATS_REFRESH_INTERVAL_MS || '60000', 10) || 60000, 10000);
 const IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS = Math.max(parseInt(process.env.IMAGE_PROXY_NEGATIVE_CACHE_TTL_MS || '600000', 10) || 600000, 10000);
+const IMAGE_CACHE_WARMER_ENABLED = process.env.IMAGE_CACHE_WARMER_ENABLED === 'true';
+const IMAGE_CACHE_WARMER_DELAY_MS = Math.max(parseInt(process.env.IMAGE_CACHE_WARMER_DELAY_MS || '1000', 10) || 1000, 100);
+const IMAGE_CACHE_WARMER_CHECK_DELAY_MS = Math.max(parseInt(process.env.IMAGE_CACHE_WARMER_CHECK_DELAY_MS || '10', 10) || 10, 0);
+const IMAGE_CACHE_WARMER_INITIAL_DELAY_MS = Math.max(parseInt(process.env.IMAGE_CACHE_WARMER_INITIAL_DELAY_MS || '30000', 10) || 30000, 0);
+const IMAGE_CACHE_WARMER_RESCAN_INTERVAL_MS = Math.max(parseInt(process.env.IMAGE_CACHE_WARMER_RESCAN_INTERVAL_MS || '86400000', 10) || 86400000, 60000);
+const IMAGE_CACHE_WARMER_MAX_IMAGES = Math.max(parseInt(process.env.IMAGE_CACHE_WARMER_MAX_IMAGES || '0', 10) || 0, 0);
+const IMAGE_CACHE_WARMER_DISK_TARGET_RATIO = 0.95;
 const ALLOWED_IMAGE_PROXY_HOSTS = new Set(['cards.scryfall.io']);
 const imageProxyCache = new Map();
 const imageProxyFailureCache = new Map();
@@ -46,6 +53,24 @@ let imageProxyLastDiskCleanupAt = 0;
 let imageProxyDiskCleanupInProgress = false;
 let imageProxyDiskStatsSnapshot = null;
 let imageProxyDiskStatsRefreshing = false;
+let imageCacheWarmerTimer = null;
+let imageCacheWarmerRunning = false;
+let imageCacheWarmerStopRequested = false;
+const imageCacheWarmerStats = {
+  enabled: IMAGE_CACHE_WARMER_ENABLED,
+  running: false,
+  discovered: 0,
+  checked: 0,
+  alreadyCached: 0,
+  downloaded: 0,
+  failed: 0,
+  bytesDownloaded: 0,
+  startedAt: null,
+  completedAt: null,
+  lastImageAt: null,
+  lastError: null,
+  stopReason: null
+};
 
 function debugLog(...args) {
   if (VERBOSE_REQUEST_LOGS) {
@@ -339,16 +364,64 @@ function getImageProxyCacheKey(urlString) {
 
 function getImageProxyCachePaths(urlString) {
   const cacheKey = getImageProxyCacheKey(urlString);
+  const shardDir = path.join(IMAGE_PROXY_CACHE_DIR, cacheKey.slice(0, 2), cacheKey.slice(2, 4));
   return {
     cacheKey,
-    metaPath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.json`),
-    filePath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`),
-    tempPath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.tmp`)
+    shardDir,
+    metaPath: path.join(shardDir, `${cacheKey}.json`),
+    filePath: path.join(shardDir, `${cacheKey}.bin`),
+    tempPath: path.join(shardDir, `${cacheKey}.tmp`),
+    legacyMetaPath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.json`),
+    legacyFilePath: path.join(IMAGE_PROXY_CACHE_DIR, `${cacheKey}.bin`)
   };
 }
 
 async function ensureImageProxyCacheDir() {
   await fs.mkdir(IMAGE_PROXY_CACHE_DIR, { recursive: true });
+}
+
+async function listImageProxyCacheFiles() {
+  await ensureImageProxyCacheDir();
+  const files = [];
+  const rootEntries = await fs.readdir(IMAGE_PROXY_CACHE_DIR, { withFileTypes: true });
+
+  for (const rootEntry of rootEntries) {
+    const rootPath = path.join(IMAGE_PROXY_CACHE_DIR, rootEntry.name);
+    if (rootEntry.isFile()) {
+      files.push(rootPath);
+      continue;
+    }
+    if (!rootEntry.isDirectory() || !/^[0-9a-f]{2}$/i.test(rootEntry.name)) {
+      continue;
+    }
+
+    let firstShardEntries;
+    try {
+      firstShardEntries = await fs.readdir(rootPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const firstShardEntry of firstShardEntries) {
+      if (!firstShardEntry.isDirectory() || !/^[0-9a-f]{2}$/i.test(firstShardEntry.name)) {
+        continue;
+      }
+      const shardPath = path.join(rootPath, firstShardEntry.name);
+      let shardEntries;
+      try {
+        shardEntries = await fs.readdir(shardPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const shardEntry of shardEntries) {
+        if (shardEntry.isFile()) {
+          files.push(path.join(shardPath, shardEntry.name));
+        }
+      }
+    }
+  }
+
+  return files;
 }
 
 async function cleanupImageDiskCacheIfNeeded(force = false) {
@@ -363,20 +436,20 @@ async function cleanupImageDiskCacheIfNeeded(force = false) {
   imageProxyDiskCleanupInProgress = true;
   try {
     await ensureImageProxyCacheDir();
-    const dirEntries = await fs.readdir(IMAGE_PROXY_CACHE_DIR, { withFileTypes: true });
+    const cacheFiles = await listImageProxyCacheFiles();
     const binFiles = [];
 
-    for (const dirEntry of dirEntries) {
-      if (!dirEntry.isFile() || !dirEntry.name.endsWith('.bin')) {
+    for (const filePath of cacheFiles) {
+      if (!filePath.endsWith('.bin')) {
         continue;
       }
 
-      const binPath = path.join(IMAGE_PROXY_CACHE_DIR, dirEntry.name);
       try {
-        const stat = await fs.stat(binPath);
+        const stat = await fs.stat(filePath);
         binFiles.push({
-          baseName: dirEntry.name.slice(0, -4),
-          binPath,
+          baseName: path.basename(filePath, '.bin'),
+          binPath: filePath,
+          directory: path.dirname(filePath),
           size: stat.size,
           mtimeMs: stat.mtimeMs
         });
@@ -399,7 +472,7 @@ async function cleanupImageDiskCacheIfNeeded(force = false) {
         break;
       }
 
-      const metaPath = path.join(IMAGE_PROXY_CACHE_DIR, `${file.baseName}.json`);
+      const metaPath = path.join(file.directory, `${file.baseName}.json`);
       await Promise.allSettled([
         fs.unlink(file.binPath),
         fs.unlink(metaPath)
@@ -416,8 +489,7 @@ async function cleanupImageDiskCacheIfNeeded(force = false) {
 }
 
 async function getImageDiskCacheUsage() {
-  await ensureImageProxyCacheDir();
-  const dirEntries = await fs.readdir(IMAGE_PROXY_CACHE_DIR, { withFileTypes: true });
+  const cacheFiles = await listImageProxyCacheFiles();
 
   let totalBytes = 0;
   let binFiles = 0;
@@ -425,12 +497,7 @@ async function getImageDiskCacheUsage() {
   let tempFiles = 0;
   let otherFiles = 0;
 
-  for (const dirEntry of dirEntries) {
-    if (!dirEntry.isFile()) {
-      continue;
-    }
-
-    const fullPath = path.join(IMAGE_PROXY_CACHE_DIR, dirEntry.name);
+  for (const fullPath of cacheFiles) {
     try {
       const stat = await fs.stat(fullPath);
       totalBytes += stat.size;
@@ -438,11 +505,11 @@ async function getImageDiskCacheUsage() {
       continue;
     }
 
-    if (dirEntry.name.endsWith('.bin')) {
+    if (fullPath.endsWith('.bin')) {
       binFiles += 1;
-    } else if (dirEntry.name.endsWith('.json')) {
+    } else if (fullPath.endsWith('.json')) {
       metaFiles += 1;
-    } else if (dirEntry.name.endsWith('.tmp')) {
+    } else if (fullPath.endsWith('.tmp')) {
       tempFiles += 1;
     } else {
       otherFiles += 1;
@@ -545,18 +612,34 @@ function getImageCacheStatsSnapshot() {
       statsError: disk.error || null
     },
     inFlightRequests: imageProxyInFlight.size,
-    negativeCacheEntries: imageProxyFailureCache.size
+    negativeCacheEntries: imageProxyFailureCache.size,
+    warmer: { ...imageCacheWarmerStats }
   };
 }
 
 async function readImageProxyCacheFromDisk(urlString) {
   const cacheIdentity = getImageProxyCacheIdentity(urlString);
-  const { cacheKey, metaPath, filePath } = getImageProxyCachePaths(urlString);
+  const paths = getImageProxyCachePaths(urlString);
+  const { cacheKey } = paths;
+  let sourcePaths = paths;
   try {
-    const [metaRaw, buffer] = await Promise.all([
-      fs.readFile(metaPath, 'utf8'),
-      fs.readFile(filePath)
-    ]);
+    let metaRaw;
+    let buffer;
+    try {
+      [metaRaw, buffer] = await Promise.all([
+        fs.readFile(paths.metaPath, 'utf8'),
+        fs.readFile(paths.filePath)
+      ]);
+    } catch {
+      sourcePaths = {
+        metaPath: paths.legacyMetaPath,
+        filePath: paths.legacyFilePath
+      };
+      [metaRaw, buffer] = await Promise.all([
+        fs.readFile(sourcePaths.metaPath, 'utf8'),
+        fs.readFile(sourcePaths.filePath)
+      ]);
+    }
     const meta = JSON.parse(metaRaw);
     if (!buffer || !buffer.length) {
       return null;
@@ -571,6 +654,11 @@ async function readImageProxyCacheFromDisk(urlString) {
       cacheKey
     };
     cacheImageResponse(cacheIdentity, entry);
+    if (sourcePaths.filePath === paths.legacyFilePath) {
+      migrateLegacyImageProxyCacheEntry(urlString, entry, sourcePaths).catch((error) => {
+        console.warn('[ImageProxy] Legacy cache migration skipped:', error.message);
+      });
+    }
     return entry;
   } catch {
     return null;
@@ -579,8 +667,8 @@ async function readImageProxyCacheFromDisk(urlString) {
 
 async function writeImageProxyCacheToDisk(urlString, entry) {
   const cacheIdentity = getImageProxyCacheIdentity(urlString);
-  const { metaPath, filePath, tempPath } = getImageProxyCachePaths(urlString);
-  await ensureImageProxyCacheDir();
+  const { shardDir, metaPath, filePath, tempPath } = getImageProxyCachePaths(urlString);
+  await fs.mkdir(shardDir, { recursive: true });
   await fs.writeFile(tempPath, entry.buffer);
   await Promise.all([
     fs.writeFile(metaPath, JSON.stringify({
@@ -595,6 +683,172 @@ async function writeImageProxyCacheToDisk(urlString, entry) {
   ]);
   await cleanupImageDiskCacheIfNeeded(false);
 }
+
+async function migrateLegacyImageProxyCacheEntry(urlString, entry, legacyPaths) {
+  await writeImageProxyCacheToDisk(urlString, entry);
+  await Promise.allSettled([
+    fs.unlink(legacyPaths.filePath),
+    fs.unlink(legacyPaths.metaPath)
+  ]);
+}
+
+async function hasImageProxyCacheOnDisk(urlString) {
+  const paths = getImageProxyCachePaths(urlString);
+  for (const filePath of [paths.filePath, paths.legacyFilePath]) {
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.isFile() && stat.size > 0) {
+        return true;
+      }
+    } catch {
+      // Try the next supported cache layout.
+    }
+  }
+  return false;
+}
+
+function collectBulkImageUrls(cards) {
+  const urls = new Set();
+  const addImageUris = (imageUris) => {
+    const sourceUrl = imageUris?.normal || imageUris?.large || imageUris?.png;
+    if (sourceUrl && isProxyableScryfallImageUrl(sourceUrl)) {
+      urls.add(normalizeScryfallImageUrl(sourceUrl));
+    }
+  };
+
+  for (const card of Array.isArray(cards) ? cards : []) {
+    addImageUris(card?.image_uris);
+    for (const face of Array.isArray(card?.card_faces) ? card.card_faces : []) {
+      addImageUris(face?.image_uris);
+    }
+  }
+  return [...urls];
+}
+
+function waitForImageCacheWarmer(ms) {
+  return new Promise((resolve) => {
+    imageCacheWarmerTimer = setTimeout(() => {
+      imageCacheWarmerTimer = null;
+      resolve();
+    }, ms);
+    if (imageCacheWarmerTimer.unref) {
+      imageCacheWarmerTimer.unref();
+    }
+  });
+}
+
+async function runImageCacheWarmer(cards) {
+  if (!IMAGE_CACHE_WARMER_ENABLED || imageCacheWarmerRunning) {
+    return;
+  }
+
+  imageCacheWarmerRunning = true;
+  imageCacheWarmerStopRequested = false;
+  Object.assign(imageCacheWarmerStats, {
+    running: true,
+    discovered: 0,
+    checked: 0,
+    alreadyCached: 0,
+    downloaded: 0,
+    failed: 0,
+    bytesDownloaded: 0,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    lastImageAt: null,
+    lastError: null,
+    stopReason: null
+  });
+
+  try {
+    const urls = collectBulkImageUrls(cards);
+    imageCacheWarmerStats.discovered = urls.length;
+    const usage = await getImageDiskCacheUsage();
+    let estimatedDiskBytes = usage.totalBytes;
+    const targetBytes = Math.floor(IMAGE_PROXY_DISK_MAX_BYTES * IMAGE_CACHE_WARMER_DISK_TARGET_RATIO);
+
+    for (const imageUrl of urls) {
+      if (imageCacheWarmerStopRequested) {
+        imageCacheWarmerStats.stopReason = 'shutdown';
+        break;
+      }
+      if (IMAGE_CACHE_WARMER_MAX_IMAGES > 0 && imageCacheWarmerStats.downloaded >= IMAGE_CACHE_WARMER_MAX_IMAGES) {
+        imageCacheWarmerStats.stopReason = 'maximum-images';
+        break;
+      }
+      if (estimatedDiskBytes >= targetBytes) {
+        imageCacheWarmerStats.stopReason = 'disk-target';
+        break;
+      }
+
+      imageCacheWarmerStats.checked += 1;
+      if (await hasImageProxyCacheOnDisk(imageUrl)) {
+        imageCacheWarmerStats.alreadyCached += 1;
+        if (IMAGE_CACHE_WARMER_CHECK_DELAY_MS > 0) {
+          await waitForImageCacheWarmer(IMAGE_CACHE_WARMER_CHECK_DELAY_MS);
+        }
+        continue;
+      }
+
+      try {
+        const entry = await fetchAndCacheImageProxyEntry(imageUrl);
+        imageCacheWarmerStats.downloaded += 1;
+        imageCacheWarmerStats.bytesDownloaded += entry.buffer.length;
+        imageCacheWarmerStats.lastImageAt = new Date().toISOString();
+        estimatedDiskBytes += entry.buffer.length;
+      } catch (error) {
+        imageCacheWarmerStats.failed += 1;
+        imageCacheWarmerStats.lastError = error.message;
+      }
+
+      await waitForImageCacheWarmer(IMAGE_CACHE_WARMER_DELAY_MS);
+    }
+
+    if (!imageCacheWarmerStats.stopReason) {
+      imageCacheWarmerStats.stopReason = 'complete';
+    }
+  } catch (error) {
+    imageCacheWarmerStats.lastError = error.message;
+    imageCacheWarmerStats.stopReason = 'error';
+    console.error('[ImageCacheWarmer] Failed:', error.message);
+  } finally {
+    imageCacheWarmerRunning = false;
+    imageCacheWarmerStats.running = false;
+    imageCacheWarmerStats.completedAt = new Date().toISOString();
+    console.log(`[ImageCacheWarmer] Stopped (${imageCacheWarmerStats.stopReason}): ${imageCacheWarmerStats.downloaded} downloaded, ${imageCacheWarmerStats.alreadyCached} already cached, ${imageCacheWarmerStats.failed} failed`);
+    if (!imageCacheWarmerStopRequested) {
+      scheduleImageCacheWarmer(bulkData.getCardsDatabase(), IMAGE_CACHE_WARMER_RESCAN_INTERVAL_MS);
+    }
+  }
+}
+
+function scheduleImageCacheWarmer(cards, delayMs = IMAGE_CACHE_WARMER_INITIAL_DELAY_MS) {
+  if (!IMAGE_CACHE_WARMER_ENABLED || imageCacheWarmerRunning || imageCacheWarmerTimer) {
+    return;
+  }
+  imageCacheWarmerTimer = setTimeout(() => {
+    imageCacheWarmerTimer = null;
+    runImageCacheWarmer(cards).catch((error) => {
+      console.error('[ImageCacheWarmer] Unexpected failure:', error.message);
+    });
+  }, delayMs);
+  if (imageCacheWarmerTimer.unref) {
+    imageCacheWarmerTimer.unref();
+  }
+}
+
+function stopImageCacheWarmer() {
+  imageCacheWarmerStopRequested = true;
+  if (imageCacheWarmerTimer && !imageCacheWarmerRunning) {
+    clearTimeout(imageCacheWarmerTimer);
+    imageCacheWarmerTimer = null;
+  }
+}
+
+app.locals.imageCacheWarmer = {
+  collectBulkImageUrls,
+  hasImageProxyCacheOnDisk,
+  getStats: () => ({ ...imageCacheWarmerStats })
+};
 
 async function getImageProxyCacheEntry(urlString) {
   const cacheKey = getImageProxyCacheIdentity(urlString);
@@ -4307,8 +4561,9 @@ if (process.env.NODE_ENV !== 'test') {
     if (USE_BULK_DATA) {
       console.log('[Init] Loading bulk data in background...');
       bulkData.loadBulkData()
-        .then(() => {
+        .then((cards) => {
           console.log('[Init] Bulk data ready!');
+          scheduleImageCacheWarmer(cards);
 
           oracleTags.loadOracleTags()
             .then(() => {
@@ -4336,6 +4591,7 @@ if (process.env.NODE_ENV !== 'test') {
   // Graceful shutdown handler
   const gracefulShutdown = (signal) => {
     console.log(`\n[Shutdown] Received ${signal}, starting graceful shutdown...`);
+    stopImageCacheWarmer();
     
     server.close(() => {
       console.log('[Shutdown] Server closed, no longer accepting connections');
