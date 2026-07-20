@@ -98,13 +98,12 @@ function onObjectDrop(ply,obj)
   if not(enc.call("APIobjIsPropEnabled",{obj=obj,propID=pID})) then return end
 
   local inHand2=false
-  if obj==nil then return end
-  for _,col in pairs(Player.getAvailableColors()) do
-    local handObjs=Player[col].getHandObjects(2)
-    for _,handObj in pairs(handObjs) do
-      if obj==handObj then
-        inHand2=true
-      end
+  local zones=enc.call("APIlistZones",{}) or {}
+  for _,zone in pairs(obj.getZones()) do
+    local encZone=zones[zone.getGUID()]
+    if encZone~=nil and encZone.name~=nil and encZone.name:find('_2',1,true) then
+      inHand2=true
+      break
     end
   end
   if not inHand2 then
