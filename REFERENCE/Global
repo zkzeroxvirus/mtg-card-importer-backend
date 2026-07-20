@@ -1,0 +1,2564 @@
+-- Table-wide format enforcement flag used by object scripts
+MTG_ENFORCE_COMMANDER_FORMAT = true
+
+-- Main functionality
+function onload()
+  if MTG_ENFORCE_COMMANDER_FORMAT == nil then
+    MTG_ENFORCE_COMMANDER_FORMAT = true
+  end
+
+  buildDataStructure()
+  registerObjectGUIDs()
+  buildTableButtons()
+  addZoneContextMenus()
+  Wait.frames(function()
+    for _,guid in pairs({'eb479b','cb1610','472648','540e21','ed5aeb','3d4319','876eb2','83ed27'}) do
+      pcall(function() getObjectFromGUID(guid).interactable=false end)
+    end
+  end,10)
+
+  Wait.frames(function()
+    for _,guid in pairs({'02e062','de4346','d936a8','b93b40'}) do
+      pcall(function() getObjectFromGUID(guid).interactable=true end)
+    end
+  end,5)
+
+  Hands.disable_unused=false
+  Wait.condition(function()
+    local Zones=Encoder.call("APIlistZones",{})
+    for guid,zone in pairs(Zones) do
+      local zoneObj=getObjectFromGUID(guid)
+      if zoneObj~=nil then
+        local objs=zoneObj.getObjects()
+        for _,obj in pairs(objs) do
+          if obj.type=='Card' then
+            local rot=obj.getRotation()
+            rot[3]=180
+            obj.setRotation(rot)
+          end
+        end
+      end
+    end
+  end,function() return Encoder~=nil end)
+
+end
+
+-- Ensure data structure exists
+function buildDataStructure()
+  data = {
+	    White  = {deck = nil},
+	    Orange = {deck = nil},
+	    Yellow = {deck = nil},
+	    Green  = {deck = nil},
+	    Blue   = {deck = nil},
+	    Purple = {deck = nil},
+	    Pink   = {deck = nil}
+  }
+
+  -- 8pl specific vars
+  revealNrow=10
+  revealUp=9.4
+  revealUpS=-3.1
+  revealRi=1.2
+  exileRot=-180
+  exileFor=4.57
+  gravFor=-4.57
+end
+
+-- Get pointers to in-game objects so we can script them
+function registerObjectGUIDs()
+  data["White"]["libraryZone"]      = getObjectFromGUID("8d25a4")
+  data["Orange"]["libraryZone"]     = getObjectFromGUID("757395")
+  data["Yellow"]["libraryZone"]     = getObjectFromGUID("dbe6d0")
+  data["Green"]["libraryZone"]      = getObjectFromGUID("6b5048")
+  data["Blue"]["libraryZone"]       = getObjectFromGUID("b15784")
+  data["Purple"]["libraryZone"]     = getObjectFromGUID("b86a24")
+  data["Pink"]["libraryZone"]       = getObjectFromGUID("cd40c1")
+
+  data["White"]["graveyard"]        = getObjectFromGUID("0e8f58")
+  data["Orange"]["graveyard"]       = getObjectFromGUID("346b49")
+  data["Yellow"]["graveyard"]       = getObjectFromGUID("21cb04")
+  data["Green"]["graveyard"]        = getObjectFromGUID("208d60")
+  data["Blue"]["graveyard"]         = getObjectFromGUID("c8ad41")
+  data["Purple"]["graveyard"]       = getObjectFromGUID("0d754d")
+  data["Pink"]["graveyard"]         = getObjectFromGUID("eb0162")
+
+  data["White"]["playmat"]          = getObjectFromGUID("a803f5")
+  data["Orange"]["playmat"]         = getObjectFromGUID("121616")
+  data["Yellow"]["playmat"]         = getObjectFromGUID("17c942")
+  data["Green"]["playmat"]          = getObjectFromGUID("c2326a")
+  data["Blue"]["playmat"]           = getObjectFromGUID("cdf8f8")
+  data["Purple"]["playmat"]         = getObjectFromGUID("d83f65")
+  data["Pink"]["playmat"]           = getObjectFromGUID("a90cd6")
+
+  data["White"]["untapButton"]      = getObjectFromGUID("474dd5")
+  data["Orange"]["untapButton"]     = getObjectFromGUID("514488")
+  data["Yellow"]["untapButton"]     = getObjectFromGUID("c6ea57")
+  data["Green"]["untapButton"]      = getObjectFromGUID("8606fa")
+  data["Blue"]["untapButton"]       = getObjectFromGUID("dec017")
+  data["Purple"]["untapButton"]     = getObjectFromGUID("55e12c")
+  data["Pink"]["untapButton"]       = getObjectFromGUID("4ae9b8")
+
+  data["White"]["drawButton"]       = getObjectFromGUID("6d642a")
+  data["Orange"]["drawButton"]      = getObjectFromGUID("499443")
+  data["Yellow"]["drawButton"]      = getObjectFromGUID("21f015")
+  data["Green"]["drawButton"]       = getObjectFromGUID("a29857")
+  data["Blue"]["drawButton"]        = getObjectFromGUID("fba8b3")
+  data["Purple"]["drawButton"]      = getObjectFromGUID("ddfe59")
+  data["Pink"]["drawButton"]        = getObjectFromGUID("6f7c37")
+
+  data["White"]["scryButton"]       = getObjectFromGUID("71c930")
+  data["Orange"]["scryButton"]      = getObjectFromGUID("15e748")
+  data["Yellow"]["scryButton"]      = getObjectFromGUID("e88d05")
+  data["Green"]["scryButton"]       = getObjectFromGUID("5c4f1b")
+  data["Blue"]["scryButton"]        = getObjectFromGUID("6a41dc")
+  data["Purple"]["scryButton"]      = getObjectFromGUID("fd115c")
+  data["Pink"]["scryButton"]        = getObjectFromGUID("1cfc31")
+
+  data["White"]["millButton"]       = getObjectFromGUID("92de75")
+  data["Orange"]["millButton"]      = getObjectFromGUID("157022")
+  data["Yellow"]["millButton"]      = getObjectFromGUID("7277f6")
+  data["Green"]["millButton"]       = getObjectFromGUID("4f4994")
+  data["Blue"]["millButton"]        = getObjectFromGUID("ca86db")
+  data["Purple"]["millButton"]      = getObjectFromGUID("ce5114")
+  data["Pink"]["millButton"]        = getObjectFromGUID("3f965b")
+
+  data["White"]["mulliganButton"]   = getObjectFromGUID("4f086d")
+  data["Orange"]["mulliganButton"]  = getObjectFromGUID("51d6cd")
+  data["Yellow"]["mulliganButton"]  = getObjectFromGUID("0c69da")
+  data["Green"]["mulliganButton"]   = getObjectFromGUID("16ff69")
+  data["Blue"]["mulliganButton"]    = getObjectFromGUID("d22904")
+  data["Purple"]["mulliganButton"]  = getObjectFromGUID("fecdf7")
+  data["Pink"]["mulliganButton"]    = getObjectFromGUID("36a4e6")
+
+  data["White"]["revealButton"]   = getObjectFromGUID("62dea1")
+  data["Orange"]["revealButton"]  = getObjectFromGUID("5c08c5")
+  data["Yellow"]["revealButton"]  = getObjectFromGUID("097e4e")
+  data["Green"]["revealButton"]   = getObjectFromGUID("49f4d1")
+  data["Blue"]["revealButton"]    = getObjectFromGUID("49504f")
+  data["Purple"]["revealButton"]  = getObjectFromGUID("2b8a9a")
+  data["Pink"]["revealButton"]    = getObjectFromGUID("a7ccd6")
+end
+
+props = {
+ White={spawns={
+ main={posX="17",   posZ="-16.5",  rotY="180"},
+ part={posX="14.5", posZ="-16.5",  rotY="180"}}},
+ Orange={spawns={
+ main={posX="-34",  posZ="-17.5",  rotY="270"},
+ part={posX="-34",  posZ="-15",    rotY="270"}}},
+ Yellow={spawns={
+ main={posX="-34",  posZ="17.5",   rotY="270"},
+ part={posX="-34",  posZ="15",     rotY="270"}}},
+ Green={spawns={
+ main={posX="-17",  posZ="16.5",   rotY="0"},
+ part={posX="-14.5",posZ="16.6",   rotY="0"}}},
+ Blue={spawns={
+ main={posX="17",   posZ="16.5",   rotY="0"},
+ part={posX="14.5", posZ="16.5",   rotY="0"}}},
+ Purple={spawns={
+ main={posX="34",   posZ="17.5",   rotY="90"},
+ part={posX="34",   posZ="15",     rotY="90"}}},
+ Pink={spawns={
+ main={posX="34",   posZ="-17.5",  rotY="90"},
+ part={posX="34",   posZ="-15",    rotY="90"}}},
+}
+
+deckDirs = {White=1,
+            Orange=1,
+            Yellow=-1,
+            Green=1,
+            Blue=-1,
+            Purple=1,
+            Pink=-1}
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+function onPlayerDisconnect(player)   -- flip cards in hand if disconnected
+  for handInd=1,player.getHandCount() do
+    objs=player.getHandObjects(handInd)
+    for _,obj in pairs(objs) do
+      local rot=obj.getRotation()
+      rot[3]=180
+      obj.setRotation(rot)
+    end
+  end
+end
+
+--------------------------------- TABLE BUTTONS --------------------------------
+function buildTableButtons()
+  -- support variables
+  nAlt = 3
+  drawDelay = 0.1  -- changing the draw delay might cause problems
+  for color, playerData in pairs(data) do
+    createTableButton(playerData["drawButton"],  "Draw", "playerDraw",  "Draw")
+    createTableButton(playerData["scryButton"],  "Scry", "playerScry",  "Scry")
+    createTableButton(playerData["millButton"],  "Mill", "playerMill",  "Mill")
+    createTableButton(playerData["untapButton"], "Untap","playerUntap", "Untap")
+    createTableButtonM(playerData["mulliganButton"], "Mulligan", "playerMulligan", "Mulligan")
+    createTableButtonR(playerData["revealButton"])
+    data[color]["mulliganNumber"] = 7
+
+    playerData["drawButton"].max_typed_number=99
+    playerData["scryButton"].max_typed_number=99
+    playerData["millButton"].max_typed_number=99
+    playerData["revealButton"].max_typed_number=99
+  end
+end
+
+function onObjectNumberTyped(obj,ply,int)
+  local txt=' card'
+  if int>1 then
+    txt=' cards'
+  end
+  for color, playerData in pairs(data) do
+    if obj==playerData["drawButton"] and color==ply then
+      local deck=getDeckFromZone(playerData["libraryZone"])
+      if deck==nil then return end
+      if int>deck.getQuantity() then int=deck.getQuantity() end
+      if int>0 then
+        Player[ply].broadcast('drawing '..int..txt,ply)
+        Wait.time(function() draw1(ply) end, drawDelay, int)
+      end
+    end
+    if obj==playerData["scryButton"] and color==ply then
+      local deck=getDeckFromZone(playerData["libraryZone"])
+      if deck==nil then return end
+      if int>deck.getQuantity() then int=deck.getQuantity() end
+      if int>0 then
+        Player[ply].broadcast('scrying '..int..txt,ply)
+        Wait.time(function() scry1(ply) end, drawDelay, int)
+      end
+    end
+    if obj==playerData["millButton"] and color==ply then
+      local deck=getDeckFromZone(playerData["libraryZone"])
+      if deck==nil then return end
+      if int>deck.getQuantity() then int=deck.getQuantity() end
+      if int>0 then
+        Player[ply].broadcast('milling '..int..txt,ply)
+        Wait.time(function() mill1(ply) end, drawDelay, int)
+      end
+    end
+    if obj==playerData["revealButton"] and color==ply then
+      local deck=getDeckFromZone(playerData["libraryZone"])
+      if deck==nil then return end
+      if int>deck.getQuantity() then int=deck.getQuantity() end
+      if int>0 then
+        Player[ply].broadcast('revealing '..int..txt,ply)
+        if obj.getRotation().z==0 then
+          Wait.time(function() revealFan(obj,ply) end, drawDelay, int)
+        elseif obj.getRotation().z==180 then
+          Wait.time(function() revealStack(obj,ply) end, drawDelay, int)
+        end
+      end
+    end
+
+  end
+end
+
+-- Creates a button with given funcionality on the object
+function createTableButton(object, name, clickFunction, ttip)
+  object.tooltip=false
+  object.interactable=true
+  object.setLock(true)
+  object.setName(name)
+  if name=='Untap' then
+    ttip = '[b]'..ttip..'[/b]'
+  else
+    ttip = '                  [b]'..ttip..'[/b]'..'\n       [i]left click[/i] for 1 card'..
+           '\n     [i]right click[/i] for '..tostring(nAlt)..' cards\nor [i]type[/i] the desired amount'
+  end
+  return object.createButton({
+    click_function = clickFunction,
+    tooltip = ttip,
+    width = 600,
+    height = 600,
+    position = {0, 0.1, 0},
+    font_size = 250,
+    color = {1, 1, 1, 0},
+    font_color = {1, 1, 1, 100},
+  })
+end
+
+function createTableButtonM(object, name, clickFunction, ttip)
+  object.tooltip=false
+  object.interactable=false
+  object.setLock(true)
+  object.setName(name)
+  return object.createButton({
+    click_function = clickFunction,
+    tooltip = '           [b]Mulligan[/b]\n  [i]left click[/i] - friendly\n[i]right click[/i] - unfriendly',
+    width = 2500,
+    height = 850,
+    position = {0, 0.1, 0},
+    font_size = 250,
+    color = {1, 1, 1, 0},
+    font_color = {1, 1, 1, 100},
+	  hover_color = {1, 1, 1, 0.1},
+	  press_color = {1, 0, 0, 0.2},
+  })
+end
+
+function createTableButtonR(object)
+  object.tooltip=false
+  object.interactable=true
+  rot=object.getRotation()
+  rot[3]=0
+  object.setRotation(rot)
+  object.setLock(true)
+  object.setName('Reveal')
+  object.memo=tostring(os.time())
+  object.setGMNotes('0')
+  return object.createButton({
+    click_function = 'revealFan',
+    tooltip = '                  [b]fanned-out reveal[/b]\n[i]left click[/i] or [i]type[/i] number to reveal cards\n       [i]right click[/i] to swap button mode',
+    function_owner = self,
+    width = 600,
+    height = 600,
+    position = {0, 0.1, 0},
+    color = {1, 1, 1, 0}
+  }),
+  object.createButton({
+    click_function = 'revealStack',
+    tooltip = '                     [b]stacked reveal[/b]\n[i]left click[/i] or [i]type[/i] number to reveal cards\n       [i]right click[/i] to swap button mode',
+    function_owner = self,
+    width = 600,
+    height = 600,
+    position = {0, -0.1, 0},
+    rotation = {0, 0, 180},
+    color = {1, 1, 1, 0},
+    font_color = {1, 1, 1, 100}
+  })
+end
+
+-- Selected card movement helpers
+function move2botLib(ply)
+  local objs=Player[ply].getSelectedObjects()
+  local cards={}
+  for _,obj in pairs(objs) do
+    if obj.type=='Card' or obj.type=='Deck' then
+      local rot=obj.getRotation()
+      rot[3]=180
+      obj.setRotationSmooth(rot,false,true)
+      table.insert(cards,obj)
+    end
+  end
+  Wait.time(function()
+    if #cards>1 then
+      targpos=vector(0,0,0)
+      for _,c in pairs(cards) do
+        targpos=targpos+c.getPosition()
+      end
+      targpos=targpos:scale(1/#cards)
+      for _,c in pairs(cards) do
+        c.setPositionSmooth(targpos,false,true)
+      end
+    end
+    local gr=group(cards)
+    gr=gr[1]
+    if gr==nil then
+      pcall(function()
+        gr=hoveredObjs[ply]
+      end)
+    end
+    if gr==nil or not(gr.type=='Card' or gr.type=='Deck') then return end
+    local rot=gr.getRotation()
+    rot[3]=180
+    gr.interactable=false
+    gr.use_gravity=false
+    gr.shuffle()
+    local deck = getDeckFromZone(data[ply]["libraryZone"])
+    if deck==nil then
+      deck = getCardFromZone(data[ply]["libraryZone"])
+    end
+    Wait.time(function()
+      gr.use_gravity=true
+      gr.interactable=true
+      gr.shuffle()
+      if gr.type=='Card' then
+        handTrigger(gr)
+      end
+      gr.shuffle()
+      if deck~=nil then
+        local pos=deck.getPosition()
+        pos[2]=1
+        gr.setPositionSmooth(pos,false,true)
+        gr.setRotationSmooth(deck.getRotation(),false,true)
+        deck.setPositionSmooth(deck.getPosition()+Vector(0,2,0),false,true)
+      else
+        local rot = gr.getRotation()
+        rot.z=180
+        local pos = data[ply]["libraryZone"].getPosition()
+        pos[2]=1
+        gr.setRotationSmooth(rot,false,true)
+        gr.setPositionSmooth(pos,false,true)
+      end
+    end, 1)
+  end, 0.25)
+end
+
+hoveredObjs={}
+function onObjectHover(ply,obj)
+  hoveredObjs[ply]=obj
+end
+
+function move2grav(ply)
+  local objs=Player[ply].getSelectedObjects()
+  local cards={}
+  for _,obj in pairs(objs) do
+    if obj.type=='Card' or obj.type=='Deck' then
+      table.insert(cards,obj)
+    end
+  end
+  local gr=group(cards)
+  gr=gr[1]
+  if gr==nil then
+    pcall(function()
+      gr=hoveredObjs[ply]
+    end)
+  end
+  if gr==nil or not(gr.type=='Card' or gr.type=='Deck') then return end
+  gr.interactable=false
+  gr.use_gravity=false
+  Wait.time(function()
+    gr.interactable=true
+    gr.use_gravity=true
+    if gr.type=='Card' then
+      handTrigger(gr)
+    end
+    local rot = gr.getRotation()
+    rot.z=0
+    rot.y=data[ply]["libraryZone"].getRotation().y+exileRot
+    local pos = data[ply]["libraryZone"].getPosition()+data[ply]["libraryZone"].getTransformForward():scale(gravFor)
+    pos[2]=3
+    gr.setRotationSmooth(rot,false,true)
+    gr.setPositionSmooth(pos,false,true)
+  end, 1)
+end
+
+function move2exile(ply)
+  local objs=Player[ply].getSelectedObjects()
+  local cards={}
+  for _,obj in pairs(objs) do
+    if obj.type=='Card' or obj.type=='Deck' then
+      table.insert(cards,obj)
+    end
+  end
+  local gr=group(cards)
+  gr=gr[1]
+  if gr==nil then
+    pcall(function()
+      gr=hoveredObjs[ply]
+    end)
+  end
+  if gr==nil or not(gr.type=='Card' or gr.type=='Deck') then return end
+  gr.interactable=false
+  gr.use_gravity=false
+  Wait.time(function()
+    gr.interactable=true
+    gr.use_gravity=true
+    if gr.type=='Card' then
+      handTrigger(gr)
+    end
+    local rot = gr.getRotation()
+    rot.z=0
+    rot.y=data[ply]["libraryZone"].getRotation().y+exileRot
+    local pos = data[ply]["libraryZone"].getPosition()+data[ply]["libraryZone"].getTransformForward():scale(exileFor)
+    pos[2]=3
+    gr.setRotationSmooth(rot,false,true)
+    gr.setPositionSmooth(pos,false,true)
+  end, 1)
+end
+
+------------------------------------ REVEAL ------------------------------------
+function revealFan(button, ply, alt)
+  if button ~= data[ply]["revealButton"] then return end
+  if alt then
+    local rot=button.getRotation()
+    rot[3]=180
+    button.setRotation(rot)
+    return
+  end
+  local card=getCardFromZone(data[ply]["libraryZone"])
+  local hexPrefix = '['..Color[ply]:toHex()..']'
+  buttonPress(button,drawDelay)
+  if card==nil then return end
+  local libZone=data[ply]["libraryZone"]
+  local now=os.time()
+  local lastT=tonumber(button.memo)
+  local nRevealed=tonumber(button.getGMNotes())
+  if now-lastT>10 then
+    nRevealed=0
+  end
+  button.memo=tostring(now)
+  local nUp=math.floor(nRevealed/revealNrow)
+  local nSide=nRevealed-nUp*revealNrow
+  local forw= libZone.getTransformForward()
+  local righ= libZone.getTransformRight()
+  local pos = libZone.getPosition()+forw:scale(revealUp+revealUpS*nUp)+righ:scale(deckDirs[ply]*2.25*(nSide+revealRi))
+  local rot = libZone.getRotation()
+  rot[2]=rot[2]+180
+  rot[3]=0
+  checkPosMove(pos,libZone)
+  card.setPositionSmooth(pos,false,true)
+  card.setRotationSmooth(rot,false,true)
+  card.highlightOn(stringColorToRGB(ply),10)
+  nRevealed=nRevealed+1
+  button.setGMNotes(tostring(nRevealed))
+  broadcastToAll(hexPrefix..'[b]'..nRevealed..':[/b][-] '..card.getName():gsub('\n',' | '))
+end
+
+function revealStack(button, ply, alt)
+  if button ~= data[ply]["revealButton"] then return end
+  if alt then
+    local rot=button.getRotation()
+    rot[3]=0
+    button.setRotation(rot)
+    return
+  end
+  local card=getCardFromZone(data[ply]["libraryZone"])
+  local hexPrefix = '['..Color[ply]:toHex()..']'
+  buttonPress(button,drawDelay)
+  if card==nil then return end
+  local libZone=data[ply]["libraryZone"]
+  local now=os.time()
+  local lastT=tonumber(button.memo)
+  local nRevealed=tonumber(button.getGMNotes())
+  if now-lastT>10 then
+    nRevealed=0
+  end
+  button.memo=tostring(now)
+  local righ= libZone.getTransformRight()
+  local pos = libZone.getPosition()+vector(0,2,0)+righ:scale(deckDirs[ply]*2.4)
+  local rot = libZone.getRotation()
+  rot[2]=rot[2]+180
+  rot[3]=0
+  card.setPositionSmooth(pos,false,true)
+  card.setRotationSmooth(rot,false,true)
+  nRevealed=nRevealed+1
+  button.setGMNotes(tostring(nRevealed))
+  broadcastToAll(hexPrefix..'[b]'..nRevealed..':[/b][-] '..card.getName():gsub('\n',' | '))
+end
+
+function checkPosMove(pos,libZone)
+  local castPos=pos
+  castPos[2]=1
+  local castPars={
+    origin= castPos,
+    type = 3,
+    size = {1,4,1.5},
+    direction = vector(0,0,1),
+    max_distance=0
+  }
+  local castOutput = Physics.cast(castPars)
+  for _,castO in pairs(castOutput) do
+    local hitObj = castO.hit_object
+    if hitObj.type=='Card' or hitObj.type=='Deck' then
+      local objPos=hitObj.getPosition()
+      local relPos=libZone.positionToLocal(pos)
+      local relPosObj=libZone.positionToLocal(objPos)
+      local newRelPos = relPosObj
+      newRelPos[3]=relPos[3]+3.1/libZone.getScale().z
+      local newPos=libZone.positionToWorld(newRelPos)
+      checkPosMove(newPos,libZone)
+      hitObj.setPositionSmooth(newPos,false,true)
+    end
+  end
+end
+
+----------------------------------- MULLIGAN -----------------------------------
+function playerMulligan(button, playerColor, alt)
+  if button == data[playerColor]["mulliganButton"] then
+
+    if nMullClick==nil then
+      nMullClick=1
+    else
+      nMullClick=nMullClick+1
+    end
+    Wait.time(function()
+      nMullClick=0
+    end,0.5)
+
+    local proceed=true
+    local playmat = data[playerColor]["playmat"]
+    for k, v in pairs(playmat.getObjects()) do
+      if (v.type=='Card' or v.type=='Deck') and nMullClick<2 then
+        proceed=false
+      end
+    end
+    if not(proceed) then
+      if mulliganSatety==nil then mulliganSatety=true end
+      if mulliganSatety then
+        Player[playerColor].broadcast('Cards detected in the play area = accidental mulligan press in the middle of a game?\n'..
+                                      'If you still wish to mulligan, [b]double click[/b] the button.')
+        mulliganSatety=false
+        Wait.time(function() mulliganSatety=true end, 10)
+      end
+      return
+    end
+
+    buttonCooldown(button, 2)
+
+    local deck = getDeckFromZone(data[playerColor]["libraryZone"])
+    if deck~=nil then
+      if not(alt) then
+        data[playerColor]["mulliganNumber"] = 7
+      else
+        data[playerColor]["mulliganNumber"] = data[playerColor]["mulliganNumber"]-1
+        if data[playerColor]["mulliganNumber"]<1 then
+          data[playerColor]["mulliganNumber"] = 1
+        end
+      end
+      local objs=Player[playerColor].getHandObjects(1)
+      for _,obj in pairs(objs) do
+        if obj.tag=='Card' then
+          deck.putObject(obj)
+        end
+      end
+      Wait.time(function() deck.shuffle() end, 0.1, 7)
+
+      Wait.time(function()
+        if smartMulligan then   -- ensure 2-5 lands in hand
+          local nMulls=0
+          local keepTrying=true
+          while keepTrying do
+            nMulls=nMulls+1
+            deck.shuffle()
+            local nLands=0
+            local cards=deck.getObjects()
+            for i=1,7 do
+              if cards[i].name:lower():find('land') then
+                nLands=nLands+1
+              end
+            end
+            if (nLands>=3 and nLands<=4) or nMulls>=3 then
+              keepTrying=false
+            end
+          end
+        end
+        deck.deal(data[playerColor]["mulliganNumber"], playerColor, 1)
+      end, 0.8)
+      -- Wait.time(function() sortHands(playerColor) end, 1.5)
+
+    end
+  end
+end
+
+------------------------------------- UNTAP ------------------------------------
+-- stolen from Untapper Tool by Tipsy Hobbit//STEAM_0:1:13465982
+function playerUntap(button, playerColor, alt)
+  if button == data[playerColor]["untapButton"] then
+    buttonPress(button,drawDelay*0.75)
+    local playmat = data[playerColor]["playmat"]
+    local enc = Global.getVar("Encoder")
+    local ry = playmat.getRotation()
+    local rr = nil
+    local untaps = true
+    for k, v in pairs(playmat.getObjects()) do
+      untaps = true
+      if v.type == 'Card' or v.type == 'Deck' then
+        if enc ~= nil then
+          if enc.call("APIobjectExists",{obj=v}) then
+            local encdat = enc.call("APIobjGetAllData",{obj=v})
+            if encdat["mtg_stuncounter"] ~= nil and untaps then
+              if encdat["mtg_stuncounter"] > 0 then
+                flash = true
+                untaps = false
+                encdat.mtg_stuncounter = encdat.mtg_stuncounter-1
+                enc.call("APIobjSetAllData",{obj=v,data=encdat})
+                enc.call("APIrebuildButtons",{obj=v})
+              end
+            end
+            if encdat["mtg_frozen"] ~= nil then
+              if encdat["mtg_frozen"] == true then
+                flash = true
+                untaps = false
+              end
+            end
+            if encdat["mtg_exert"] ~= nil then
+              if encdat["mtg_exert"] == true then
+                untaps = false
+                encdat.mtg_exert = false
+                enc.call("APIobjSetAllData",{obj=v,data=encdat})
+                enc.call("APIrebuildButtons",{obj=v})
+              end
+            end
+          end
+        end
+        if v.type=='Card' then
+          local cname=v.getName():lower()
+          local cdesc=v.getDescription():lower()
+          local typeline=cname:match('\n(.*)')
+          if cname and (cname:find('mana vault') or cname:find('basalt monolith') or cname:find('grim monolith')) then
+            untaps=false
+            flash=true
+          end
+          if cdesc and cdesc:find("doesn't untap during your untap step") then
+            untaps=false
+            flash=true
+          end
+          if typeline and typeline:find('battle') then
+            untaps=false
+          end
+        end
+        if untaps == false and flash == true then
+          Wait.time(function() v.highlightOn(playerColor,0.1) end,0.2,3)
+        elseif untaps == true then
+          rr = v.getRotation()
+          v.setRotationSmooth({x=rr.x,y=ry.y,z=rr.z})
+        end
+      end
+    end
+  end
+end
+
+
+------------------------------------- DRAW -------------------------------------
+function playerDraw(button, playerColor, alt)
+  if button == data[playerColor]["drawButton"] then
+    if not(alt) then
+      buttonPress(button,drawDelay*0.75)
+      draw1(playerColor)
+    else
+      buttonPress(button,drawDelay*nAlt)
+      buttonCooldown(button, drawDelay*nAlt)
+      Wait.time(function() draw1(playerColor) end, drawDelay, nAlt)
+    end
+  end
+end
+
+function draw1(playerColor)
+  local card=getCardFromZone(data[playerColor]['libraryZone'])
+  if card~=nil then
+    --interactTrigger(card)
+    Wait.condition(function() card.deal(1,playerColor,1) end,
+                   function() return not(card.spawning) end)
+  end
+end
+
+------------------------------------- MILL -------------------------------------
+function playerMill(button, playerColor, alt)
+  if button == data[playerColor]["millButton"] then
+    if not(alt) then
+      buttonPress(button,drawDelay*0.75)
+      mill1(playerColor)
+    else
+      buttonPress(button,drawDelay*nAlt)
+      buttonCooldown(button, drawDelay*nAlt)
+      Wait.time(function() mill1(playerColor) end, drawDelay, nAlt)
+    end
+  end
+end
+
+function mill1(playerColor)
+  local card=getCardFromZone(data[playerColor]['libraryZone'])
+  if card~=nil then
+    local gravPos = data[playerColor]["graveyard"].getPosition()
+    local targPos = {x=gravPos.x,y=3,z=gravPos.z}
+    --interactTrigger(card)
+    local cardRot = card.getRotation()
+    cardRot.z = 0
+    card.setRotationSmooth(cardRot,false,true)
+    card.setPositionSmooth(targPos,false,true)
+    Wait.time(function() checkMoveSuccess(card,targPos,playerColor) end, 0.5)
+  end
+end
+
+------------------------------------- SCRY -------------------------------------
+function playerScry(button, playerColor, alt)
+  if button == data[playerColor]["scryButton"] then
+    if not(alt) then
+      buttonPress(button,drawDelay*0.75)
+      scry1(playerColor)
+    else
+      buttonPress(button,drawDelay*nAlt)
+      buttonCooldown(button, drawDelay*nAlt)
+      Wait.time(function() scry1(playerColor) end, drawDelay, nAlt)
+    end
+  end
+end
+
+function scry1(playerColor)
+  local card=getCardFromZone(data[playerColor]['libraryZone'])
+  if card~=nil then
+    Wait.condition(function()
+      card.deal(1,playerColor,2)
+      Encoder.call("APIencodeObject",{obj=card})
+      Encoder.call("APIobjEnableProp",{obj=card,propID="πScry"})
+    end, function() return not(card.spawning) end)
+  end
+end
+
+-- deal() works stupidly with non-primary hand
+-- (card arrives and floats for 5 seconds before taking formation with other cards)
+-- using setPositionSmooth() does not have this problem but
+-- using default hand position always sends the card into the middle, changing the order of cards
+-- so.. the function below gets the right-ish side of the zone
+function getHand2Pos(playerColor)
+  local pos = Player[playerColor].getHandTransform(2).position
+  local sca = Player[playerColor].getHandTransform(2).scale
+  local rig = Player[playerColor].getHandTransform(2).right
+  local targPos = pos:add(rig:scale(sca.x*0.55))
+  -- {x=pos.x+sca.x*rig.x*0.65,y=pos.y+sca.x*rig.y*0.65+1.5,z=pos.z+sca.x*rig.z*0.65}
+  return targPos
+end
+
+----------------------------------- UNIVERSAL ----------------------------------
+
+-- this should get the highest resting card from the library zones
+-- works if there are extra cards flipped face up on top of the deck
+-- (personally, I play with a bunch of decks that keep the top card of the library revealed)
+-- works if there is just one card remaining in the zone, too
+function getCardFromZone(zone)
+  local card = nil
+  local highY = 0
+  local highObj = nil
+  local objects = zone.getObjects()
+  for i,obj in pairs(objects) do
+    if obj.type=='Deck' or (obj.type=='Card' and obj.use_gravity) then
+      if obj.getPosition().y>highY then
+        highY=obj.getPosition().y
+        highObj=obj
+      end
+    end
+  end
+  if highObj~=nil then
+    if highObj.type=='Deck' then     -- pull one card from the top of the deck
+      local deck = highObj
+      local cardPresent, card = pcall(deck.takeObject)
+      if cardPresent and card.type=='Card' then
+        deck.setLock(true)
+        Wait.frames(function() deck.setLock(false) end, 1)
+        card.use_hands = true
+        gravityTrigger(card)
+        return card
+      end
+    elseif highObj.type=='Card' then
+      local card=highObj
+      card.use_hands = true
+      gravityTrigger(card)
+      return card
+    end
+  end
+  return card   -- if nil?
+end
+
+function getDeckFromZone(zone)
+  local deck = nil
+  local objects = zone.getObjects()
+  for i,obj in pairs(objects) do
+    if obj.type=='Deck' then
+      deck = obj
+      return deck
+    end
+  end
+  return deck
+end
+
+-- button press animation
+function buttonPress(button,T)
+  local posUp = button.getPosition()
+  local posDown = button.getPosition()
+  posUp.y=1
+  posDown.y=0.9
+  local downT = T
+  if downT<0.05 then downT=0.05 end
+  button.setPositionSmooth(posDown,false,true)
+  Wait.time(function() button.setPositionSmooth(posUp,false,true) end, downT)
+end
+
+ -- rotate all buttons on the object upside down for the cooldown timer
+function buttonCooldown(button,T)
+  buts = button.getButtons()
+  for i,but in pairs(buts) do
+    local oldRot = but.rotation
+    local ind = but.index
+    button.editButton({index=ind,rotation={x=oldRot.x,y=oldRot.y,z=180}})
+    Wait.time(function() button.editButton({index=ind,rotation={x=oldRot.x,y=oldRot.y,z=0}}) end, T)
+  end
+end
+
+-- check that the card made it to it's target, if not, teleport it
+function checkMoveSuccess(card,targetPos,playerColor)
+  if card==nil then   -- the card is gone, probably stacked into a deck already
+    return
+  end
+  -- use hands orientation to determine which coordinate to use to check position
+  -- currently only set up to work with hands rotated 0,90,180,270 degrees
+  local handForw=Player[playerColor].getHandTransform(2).forward
+  local posDiff = 0
+  if math.abs(handForw.z)>0.5 then
+    posDiff = math.abs(card.getPosition().z - targetPos.z)
+  elseif math.abs(handForw.x)>0.5 then
+    posDiff = math.abs(card.getPosition().x - targetPos.x)
+  end
+  if posDiff>1 then
+    card.setPosition(targetPos)
+  end
+end
+
+-- for hiding cards
+function allBut(playerColor)
+  local players = {}
+  for key, color in pairs(Color.list) do
+    if color ~= playerColor then
+      table.insert(players,color)
+    end
+  end
+  return players
+end
+function unhide(card)
+  if card~=nil then
+    card.setHiddenFrom({})
+  end
+end
+
+-- turns off gravity on the card for a few frames (prevents it from falling back onto a deck)
+function gravityTrigger(obj)
+  if obj~=nil then
+    obj.use_gravity=false
+    Wait.time(function() gravOn(obj) end, 0.2)
+  end
+end
+function gravOn(obj)
+  if obj~=nil then
+    obj.use_gravity=true
+  end
+end
+
+function interactTrigger(obj)
+  if obj~=nil then
+    obj.interactable = false
+    Wait.time(function() interactOn(obj) end, 0.2)
+  end
+end
+function interactOn(obj)
+  if obj~=nil then
+    obj.interactable = true
+  end
+end
+
+function handTrigger(obj)
+  if obj~=nil then
+    obj.use_hands=false
+    Wait.time(function() handOn(obj) end, 0.1)
+  end
+end
+function handOn(obj)
+  if obj~=nil then
+    obj.use_hands=true
+  end
+end
+
+function null()
+end
+
+
+-- debounce map to avoid rebuilding context menus repeatedly as objects move through zones
+local contextMenuDebounce={}
+local contextMenuState={}
+local landContextCache={}
+
+local function clearLandContextCache(obj)
+  if obj==nil or obj.getGUID==nil then return end
+  landContextCache[obj.getGUID()]=nil
+end
+
+function addZoneContextMenus()
+  for color, playerData in pairs(data) do
+    if Player[color] and Player[color].seated then
+      local libZone=playerData["libraryZone"]
+      if libZone and libZone.getObjects then
+        for _,obj in pairs(libZone.getObjects()) do
+          if obj.type=='Deck' and not(obj.getName():lower():find('planechase')) then
+            obj.addContextMenuItem('Cascade for X',deckCascade)
+            obj.addContextMenuItem('Reveal until Type',deckSeachType)
+            addLandContextMenus(obj)
+          end
+        end
+      end
+
+      local playmat=playerData["playmat"]
+      if playmat and playmat.getObjects then
+        for _,obj in pairs(playmat.getObjects()) do
+          if obj.type=='Card' then
+            obj.addContextMenuItem('Make Token Copy',cardToken)
+            if obj.getDescription():lower():find('morph') then
+              obj.addContextMenuItem('Morph',cardMorph)
+            end
+            if obj.getDescription():lower():find('cascade') then
+              obj.addContextMenuItem('Cascade',cardCascade)
+            end
+          end
+        end
+      end
+
+      local ok,handObjs=pcall(function() return Player[color].getHandObjects(1) end)
+      if ok and handObjs and #handObjs>0 then
+        for _,obj in pairs(handObjs) do
+          obj.addContextMenuItem('Sort Hand by CMC',sortHands)
+          obj.addContextMenuItem('Random Discard',randomDiscard)
+          if obj.type=='Card' and obj.getDescription():lower():find('morph') then
+            obj.addContextMenuItem('Morph',cardMorph)
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Global
+addContextMenuItem('have a response',function(c)
+    broadcastToAll(Player[c].steam_name..' has a response!',stringColorToRGB(c))
+  end)
+addContextMenuItem('could you not',function(c)
+    broadcastToAll(Player[c].steam_name..' asks: [999999]"Could you not?"[-]',stringColorToRGB(c))
+  end)
+addContextMenuItem('hand counts',function(c)
+    local s='number of cards in hands:'
+    for _,p in pairs(Player.getPlayers()) do
+      local n=#p.getHandObjects()
+      if n<10 then n='0'..n end
+      s=s..'\n['..Color[p.color]:toHex()..']'..n
+    end
+    Player[c].broadcast(s..'[-]',{0.7,0.7,0.7})
+  end)
+
+-- function onObjectSpawn(obj)
+--   -- Card "Encoder Menu" context item
+--   if obj.type ~= "Card" then return end
+--   obj.hide_when_face_down=true
+--   obj.setHiddenFrom({})
+--   Wait.condition(function()
+--     if Encoder ~= nil and obj~=nil then
+--       obj.addContextMenuItem('Encoder Menu',toggleEncMenu)
+--     end
+--   end, function() return obj==nil or not(obj.spawning) end, 1)
+-- end
+
+-- zone specific context menu items
+function onObjectEnterZone(zone,obj)
+  if obj==nil or not(obj.type=='Card' or obj.type=='Deck') then return end
+  if obj.getName():lower():find('planechase') then return end
+
+  local guid=obj.getGUID()
+  if contextMenuDebounce[guid] then return end
+  contextMenuDebounce[guid]=true
+
+  Wait.frames(function()
+    contextMenuDebounce[guid]=nil
+    if obj==nil or not(obj.type=='Card' or obj.type=='Deck') then return end
+
+    local inHandZone=false
+    local inPlayZone=false
+    local inLibrZone=false
+
+    local objZones=obj.getZones() or {}
+    local encZones=nil
+    if Encoder~=nil then
+      encZones=Encoder.call("APIlistZones",{})
+    end
+
+    for _,oZone in pairs(objZones) do
+      if encZones then
+        local encZone=encZones[oZone.getGUID()]
+        if encZone and encZone.name:match('_1') then
+          inHandZone=true
+        end
+      end
+      for _,col in pairs(Player.getAvailableColors()) do
+        if data[col] then
+          if oZone==data[col]["playmat"] then
+            inPlayZone=true
+          end
+          if oZone==data[col]["libraryZone"] then
+            inLibrZone=true
+          end
+        end
+      end
+    end
+
+    local state=(inHandZone and '1' or '0')..(inPlayZone and '1' or '0')..(inLibrZone and '1' or '0')
+    if contextMenuState[guid]==state then return end
+    contextMenuState[guid]=state
+
+    if not(inHandZone or inPlayZone or inLibrZone) then return end
+
+    obj.clearContextMenu()
+    if obj.type=='Card' then
+      if obj.getDescription():lower():find('morph') then
+        obj.addContextMenuItem('Morph',cardMorph)
+      end
+    end
+    if obj.type=='Card' and inPlayZone then
+      obj.addContextMenuItem('Make Token Copy',cardToken)
+      if obj.getDescription():lower():find('cascade') then
+        obj.addContextMenuItem('Cascade',cardCascade)
+      end
+    end
+    if obj.type=='Card' and inHandZone then
+      obj.addContextMenuItem('Sort Hand by CMC',sortHands)
+      obj.addContextMenuItem('Random Discard',randomDiscard)
+    end
+    if obj.type=='Deck' and inLibrZone then
+      obj.addContextMenuItem('Cascade for X',deckCascade)
+      obj.addContextMenuItem('Reveal until Type',deckSeachType)
+      addLandContextMenus(obj)
+      obj.setScale({1,1,1})
+    end
+  end,1)
+end
+
+function onObjectLeaveZone(zone,obj)
+  if obj==nil or not(obj.type=='Card' or obj.type=='Deck') then return end
+  if obj.getName():lower():find('planechase') then return end
+
+  local guid=obj.getGUID()
+  if contextMenuDebounce[guid] then return end
+  contextMenuDebounce[guid]=true
+
+  Wait.frames(function()
+    contextMenuDebounce[guid]=nil
+    if obj==nil or not(obj.type=='Card' or obj.type=='Deck') then return end
+
+    local inHandZone=false
+    local inPlayZone=false
+    local inLibrZone=false
+    local objZones=obj.getZones() or {}
+    local encZones=nil
+    if Encoder~=nil then
+      encZones=Encoder.call("APIlistZones",{})
+    end
+
+    for _,oZone in pairs(objZones) do
+      if encZones~=nil then
+        local encZone=encZones[oZone.getGUID()]
+        if encZone and encZone.name and encZone.name:match('_1') then
+          inHandZone=true
+        end
+      end
+      for _,col in pairs(Player.getAvailableColors()) do
+        if data[col] then
+          if oZone==data[col]["playmat"] then
+            inPlayZone=true
+          end
+          if oZone==data[col]["libraryZone"] then
+            inLibrZone=true
+          end
+        end
+      end
+    end
+
+    local state=(inHandZone and '1' or '0')..(inPlayZone and '1' or '0')..(inLibrZone and '1' or '0')
+    if contextMenuState[guid]==state then return end
+    contextMenuState[guid]=state
+
+    obj.clearContextMenu()
+    if obj.type=='Card' then
+      -- obj.addContextMenuItem('Encoder Menu',toggleEncMenu)
+      if obj.getDescription():lower():find('morph') then
+        obj.addContextMenuItem('Morph',cardMorph)
+      end
+    end
+    if obj.type=='Card' and inPlayZone then
+      obj.addContextMenuItem('Make Token Copy',cardToken)
+      if obj.getDescription():lower():find('cascade') then
+        obj.addContextMenuItem('Cascade',cardCascade)
+      end
+    end
+    if obj.type=='Card' and inHandZone then
+      obj.addContextMenuItem('Sort Hand by CMC',sortHands)
+      obj.addContextMenuItem('Random Discard',randomDiscard)
+    end
+    if obj.type=='Deck' and inLibrZone then
+      obj.addContextMenuItem('Cascade for X',deckCascade)
+      obj.addContextMenuItem('Reveal until Type',deckSeachType)
+      addLandContextMenus(obj)
+      -- obj.addContextMenuItem('Get Basic Land',deckRamp)
+      obj.setScale({1,1,1})
+    end
+  end,1)
+end
+
+function addLandContextMenus(deck)
+  local guid=deck.getGUID()
+  local quantity=0
+  pcall(function() quantity=deck.getQuantity() end)
+  if quantity==nil or quantity==0 then
+    local ok,objects=pcall(function() return deck.getObjects() end)
+    quantity=ok and objects and #objects or 0
+  end
+
+  local cached=landContextCache[guid]
+  if cached==nil or cached.quantity~=quantity then
+    local plains,island,mountain,swamp,forest=false,false,false,false,false
+    for _,card in pairs(deck.getObjects()) do
+      local cname=card.name:lower():gsub('%p','')
+      if cname:find('basic') and cname:find('land') and cname:find('plains') then
+        plains=true
+      end
+      if cname:find('basic') and cname:find('land') and cname:find('island') then
+        island=true
+      end
+      if cname:find('basic') and cname:find('land') and cname:find('mountain') then
+        mountain=true
+      end
+      if cname:find('basic') and cname:find('land') and cname:find('swamp') then
+        swamp=true
+      end
+      if cname:find('basic') and cname:find('land') and cname:find('forest') then
+        forest=true
+      end
+    end
+    cached={quantity=quantity,plains=plains,island=island,mountain=mountain,swamp=swamp,forest=forest}
+    landContextCache[guid]=cached
+  end
+
+  if cached.plains then
+    deck.addContextMenuItem('Get Basic Plains',deckRampW)
+  end
+  if cached.island then
+    deck.addContextMenuItem('Get Basic Island',deckRampU)
+  end
+  if cached.mountain then
+    deck.addContextMenuItem('Get Basic Mountain',deckRampR)
+  end
+  if cached.swamp then
+    deck.addContextMenuItem('Get Basic Swamp',deckRampB)
+  end
+  if cached.forest then
+    deck.addContextMenuItem('Get Basic Forest',deckRampG)
+  end
+
+end
+
+function deckRampW(ply)
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then return end
+  for i,card in ipairs(deck.getObjects()) do
+    local cname=card.name:lower():gsub('%p','')
+    if cname:find('basic') and cname:find('land') and cname:find('plains') then
+      local rot=deck.getRotation()
+      local pos=deck.getPosition()
+      local rig=deck.getTransformRight()
+      rot[3]=0
+      pos=pos+rig:scale(deckDirs[ply]*2.4)
+      clearLandContextCache(deck)
+      deck.takeObject({index=i-1,position=pos,rotation=rot})
+      break
+    end
+  end
+  Wait.time(function() deck.shuffle() end, 0.1)
+end
+
+function deckRampU(ply)
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then return end
+  for i,card in ipairs(deck.getObjects()) do
+    local cname=card.name:lower():gsub('%p','')
+    if cname:find('basic') and cname:find('land') and cname:find('island') then
+      local rot=deck.getRotation()
+      local pos=deck.getPosition()
+      local rig=deck.getTransformRight()
+      rot[3]=0
+      pos=pos+rig:scale(deckDirs[ply]*2.4)
+      clearLandContextCache(deck)
+      deck.takeObject({index=i-1,position=pos,rotation=rot})
+      break
+    end
+  end
+  Wait.time(function() deck.shuffle() end, 0.1)
+end
+
+function deckRampR(ply)
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then return end
+  for i,card in ipairs(deck.getObjects()) do
+    local cname=card.name:lower():gsub('%p','')
+    if cname:find('basic') and cname:find('land') and cname:find('mountain') then
+      local rot=deck.getRotation()
+      local pos=deck.getPosition()
+      local rig=deck.getTransformRight()
+      rot[3]=0
+      pos=pos+rig:scale(deckDirs[ply]*2.4)
+      clearLandContextCache(deck)
+      deck.takeObject({index=i-1,position=pos,rotation=rot})
+      break
+    end
+  end
+  Wait.time(function() deck.shuffle() end, 0.1)
+end
+
+function deckRampB(ply)
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then return end
+  for i,card in ipairs(deck.getObjects()) do
+    local cname=card.name:lower():gsub('%p','')
+    if cname:find('basic') and cname:find('land') and cname:find('swamp') then
+      local rot=deck.getRotation()
+      local pos=deck.getPosition()
+      local rig=deck.getTransformRight()
+      rot[3]=0
+      pos=pos+rig:scale(deckDirs[ply]*2.4)
+      clearLandContextCache(deck)
+      deck.takeObject({index=i-1,position=pos,rotation=rot})
+      break
+    end
+  end
+  Wait.time(function() deck.shuffle() end, 0.1)
+end
+
+function deckRampG(ply)
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then return end
+  for i,card in ipairs(deck.getObjects()) do
+    local cname=card.name:lower():gsub('%p','')
+    if cname:find('basic') and cname:find('land') and cname:find('forest') then
+      local rot=deck.getRotation()
+      local pos=deck.getPosition()
+      local rig=deck.getTransformRight()
+      rot[3]=0
+      pos=pos+rig:scale(deckDirs[ply]*2.4)
+      clearLandContextCache(deck)
+      deck.takeObject({index=i-1,position=pos,rotation=rot})
+      break
+    end
+  end
+  Wait.time(function() deck.shuffle() end, 0.1)
+end
+
+function toggleEncMenu(ply)
+  objs=Player[ply].getSelectedObjects()
+  for i,obj in pairs(objs) do
+    obj.setLock(true)
+    Encoder.call("APIencodeObject",{obj=obj})
+    local objRot=obj.getRotation()
+    local cardFlip=1
+    if objRot[3]>90 and objRot[3]<270 then cardFlip=-1 end
+    local encFlip = Encoder.call("APIgetFlip",{obj=obj})
+    if encFlip~=cardFlip then
+      Encoder.call("APIFlip",{obj=obj})
+    end
+    Encoder.call("APIobjToggleMenu",{obj=obj,menuID='πMenu'})
+    Encoder.call("APIrebuildButtons",{obj=obj})
+    Wait.frames(function() obj.setLock(false) end, 1)
+  end
+end
+
+function cardToken(ply)
+  objs=Player[ply].getSelectedObjects()
+  card=objs[1]
+  Player[ply].clearSelectedObjects()
+  if card.type~='Card' then return end
+  local newPos=card.getPosition()+card.getTransformForward():scale(-3.2)
+  local cardDat=card.getData()
+  cardDat.Transform.posX=newPos.x
+  cardDat.Transform.posY=newPos.y+0.1
+  cardDat.Transform.posZ=newPos.z
+  Encoder.call("APIencodeObject",{obj=card})
+  local flip = Encoder.call("APIgetFlip",{obj=card})
+  local moduleData = Encoder.call("APIobjGetProps", {obj = card})
+  local valueData = Encoder.call("APIobjGetAllData",{obj = card})
+  local tCard=spawnObjectData({data=cardDat})
+  Wait.condition(function()
+    if tCard==nil or Encoder==nil then return end
+    Encoder.call("APIencodeObject",{obj=tCard})
+    Encoder.call("APIobjSetAllData",{obj=tCard, data = valueData})
+    Encoder.call("APIobjSetProps",{obj=tCard, data = moduleData})
+    if flip < 0 then Encoder.call("APIFlip", {obj = tCard}) end
+    Encoder.call("APIobjEnableProp",{obj=tCard,propID="MTG_Token"})
+    Encoder.call("APIrebuildButtons",{obj=tCard})
+  end,function() return tCard==nil or not(tCard.spawning) end)
+end
+
+function cardCascade(ply)
+  objs=Player[ply].getSelectedObjects()
+  card=objs[1]
+  Player[ply].clearSelectedObjects()
+  if card.type~='Card' then return end
+  local proceed=false
+  for _,obj in pairs(data[ply]["playmat"].getObjects()) do
+    if obj==card then
+      proceed=true
+    end
+  end
+  if proceed then
+    local cmc=getCMC(card.getName(),card.getDescription())
+    local val=cmc-1
+    local deck = getDeckFromZone(data[ply]["libraryZone"])
+    if val>=0 and deck~=nil then
+      local rot=deck.getRotation()
+      rot.z=180
+      deck.setRotation(rot)
+      cascade(deck,ply,val)
+    end
+  end
+end
+
+function cardMorph(ply)
+  objs=Player[ply].getSelectedObjects()
+  card=objs[1]
+  Player[ply].clearSelectedObjects()
+  if card.type~='Card' or Encoder==nil or Morph==nil then return end
+  Encoder.call("APIencodeObject",{obj=card})
+  Morph.call('toggleMorph',card)
+end
+
+-- sort hands by CMC
+function sortHands(ply)
+  Player[ply].clearSelectedObjects()
+  for handInd=1,Player[ply].getHandCount() do
+    local cards=Player[ply].getHandObjects(handInd)
+    local cmcs={}
+    local poss={}
+    noCMCs=false
+    for i,card in ipairs(cards) do
+      if card.type=="Card" then
+        cmc=getCMC(card.getName(),card.getDescription())
+        if cmc==nil then
+          cmc='-2'
+          noCMCs=true
+        end
+        table.insert(cmcs,{id=i,cmc=cmc})
+        table.insert(poss,card.getPosition())
+      end
+    end
+    table.sort(cmcs,function(a,b) return tonumber(a.cmc)<tonumber(b.cmc) end)
+
+    if noCMCs then
+      Player[ply].broadcast('No CMC info found in the card names or description.\n'..
+          'You could use the Deck Lister to reimport your deck with the necessary info,\n'..
+          'Or the Deck Data Fetcher to download and port the info directly onto your deck.',{0.7,0.7,0.7})
+      local pingGUIDs={'6d07c3','5006a4','6d46cd','6ed442'}
+      for i,guid in ipairs(pingGUIDs) do
+        if getObjectFromGUID(guid)~=nil then
+          Player[ply].pingTable(getObjectFromGUID(guid).getPosition())
+        end
+      end
+    else
+
+      -- for i,v in ipairs(cmcs) do
+        -- cards[v.id].setPosition(poss[i])
+      -- end
+
+      for i,v in ipairs(cmcs) do
+        cards[v.id].setHiddenFrom(allBut(ply))
+        cards[v.id].setLock(true)
+        Wait.frames(function()
+          cards[v.id].setPositionSmooth(poss[i],false,false)
+        end,1)
+      end
+
+      Wait.frames(function()
+        Wait.condition(function()
+          for i,v in ipairs(cmcs) do
+            cards[v.id].setLock(false)
+            cards[v.id].setPosition(poss[i])
+            Wait.frames(function() cards[v.id].setHiddenFrom({}) end, 20)
+          end
+        end, function()
+          local doneMoving=true
+          for _,card in pairs(cards) do
+            if card.isSmoothMoving() then
+              doneMoving=false
+            end
+          end
+          return doneMoving
+        end)
+      end, 5)
+
+    end
+  end
+end
+
+function randomDiscard(ply)
+  local cards=Player[ply].getHandObjects(1)
+  Player[ply].clearSelectedObjects()
+  local discardN=math.random(#cards)
+  Wait.time(function()
+    discardN=math.random(#cards)
+    cards[discardN].highlightOn({1,1,1},0.1)
+  end,0.1,20)
+  Wait.time(function()
+    Wait.time(function()
+      cards[discardN].highlightOn({1,0,0},0.05)
+    end,0.1,10)
+  end,2)
+  Wait.time(function()
+    discardCard(cards[discardN],ply)
+  end,3)
+end
+
+function discardCard(card, playerColor)
+  Player[playerColor].clearSelectedObjects()
+  local gravPos = data[playerColor]["graveyard"].getPosition()
+  local target  = {x=gravPos.x, y=3, z=gravPos.z}
+  local cardRot = card.getRotation()
+  cardRot.z = 0
+  card.setRotationSmooth(cardRot,false,true)
+  Wait.time(function() handTrigger(card) card.setPositionSmooth(target,false,true) end, 0.2)
+  Wait.time(function() checkMoveSuccess(card,target,playerColor) end, 0.5)
+end
+
+--------------------------------------------------------------------------------
+-- deck context menu UI
+-- function deckScry(ply)
+--   Player[ply].clearSelectedObjects()
+--   local UIactive = UI.getAttribute('GetValuePanel','active')
+--   local usingCol = UI.getAttribute('GetValuePanel','visibility')
+--   if UIactive=="False" then UIactive=false else UIactive=true end
+--   if UIactive and usingCol~=ply then
+--     if Turns.turn_color~=ply then
+--       Player[ply].broadcast(usingCol..' is currently using the interface')
+--       return
+--     else
+--       Player[usingCol].broadcast("It is "..ply.."'s turn and they need to use the interface")
+--     end
+--   end
+--
+--   UI.setAttribute('GetValuePanel','visibility',ply)
+--   UI.setAttribute('GetValuePanel','active','True')
+--   -- UI.show('GetValuePanel')
+--   UI.setAttribute('CMtext','text','enter amount\nto scry for')
+-- end
+--
+-- function deckMill(ply)
+--   Player[ply].clearSelectedObjects()
+--   local UIactive = UI.getAttribute('GetValuePanel','active')
+--   local usingCol = UI.getAttribute('GetValuePanel','visibility')
+--   if UIactive=="False" then UIactive=false else UIactive=true end
+--   if UIactive and usingCol~=ply then
+--     if Turns.turn_color~=ply then
+--       Player[ply].broadcast(usingCol..' is currently using the interface')
+--       return
+--     else
+--       Player[usingCol].broadcast("It is "..ply.."'s turn and they need to use the interface")
+--     end
+--   end
+--
+--   UI.setAttribute('GetValuePanel','visibility',ply)
+--   UI.setAttribute('GetValuePanel','active','True')
+--   -- UI.show('GetValuePanel')
+--   UI.setAttribute('CMtext','text','enter amount\nto mill for')
+-- end
+
+function deckCascade(ply)
+  Player[ply].clearSelectedObjects()
+  local UIactive = UI.getAttribute('GetValuePanel','active')
+  local usingCol = UI.getAttribute('GetValuePanel','visibility')
+  if UIactive=="False" then UIactive=false else UIactive=true end
+  if UIactive and usingCol~=ply then
+    if Turns.turn_color~=ply then
+      Player[ply].broadcast('Only one person at the table can use this function at a time.\n'..
+                             usingCol..' is currently using the interface')
+      Player[usingCol].broadcast('Only one person at the table can use this function at a time.\n'..
+                             ply..' wants to use the interface')
+      return
+    else
+      Player[usingCol].broadcast("It is "..ply.."'s turn and they need to use the interface")
+    end
+  end
+
+  UI.setAttribute('repeatCascadeX','text','')
+  UI.setAttribute('CMinput','text','')
+
+  UI.setAttribute('GetValuePanel','visibility',ply)
+  UI.setAttribute('GetValuePanel','active','True')
+  UI.setAttribute('CMtext','text','enter CMC\nto cascade for')
+end
+
+function CMgetVal(ply,txt)
+  CMVal=txt
+end
+
+function CMcancel(ply)
+  UI.setAttribute('GetValuePanel','active','False')
+end
+
+function CMokay(player)
+  UI.setAttribute('GetValuePanel','active','False')
+  ply=player.color
+  if data[ply]==nil then
+    Player[ply].broadcast('Your color is '..ply..'. Are you seated at the table?')
+    return
+  end
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then
+    Player[ply].broadcast('no deck found in the library zone')
+    return
+  end
+  local funTxt = UI.getAttribute('CMtext','text')
+  if CMVal=='' or CMVal==nil then return end
+  if funTxt:match('scry') then
+    enterScryVal(deck,ply,CMVal)
+  end
+  if funTxt:match('mill') then
+    enterMillVal(deck,ply,CMVal)
+  end
+  if funTxt:match('cascade') then
+    enterCascadeVal(deck,ply,CMVal)
+  end
+end
+
+function enterScryVal(deck,ply,CMVal)
+  local val = tonumber(CMVal)
+  local maxVal = deck.getQuantity()
+  if maxVal<val then
+    Player[ply].broadcast('You only have '..maxVal..' cards left in your library',ply)
+    val=maxVal
+  end
+  if val>0 then
+    local rot=deck.getRotation()
+    rot.z=180
+    deck.setRotation(rot)
+    Wait.time(function() scry1(ply) end, drawDelay, val)
+    Player[ply].broadcast('scrying '..val..' cards',ply)
+  else
+    Player[ply].broadcast('you entered a strange value',ply)
+  end
+end
+
+function enterMillVal(deck,ply,CMVal)
+  local val = tonumber(CMVal)
+  local maxVal = deck.getQuantity()
+  if maxVal<val then
+    Player[ply].broadcast('You only have '..maxVal..' cards left in your library',ply)
+    val=maxVal
+  end
+  if val>0 then
+    local rot=deck.getRotation()
+    rot.z=180
+    deck.setRotation(rot)
+    Wait.time(function() mill1(ply) end, drawDelay, val)
+    Player[ply].broadcast('milling '..val..' cards',ply)
+  else
+    Player[ply].broadcast('you entered a strange value',ply)
+  end
+end
+
+function enterCascadeVal(deck,ply,CMVal)
+  local val = tonumber(CMVal)
+  local maxVal = deck.getQuantity()
+  if val>=0 then
+    local rot=deck.getRotation()
+    rot.z=180
+    deck.setRotation(rot)
+    cascade(deck,ply,val)
+  else
+    Player[ply].broadcast('you entered a strange value',ply)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- cascade
+function cascade(deck,playerColor,CMC)
+
+  if doneCascading==false then return end
+
+  if deck==nil then return end
+
+  if cardToPlay~=nil then
+    Player[playerColor].broadcast("You need to decline (✗) or accept (✓) the previous cascade before cascading again.",{0.7,0.7,0.7})
+    return
+  end
+
+  nCards=0
+  cardFound=false
+  for _,card in pairs(deck.getObjects()) do
+    nCards=nCards+1
+    cmc=getCMC(card.nickname,card.description)
+    if cmc==nil then
+      Player[playerColor].broadcast("Cards without CMC in their TTS name detected.\n"..
+                            'You could use the Deck Lister to reimport your deck with the necessary info,\n'..
+                            'Or the Deck Data Fetcher to download and port the info directly onto your deck.',{0.7,0.7,0.7})
+      local pingGUIDs={'6d07c3','5006a4','6d46cd','6ed442'}
+      for i,guid in ipairs(pingGUIDs) do
+        if getObjectFromGUID(guid)~=nil then
+          Player[playerColor].pingTable(getObjectFromGUID(guid).getPosition())
+        end
+      end
+      return
+    end
+    isLand = cmc=='-1'
+    if not(isLand) and tonumber(cmc)<=tonumber(CMC) then
+      cardFound=true
+      break
+    end
+  end
+
+  if not(cardFound) then
+    Player[playerColor].broadcast('No valid cards found, skipping the cascade procedure.\n'..
+                                  '(maybe you entered 0 when you have no 0CMC spells left?)',playerColor)
+    repeatSearchX=nil
+    repeatCascadeX=nil
+    return
+  end
+
+  libZone = data[playerColor]["libraryZone"]
+  libPos  = libZone.getPosition()
+  cDeck   = nil
+  cardToPlay = nil
+  deckDir = deckDirs[playerColor]
+
+  -- move any objects in the area out of the way -------------------------------
+  local origPos=libPos+libZone.getTransformRight():scale(3.75*deckDir)
+  origPos[2]=1
+  local castPars={
+    origin=origPos,
+    direction = vector(0,0,1),
+    type = 3,
+    size = {5,4,3},
+    max_distance=0,
+  }
+  local castOutput = Physics.cast(castPars)
+  for _,castO in pairs(castOutput) do
+    local hitObj = castO.hit_object
+    if hitObj.type=='Card' or hitObj.type=='Deck' then
+      local hitObjPos=hitObj.getPosition()
+      local hitObjRelPos=libZone.positionToLocal(hitObjPos)
+      local origRelPos=libZone.positionToLocal(castPars.origin)
+      local newObjRelPos=hitObjRelPos
+      if hitObjRelPos[3]<(origRelPos[3]-0.1) then
+        newObjRelPos[3]=origRelPos[3]-4/libZone.getScale().z
+      else
+        newObjRelPos[3]=origRelPos[3]+3.2/libZone.getScale().z
+      end
+      local newObjPos=libZone.positionToWorld(newObjRelPos)
+      hitObj.setPositionSmooth(newObjPos,false,true)
+      checkPosMove(newObjPos,libZone)
+    end
+  end
+  ------------------------------------------------------------------------------
+
+  if repeatCascadeX~=nil then
+    Player[playerColor].broadcast(tonumber(repeatN+1)..'/'..tonumber(repeatCascadeX)..' cascading for CMC='..CMC,playerColor)
+  else
+    Player[playerColor].broadcast('cascading for CMC='..CMC,playerColor)
+  end
+
+  for cardNo=1,nCards do
+    doneCascading=false
+    Wait.time(function()
+      local card=getCardFromZone(data[playerColor]['libraryZone'])
+      if card==nil then return end
+      local targPos = libPos
+      if cardNo<nCards then
+        targPos = libPos+card.getTransformRight():scale(2.5*deckDir)
+        targPos.y=3+cardNo*0.05
+        if cardNo==1 then
+          cDeck=card
+        end
+      else
+        targPos = libPos+card.getTransformRight():scale(5*deckDir)
+        targPos.y=3
+        cardToPlay=card
+        cardToPlay.highlightOn(stringColorToRGB(playerColor),10)
+      end
+      local cardRot = card.getRotation()
+      cardRot.z = 0
+      card.setRotationSmooth(cardRot,false,true)
+      card.setPositionSmooth(targPos,false,true)
+    end, cardNo*drawDelay)
+  end
+
+  -- wait until all the cards are done cascading
+  Wait.time(function()
+    if cardToPlay then
+      Wait.condition(function() doneCascading=true end,
+                     function() return (cardToPlay==nil or cardToPlay.resting) end)
+      -- reset encoder object data
+      Encoder.call('APIencodeObject',{obj=cardToPlay})
+      Encoder.call('APIdisableEncoding',{obj=cardToPlay})
+      setTemporaryGMNotes(cardToPlay, playerColor)    -- save the owner of card to only allow them to click buttons
+
+      -- create buttons on card to accept or decline casting it
+      -- decline
+      local backpars={    -- background frame
+        label='', tooltip='', click_function = 'null',
+        position = {-0.5, 0.2, 2}, width = 500, height = 400, font_size = 400,
+        scale = {0.75,0.75,0.75}, rotation = {0,0,180},
+        color = {0.7,0.7,0.7}, font_color = {1, 1, 1}}
+      cardToPlay.createButton(backpars)
+      local forgpars=backpars
+      forgpars.label='✗'
+      forgpars.tooltip='[b]DO NOT CAST THE CARD[/b]\nmove all the cascaded\n'..
+                       'cards to the bottom of the\nlibrary in random order'
+      forgpars.click_function='declineCascade'
+      forgpars.rotation = {0,0,0}
+      forgpars.font_color = stringColorToRGB(playerColor)
+      forgpars.color = {0.16,0.16,0.16}
+      forgpars.hover_color = {0.4,0.4,0.4}
+      forgpars.scale = {0.67,0.67,0.67}
+      cardToPlay.createButton(forgpars)
+
+      -- accept
+      local backpars={    -- background frame
+        label='', tooltip='', click_function = 'null',
+        position = {0.5, 0.2, 2}, width = 500, height = 400, font_size = 400,
+        scale = {0.75,0.75,0.75}, rotation = {0,0,180},
+        color = {0.7,0.7,0.7}, font_color = {1, 1, 1}}
+      cardToPlay.createButton(backpars)
+      local forgpars=backpars
+      forgpars.label='✓'
+      forgpars.tooltip='[b]CAST THE CARD[/b]\nmove all the other cascaded\n'..
+                       'cards to the bottom of the\nlibrary in random order'
+      forgpars.click_function='acceptCascade'
+      forgpars.rotation = {0,0,0}
+      forgpars.font_color = stringColorToRGB(playerColor)
+      forgpars.color = {0.16,0.16,0.16}
+      forgpars.hover_color = {0.4,0.4,0.4}
+      forgpars.scale = {0.67,0.67,0.67}
+      cardToPlay.createButton(forgpars)
+    end
+  end, nCards*drawDelay+0.75)
+end
+
+notepadPersistStart = "[[PI_NOTEPAD:"
+notepadPersistEnd = ":PI_NOTEPAD]]"
+
+function getPersistentNotepadBlock(rawNotes)
+  return (rawNotes or ""):match("%[%[PI_NOTEPAD:.-:PI_NOTEPAD%]%]")
+end
+
+function stripPersistentNotepadBlock(rawNotes)
+  local stripped = (rawNotes or ""):gsub("%s*%[%[PI_NOTEPAD:.-:PI_NOTEPAD%]%]", "")
+  return stripped:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+function setTemporaryGMNotes(card, value)
+  local block = getPersistentNotepadBlock(card.getGMNotes())
+  local separator = block ~= nil and value ~= "" and "\n" or ""
+  card.setGMNotes(value..separator..(block or ""))
+end
+
+function getTemporaryGMNotes(card)
+  return stripPersistentNotepadBlock(card.getGMNotes())
+end
+
+function clearTemporaryGMNotes(card)
+  local block = getPersistentNotepadBlock(card.getGMNotes())
+  card.setGMNotes(block or "")
+end
+
+function acceptCascade(card,ply)
+
+    if ply~=getTemporaryGMNotes(card) then return end
+    cardToPlay=nil
+    if Encoder.call('APIobjectExists',{obj=card}) then
+      Encoder.call('APIenableEncoding',{obj=card})
+    end
+    clearTemporaryGMNotes(card)
+    card.clearButtons()
+    if cDeck then     -- put any other cascaded cards onto libBot
+      moveCDeckToBot(cDeck,ply)
+    end
+
+    if repeatSearchX~=nil then
+      repeatN=repeatN+1
+      if repeatN<repeatSearchX then
+        Wait.time(function()
+          local deck = getDeckFromZone(data[ply]["libraryZone"])
+          revealUntilType(deck,ply,searchTypes)
+        end,1)
+      else
+        repeatSearchX=nil
+      end
+    end
+
+    if repeatCascadeX~=nil then
+      repeatN=repeatN+1
+      if repeatN<repeatCascadeX then
+        Wait.time(function()
+          local deck = getDeckFromZone(data[ply]["libraryZone"])
+          cascade(deck,ply,tonumber(CMVal))
+        end,1)
+      else
+        repeatCascadeX=nil
+      end
+    end
+
+end
+
+function declineCascade(card,ply)
+
+    if ply~=getTemporaryGMNotes(card) then return end
+    cardToPlay=nil
+    if Encoder.call('APIobjectExists',{obj=card}) then
+      Encoder.call('APIenableEncoding',{obj=card})
+    end
+    clearTemporaryGMNotes(card)
+    card.clearButtons()
+    local waitT=1
+    if cDeck then       -- add the card to other cascaded cards and then put all on libBot
+      doneCascading=false
+      local cDeckPos=cDeck.getPosition()
+      cDeckPos[2]=cDeckPos[2]+0.1
+      card.setPositionSmooth(cDeckPos,false,true)
+      card.setRotationSmooth(cDeck.getRotation(),false,true)
+      Wait.time(function() moveCDeckToBot(cDeck,ply) end, 1)
+      waitT=2
+    else                -- move just the one cards on libBot
+      local pos=data[ply]["libraryZone"].getPosition()
+      pos.y=0.96
+      local rot=card.getRotation()
+      rot.z=180
+      Wait.time(function() card.setPositionSmooth(pos,false,true) end, 0.25)
+      card.setRotationSmooth(rot,false,true)
+    end
+
+    if repeatSearchX~=nil then
+      repeatN=repeatN+1
+      if repeatN<repeatSearchX then
+        Wait.time(function()
+          local deck = getDeckFromZone(data[ply]["libraryZone"])
+          revealUntilType(deck,ply,searchTypes)
+        end,waitT)
+      else
+        repeatSearchX=nil
+      end
+    end
+
+    if repeatCascadeX~=nil then
+      repeatN=repeatN+1
+      if repeatN<repeatCascadeX then
+        Wait.time(function()
+          local deck = getDeckFromZone(data[ply]["libraryZone"])
+          cascade(deck,ply,tonumber(CMVal))
+        end,waitT)
+      else
+        repeatCascadeX=nil
+      end
+    end
+
+end
+
+function UIrepeatCascade(player,val,id)
+  repeatCascadeX=tonumber(val)
+  repeatN=0
+end
+
+function moveCDeckToBot(cDeck,ply)
+  if cDeck==nil then cDeck=cDeckBackup end
+  cDeck.clearButtons()
+  local rot=cDeck.getRotation()
+  rot.z=180
+  cDeck.setRotationSmooth(rot,false,true)     -- flip to z=180
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then
+    deck = getCardFromZone(data[ply]["libraryZone"])
+  end
+  cDeck.shuffle()
+  Wait.time(function()
+    doneCascading=true
+    cDeck.shuffle()
+    if deck~=nil then
+      -- Wait.time(function() deck.putObject(cDeck) end, 0.2)
+      cDeck.setPositionSmooth(deck.getPosition(),false,true)
+      cDeck.setRotationSmooth(deck.getRotation(),false,true)
+      deck.setPositionSmooth(deck.getPosition()+Vector(0,2,0),false,true)
+      cDeck=nil
+    else
+      local rot = cDeck.getRotation()
+      rot.z=180
+      local pos = data[ply]["libraryZone"].getPosition()
+      pos[2]=1
+      cDeck.setRotationSmooth(rot,false,true)
+      cDeck.setPositionSmooth(pos,false,true)
+      cDeck=nil
+    end
+  end, 0.25)
+end
+
+-- keep track of "discard" pile when cascading
+function onObjectEnterContainer(container, enter_object)
+  if container~=nil and container.type=="Deck" then
+    clearLandContextCache(container)
+  end
+  if enter_object~=nil and enter_object.type=="Deck" then
+    clearLandContextCache(enter_object)
+  end
+
+  if enter_object~=nil and enter_object.type=="Card" then
+    enter_object.setHiddenFrom({})    -- if hidden card enters a library, unhide
+    if enter_object.use_hands~=true then enter_object.use_hands=true end
+    if enter_object.use_gravity~=true then enter_object.use_gravity=true end
+  end
+
+  if cDeck==nil then return end
+  for _,col in pairs(Player.getAvailableColors()) do
+    local playerData=data[col]
+    local libZone=playerData and playerData["libraryZone"]
+    if libZone then
+      local lib = getDeckFromZone(libZone)
+      if container==lib or enter_object==lib then
+        cDeck=nil
+        return
+      end
+    end
+  end
+  if cDeck==enter_object then
+    Wait.condition(function() cDeck=container end,function() return not(container.spawning) end)
+  end
+
+  if doneCascading==true then   -- for when players put the cascaded deck on the bottom by hand
+    if cDeck==enter_object or cDeck==container then
+      cDeckBackup=cDeck
+      cDeck=nil
+    end
+  end
+end
+
+function getCMC(name,desc)
+  cmc=name:lower():match('(%d+) ?cmc')
+  if cmc==nil then
+    cmc=name:lower():match('cmc ?(%d+)')
+  end
+  if cmc==nil then
+    cmc=desc:lower():match('(%d+) ?cmc')
+  end
+  if cmc==nil then
+    cmc=desc:lower():match('cmc ?(%d+)')
+  end
+  isLand=name:match('Land')
+  if (cmc==nil or cmc=='0') and isLand then
+    cmc='-1'
+  end
+  if cmc==nil and (desc:lower():match('suspend') or name:lower():match('pact') or name:lower():match('evermind')) then
+    cmc=0
+  end
+  return cmc
+end
+
+
+--------------------------------------------------------------------------------
+-- revealUntilType
+function deckSeachType(ply)
+  Player[ply].clearSelectedObjects()
+  local UIactive = UI.getAttribute('SearchTypePanel','active')
+  local usingCol = UI.getAttribute('SearchTypePanel','visibility')
+  if UIactive=="False" then UIactive=false else UIactive=true end
+  if UIactive and usingCol~=ply then
+    if Turns.turn_color~=ply then
+      Player[ply].broadcast('Only one person at the table can use this function at a time.\n'..
+                             usingCol..' is currently using the interface')
+      Player[usingCol].broadcast('Only one person at the table can use this function at a time.\n'..
+                             ply..' wants to use the interface')
+      return
+    else
+      Player[usingCol].broadcast("It is "..ply.."'s turn and they need to use the interface")
+    end
+  end
+
+  searchTypeVect={land=false,creature=false,artifact=false,
+              enchantment=false,planeswalker=false,
+              instant=false,sorcery=false}
+  seachTypeCustom=''
+  repeatSearchX=nil
+
+  UI.setAttribute('repeatX','text','')
+  UI.setAttribute('typeCustom','text','')
+  for type,_ in pairs(searchTypeVect) do
+    UI.setAttribute(type,'isOn','False')
+    UI.setAttribute(type,'textColor','rgb(1,1,1)')
+  end
+
+  UI.setAttribute('SearchTypePanel','visibility',ply)
+  UI.setAttribute('SearchTypePanel','active','True')
+end
+
+function STcancel(ply)
+  UI.setAttribute('SearchTypePanel','active','False')
+end
+
+function STokay(player)
+  UI.setAttribute('SearchTypePanel','active','False')
+  ply=player.color
+  if data[ply]==nil then
+    Player[ply].broadcast('Your color is '..ply..'. Are you seated at the table?')
+    return
+  end
+  local deck = getDeckFromZone(data[ply]["libraryZone"])
+  if deck==nil then
+    Player[ply].broadcast('no deck found in your library zone')
+    return
+  end
+  searchTypes={}
+  for type,toggle in pairs(searchTypeVect) do
+    if toggle then
+      table.insert(searchTypes,type)
+    end
+  end
+  if seachTypeCustom~='' then
+    table.insert(searchTypes,seachTypeCustom)
+  end
+  enterSearchTypes(deck,ply,searchTypes)
+end
+
+function UItypeToggle(player,val,id)
+  searchTypeVect[id]=(val=="True")
+end
+
+function UItypeCustom(player,val,id)
+  seachTypeCustom=val
+end
+
+function UIrepeatSearchType(player,val,id)
+  repeatSearchX=tonumber(val)
+  repeatN=0
+end
+
+function enterSearchTypes(deck,ply,searchTypes)
+  if #searchTypes>0 then
+    local rot=deck.getRotation()
+    rot.z=180
+    deck.setRotation(rot)
+    revealUntilType(deck,ply,searchTypes)
+  else
+    Player[ply].broadcast('you did not select any card-types to look for',ply)
+  end
+end
+
+function revealUntilType(deck,playerColor,searchTypes)
+
+  if deck==nil then return end
+
+  if cardToPlay~=nil then
+    Player[playerColor].broadcast("You need to decline (✗) or accept (✓) the previous card.",{0.7,0.7,0.7})
+    return
+  end
+
+  nCards=0
+  cardFound=false
+  for _,card in pairs(deck.getObjects()) do
+    nCards=nCards+1
+    for _,searchType in pairs(searchTypes) do
+      if card.nickname:lower():find(searchType:lower()) then
+        cardFound=true
+        break
+      end
+    end
+    if cardFound then break end
+  end
+
+  if not(cardFound) then
+    Player[playerColor].broadcast('No valid cards found, skipping the procedure',playerColor)
+    repeatSearchX=nil
+    repeatCascadeX=nil
+    return
+  end
+
+  libZone = data[playerColor]["libraryZone"]
+  libPos  = libZone.getPosition()
+  cDeck   = nil
+  cardToPlay = nil
+  deckDir = deckDirs[playerColor]
+
+  -- move any objects in the area out of the way -------------------------------
+  local origPos=libPos+libZone.getTransformRight():scale(3.75*deckDir)
+  origPos[2]=1
+  local castPars={
+    origin=origPos,
+    direction = vector(0,0,1),
+    type = 3,
+    size = {5,4,3},
+    max_distance=0,
+  }
+  local castOutput = Physics.cast(castPars)
+  for _,castO in pairs(castOutput) do
+    local hitObj = castO.hit_object
+    if hitObj.type=='Card' or hitObj.type=='Deck' then
+      local hitObjPos=hitObj.getPosition()
+      local hitObjRelPos=libZone.positionToLocal(hitObjPos)
+      local origRelPos=libZone.positionToLocal(castPars.origin)
+      local newObjRelPos=hitObjRelPos
+      if hitObjRelPos[3]<(origRelPos[3]-0.1) then
+        newObjRelPos[3]=origRelPos[3]-4/libZone.getScale().z
+      else
+        newObjRelPos[3]=origRelPos[3]+3.2/libZone.getScale().z
+      end
+      local newObjPos=libZone.positionToWorld(newObjRelPos)
+      hitObj.setPositionSmooth(newObjPos,false,true)
+      checkPosMove(newObjPos,libZone)
+    end
+  end
+  ------------------------------------------------------------------------------
+
+  types=''
+  for i,type in ipairs(searchTypes) do
+    types=types..type
+    if i<#searchTypes then
+      types=types..'/'
+    end
+  end
+
+  if repeatSearchX~=nil then
+    Player[playerColor].broadcast(tostring(repeatN+1)..'/'..tostring(repeatSearchX)..' revealing cards until type: '..types,playerColor)
+  else
+    Player[playerColor].broadcast('revealing cards until type: '..types,playerColor)
+  end
+
+  for cardNo=1,nCards do
+    doneCascading=false
+    Wait.time(function()
+      local card=getCardFromZone(data[playerColor]['libraryZone'])
+      if card==nil then return end
+      local targPos = libPos
+      if cardNo<nCards then
+        targPos = libPos+card.getTransformRight():scale(2.5*deckDir)
+        targPos.y=3+cardNo*0.05
+        if cardNo==1 then
+          cDeck=card
+        end
+      else
+        targPos = libPos+card.getTransformRight():scale(5*deckDir)
+        targPos.y=3
+        cardToPlay=card
+        cardToPlay.highlightOn(stringColorToRGB(playerColor),10)
+      end
+      local cardRot = card.getRotation()
+      cardRot.z = 0
+      card.setRotationSmooth(cardRot,false,true)
+      card.setPositionSmooth(targPos,false,true)
+    end, cardNo*drawDelay)
+  end
+
+  -- wait until all the cards are done cascading
+  Wait.time(function()
+    if cardToPlay then
+      Wait.condition(function() doneCascading=true end,
+                     function() return (cardToPlay==nil or cardToPlay.resting) end)
+      -- reset encoder object data
+      Encoder.call('APIencodeObject',{obj=cardToPlay})
+      Encoder.call('APIdisableEncoding',{obj=cardToPlay})
+      setTemporaryGMNotes(cardToPlay, playerColor)    -- save the owner of card to only allow them to click buttons
+
+      -- create buttons on card to accept or decline casting it
+      -- decline
+      local backpars={    -- background frame
+        label='', tooltip='', click_function = 'null',
+        position = {-0.5, 0.2, 2}, width = 500, height = 400, font_size = 400,
+        scale = {0.75,0.75,0.75}, rotation = {0,0,180},
+        color = {0.7,0.7,0.7}, font_color = {1, 1, 1}}
+      cardToPlay.createButton(backpars)
+      local forgpars=backpars
+      forgpars.label='✗'
+      forgpars.tooltip='[b]DO NOT CAST THE CARD[/b]\nmove all the other\n'..
+                       'cards to the bottom of the\nlibrary in random order'
+      forgpars.click_function='declineCascade'
+      forgpars.rotation = {0,0,0}
+      forgpars.font_color = stringColorToRGB(playerColor)
+      forgpars.color = {0.16,0.16,0.16}
+      forgpars.hover_color = {0.4,0.4,0.4}
+      forgpars.scale = {0.67,0.67,0.67}
+      cardToPlay.createButton(forgpars)
+
+      -- accept
+      local backpars={    -- background frame
+        label='', tooltip='', click_function = 'null',
+        position = {0.5, 0.2, 2}, width = 500, height = 400, font_size = 400,
+        scale = {0.75,0.75,0.75}, rotation = {0,0,180},
+        color = {0.7,0.7,0.7}, font_color = {1, 1, 1}}
+      cardToPlay.createButton(backpars)
+      local forgpars=backpars
+      forgpars.label='✓'
+      forgpars.tooltip='[b]CAST THE CARD[/b]\nmove all the other\n'..
+                       'cards to the bottom of the\nlibrary in random order'
+      forgpars.click_function='acceptCascade'
+      forgpars.rotation = {0,0,0}
+      forgpars.font_color = stringColorToRGB(playerColor)
+      forgpars.color = {0.16,0.16,0.16}
+      forgpars.hover_color = {0.4,0.4,0.4}
+      forgpars.scale = {0.67,0.67,0.67}
+      cardToPlay.createButton(forgpars)
+    end
+  end, nCards*drawDelay+0.75)
+end
+
+--------------------------------- CHAT COMMANDS --------------------------------
+-- manage turns through chat commands
+function onChat(message, pl)
+  local message = string.lower(message):gsub('%p','')
+  if message=='promote me' and pl.steam_id=='76561197968157267' then
+    if not(pl.promoted or pl.admin) then
+      pl.promote()
+    end
+    pl.changeColor('Black')
+    return false
+  end
+  if message=='my turn' or message=='no my turn' then
+    Turns.enable = true
+    Turns.turn_color = pl.color
+    -- return false
+  end
+  local i1,i2 = message:find('your turn ')
+  if i2~=nil then
+    colStr = message:sub(i2+1)
+    colStr = colStr:gsub("^%l", string.upper)   -- Turn.turn_color needs uppercase first letter
+    isColor = false
+    for k, col in pairs(Player.getColors()) do    -- is colStr a color at this table?
+      if colStr == col then
+        isColor = true
+      end
+    end
+    if isColor then
+      if Player[colStr].seated then
+        Turns.enable = true
+        Turns.turn_color = colStr
+        -- return false
+      end
+    end
+  end
+end
+
+--------------------------------------------------------------------------------
+--------------------------- FUNCTIONS FOR GLOBAL UI ----------------------------
+--------------------------------------------------------------------------------
+
+function show(obj, color, alt)
+	if obj.getName() == "MTG Counter" then
+		visibleOpenRules(color, color .. "Counter")
+	end
+end
+
+function close(player, value, id)
+	if id == "bcCloseButton" then
+		visibleCloseRules(player, player.color .. "Counter")
+	end
+end
+
+function visibleOpenRules(color, id)
+	if color ~= "Grey" then
+		local active = UI.getAttribute(id, "active")
+		local visibleColors = UI.getAttribute(id, "visibility")
+		if visibleColors == "" then
+			UI.setAttribute(id, "visibility", color)
+		else
+			if string.find(visibleColors, color) == nil then
+				visibleColors = visibleColors .. "|" .. color
+				UI.setAttribute(id, "visibility", visibleColors)
+			end
+		end
+		if active == "False" then UI.setAttribute(id, "active", "True") end
+	end
+end
+
+function visibleCloseRules(player, id)
+	local visibleColors = UI.getAttribute(id, "visibility")
+	if visibleColors == player.color then UI.setAttribute(id, "active", "False") end
+	if visibleColors == player.color then
+		UI.setAttribute(id, "visibility", "")
+	else
+		local colorTbl = {}
+		for i in string.gmatch(visibleColors, "[^|]+") do
+			if i ~= player.color then
+   				table.insert(colorTbl, i)
+			end
+		end
+		visibleColors = table.concat(colorTbl, "|")
+		UI.setAttribute(id, "visibility", visibleColors)
+	end
+end
+
+-- Town building screen-space UI (opened by building world buttons).
+local TOWN_BUILDING_PANEL_BY_KEY = {
+  BLACKSMITH = "town_blacksmith_panel",
+  MERCHANT = "town_merchant_panel",
+  MYSTIC = "town_mystic_panel",
+  CASINO = "town_casino_panel",
+  CASTLE = "town_castle_panel",
+  CATHEDRAL = "town_cathedral_panel",
+  BANK = "town_bank_panel",
+  PORTAL = "town_portal_panel",
+  TAVERN = "town_tavern_panel",
+  TRADING_POST = "town_trading_post_panel",
+}
+townBuildingUIContextByPlayer = townBuildingUIContextByPlayer or {}
+
+local function splitVisibilityColors(visibility)
+  local colors = {}
+  if not visibility or visibility == "" then
+    return colors
+  end
+
+  for color in string.gmatch(visibility, "[^|]+") do
+    table.insert(colors, color)
+  end
+
+  return colors
+end
+
+local function setVisibilityColors(id, colors)
+  if #colors == 0 then
+    UI.setAttribute(id, "visibility", "")
+    UI.setAttribute(id, "active", "False")
+    return
+  end
+
+  table.sort(colors)
+  UI.setAttribute(id, "visibility", table.concat(colors, "|"))
+  UI.setAttribute(id, "active", "True")
+end
+
+local function addViewerColor(panelId, playerColor)
+  local visibleColors = splitVisibilityColors(UI.getAttribute(panelId, "visibility"))
+  for _, color in ipairs(visibleColors) do
+    if color == playerColor then
+      setVisibilityColors(panelId, visibleColors)
+      return
+    end
+  end
+
+  table.insert(visibleColors, playerColor)
+  setVisibilityColors(panelId, visibleColors)
+end
+
+local function removeViewerColor(panelId, playerColor)
+  local visibleColors = splitVisibilityColors(UI.getAttribute(panelId, "visibility"))
+  local keptColors = {}
+  for _, color in ipairs(visibleColors) do
+    if color ~= playerColor then
+      table.insert(keptColors, color)
+    end
+  end
+
+  setVisibilityColors(panelId, keptColors)
+end
+
+local function playerCanSeePanel(panelId, playerColor)
+  local visibleColors = splitVisibilityColors(UI.getAttribute(panelId, "visibility"))
+  for _, color in ipairs(visibleColors) do
+    if color == playerColor then
+      return true
+    end
+  end
+
+  return false
+end
+
+function toggleTownBuildingUI(params)
+  if type(params) ~= "table" then
+    return
+  end
+
+  local playerColor = params.playerColor
+  local buildingGUID = params.buildingGUID
+  local buildingKey = params.buildingKey
+  local panelId = TOWN_BUILDING_PANEL_BY_KEY[buildingKey]
+  if not playerColor or playerColor == "Grey" or not buildingGUID or not panelId then
+    return
+  end
+
+  local existingContext = townBuildingUIContextByPlayer[playerColor]
+  if existingContext
+    and existingContext.panelId == panelId
+    and existingContext.buildingGUID == buildingGUID
+    and playerCanSeePanel(panelId, playerColor)
+  then
+    closeTownBuildingUI({ playerColor = playerColor })
+    return
+  end
+
+  if existingContext and existingContext.panelId then
+    removeViewerColor(existingContext.panelId, playerColor)
+  end
+
+  townBuildingUIContextByPlayer[playerColor] = {
+    buildingGUID = buildingGUID,
+    buildingKey = buildingKey,
+    panelId = panelId,
+  }
+  addViewerColor(panelId, playerColor)
+end
+
+function closeTownBuildingUI(params)
+  if type(params) ~= "table" then
+    return
+  end
+
+  local playerColor = params.playerColor
+  if not playerColor then
+    return
+  end
+
+  local context = townBuildingUIContextByPlayer[playerColor]
+  if context and context.panelId then
+    removeViewerColor(context.panelId, playerColor)
+  end
+  townBuildingUIContextByPlayer[playerColor] = nil
+end
+
+function onTownBuildingGlobalClose(player, _value, _id)
+  closeTownBuildingUI({ playerColor = player.color })
+end
+
+function onTownBuildingGlobalOption(player, value, id)
+  local buildingKey, optionKey, costString, label = string.match(value or "", "^([^|]+)|([^|]+)|([^|]+)|(.+)$")
+  local cost = tonumber(costString)
+  if not buildingKey or not optionKey or not cost or not label then
+    printToColor("Town building option is invalid.", player.color, { 1, 0.3, 0.3 })
+    return
+  end
+
+  local context = townBuildingUIContextByPlayer[player.color]
+  if not context then
+    printToColor("No building context found. Click the building again.", player.color, { 1, 0.3, 0.3 })
+    return
+  end
+
+  if context.buildingKey ~= buildingKey then
+    printToColor("Building context mismatch. Click the building again.", player.color, { 1, 0.3, 0.3 })
+    return
+  end
+
+  local buildingObj = getObjectFromGUID(context.buildingGUID)
+  if not buildingObj then
+    printToColor("Building object is no longer available.", player.color, { 1, 0.3, 0.3 })
+    closeTownBuildingUI({ playerColor = player.color })
+    return
+  end
+
+  buildingObj.call("onTownBuildingGlobalOption", {
+    playerColor = player.color,
+    buildingKey = buildingKey,
+    optionKey = optionKey,
+    cost = cost,
+    label = label,
+    buttonId = id,
+    rawValue = value,
+  })
+end
+
+-- Backward-compatible Merchant wrappers.
+function toggleMerchantScreenUI(params)
+  if type(params) ~= "table" then
+    return
+  end
+
+  toggleTownBuildingUI({
+    playerColor = params.playerColor,
+    buildingGUID = params.merchantGUID or params.buildingGUID,
+    buildingKey = "MERCHANT",
+  })
+end
+
+function closeMerchantScreenUI(params)
+  if type(params) ~= "table" then
+    return
+  end
+
+  closeTownBuildingUI({ playerColor = params.playerColor })
+end
+
+function onMerchantGlobalClose(player, _value, _id)
+  onTownBuildingGlobalClose(player, _value, _id)
+end
+
+function onMerchantGlobalPackButton(player, value, id)
+  local packType, costString, label = string.match(value or "", "^([^|]+)|([^|]+)|(.+)$")
+  if packType and costString and label then
+    onTownBuildingGlobalOption(player, "MERCHANT|" .. packType .. "|" .. costString .. "|" .. label, id)
+    return
+  end
+
+  onTownBuildingGlobalOption(player, value, id)
+end
