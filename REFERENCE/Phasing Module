@@ -43,7 +43,7 @@ function createButtons(t)
     t.obj.createButton({
     label=temp, click_function='unPhased', function_owner=self,
     position={(0+offset_x)*flip*scaler.x,0.63*flip*scaler.z,(0+offset_y)*scaler.y}, height=1000, width=1500, font_size=200,color={0,0,0,1},font_color={0.6,0.6,1,1},
-    rotation={0,90,90-90*flip}, tooltip="This is Phased Out."
+    rotation={0,90,90-90*flip,tooltip="This is Phased Out."}
     })
   end
 end
@@ -76,7 +76,7 @@ function unPhased(obj,ply)
 			local selection =Player[ply].getSelectedObjects()
 			if selection ~= nil then
 				for k,v in pairs(selection) do
-					if v ~= obj and enc.call("APIobjectExists",{obj=v}) == true then 
+					if v ~= tar and enc.call("APIobjectExists",{obj=v}) == true then 
 						unPhased(v,0)
 					end
 				end
