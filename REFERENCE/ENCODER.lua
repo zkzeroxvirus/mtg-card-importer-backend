@@ -4,7 +4,7 @@
 -- https://steamcommunity.com/sharedfiles/filedetails/?id=828894732
 -- I will not provide support for my version -- I honestly don't remember what I changed to get it to work for me the way I needed
 -- just in case, I might have it set to non-interactable to filter out folks who can't script at all
--- Sirin here Further modified this thingy for his own needs
+
 
 --By Tipsy Hobbit
 mod_name = "Encoder"
@@ -47,19 +47,6 @@ basicstyleTableDefault = {
 
 --Use the API to access these.
 local EncodedObjects = {}
-local RebuildQueue = {}
-local RebuildQueued = {}
-local PendingDestroyRemoval = {}
-local ModuleRegistry = {}
-local ModuleEventSubscribers = {}
-local ModuleEventQueue = {}
-local ModuleEventQueued = {}
-local rebuildQueueActive = false
-local rebuildBatchSize = 2
-local rebuildQueueDelay = 0.05
-local moduleEventQueueActive = false
-local moduleEventBatchSize = 6
-local moduleEventQueueDelay = 0.03
 --[[
 Object Structure
 EncodedObjects[objID] = {
@@ -127,6 +114,100 @@ local Menus = {} --Menu Modules are always drawn.
   funcOwner = obj,
   activateFunc = func name --Encoder calls this to create the menus.
 ]]
+
+-- ENC4 save cache. Runtime behavior remains the original Encoder behavior;
+-- only persistence is incremental. Card records are re-encoded after a
+-- mutation, while module registries are re-encoded only after registration or
+-- player-level state changes.
+local EncoderSaveCache = {
+  cardFragments = {},
+  dirtyCards = {},
+  registryDirty = true,
+  registry = nil,
+  finalJSON = nil,
+  dirty = true
+}
+
+local function encoderGuid(objOrGuid)
+  if type(objOrGuid) == 'string' then return objOrGuid end
+  if objOrGuid == nil then return nil end
+  local ok,guid=pcall(function() return objOrGuid.getGUID() end)
+  return ok and guid or nil
+end
+
+local function markEncoderSaveDirty()
+  EncoderSaveCache.dirty = true
+  EncoderSaveCache.finalJSON = nil
+end
+
+local function markEncoderRegistryDirty()
+  EncoderSaveCache.registryDirty = true
+  markEncoderSaveDirty()
+end
+
+local function markEncoderCardDirty(objOrGuid)
+  local guid=encoderGuid(objOrGuid)
+  if guid ~= nil then EncoderSaveCache.dirtyCards[guid] = true end
+  markEncoderSaveDirty()
+end
+
+local function encodeStringMap(map)
+  local keys={}
+  for key,_ in pairs(map or {}) do keys[#keys+1]=key end
+  table.sort(keys)
+  local out={}
+  for _,key in ipairs(keys) do
+    out[#out+1]=JSON.encode(key)..':'..JSON.encode(map[key])
+  end
+  return '{'..table.concat(out,',')..'}'
+end
+
+local function encodeCardRecord(guid,record)
+  local live=getObjectFromGUID(guid)
+  record.this=live
+  if live == nil then return nil end
+  local tempThis=record.this
+  record.this=''
+  local encoded=JSON.encode(record)
+  record.this=tempThis
+  return encoded
+end
+
+local function encodeRegistryENC4()
+  local registry={properties={},zones={},values={},menus={}}
+  registry.players=JSON.encode(Players)
+  for i,v in pairs(Zones) do
+    if v.funcOwner ~= nil then
+      local owner=v.funcOwner
+      v.funcOwner=owner.getGUID()
+      registry.zones[i]=JSON.encode(v)
+      v.funcOwner=owner
+    end
+  end
+  for i,v in pairs(Properties) do
+    if v.funcOwner ~= nil then
+      local owner=v.funcOwner
+      v.funcOwner=owner.getGUID()
+      registry.properties[i]=JSON.encode(v)
+      v.funcOwner=owner
+    end
+  end
+  for i,v in pairs(Values) do
+    local validate=v.validate
+    v.validate=''
+    registry.values[i]=JSON.encode(v)
+    v.validate=validate
+  end
+  for i,v in pairs(Menus) do
+    if v.funcOwner ~= nil then
+      local owner=v.funcOwner
+      v.funcOwner=owner.getGUID()
+      registry.menus[i]=JSON.encode(v)
+      v.funcOwner=owner
+    end
+  end
+  return registry
+end
 
 
 
@@ -204,13 +285,10 @@ function onLoad(saved_data)
           EncodedObjects[i] = JSON.decode(v)
           EncodedObjects[i].this = getObjectFromGUID(i)
           if EncodedObjects[i].this == nil then
-            if EncodedObjects[i].inContainer ~= true then
-              EncodedObjects[i] = nil
-            end
+            EncodedObjects[i] = nil
           else
             local o = EncodedObjects[i].this
-            EncodedObjects[i].inContainer = nil
-            Wait.frames(function() queueRebuildButtons(o) end,2)
+            Wait.frames(function() buildButtons(o) end,2)
           end
         end
       end
@@ -303,57 +381,37 @@ end
 -- Saves core data on save triggers.
 ------------------------------------
 function onSave()
-  local data_to_save = {}
-  data_to_save["cards"] = {}
-  data_to_save["properties"] = {}
-  data_to_save["zones"] = {}
-  data_to_save["values"] = {}
-  data_to_save["players"] = JSON.encode(Players)
-  data_to_save["menus"] = {}
+  if EncoderSaveCache.dirty ~= true and EncoderSaveCache.finalJSON ~= nil then
+    return EncoderSaveCache.finalJSON
+  end
 
-  for i,v in pairs(EncodedObjects) do
-    --Removing Object reference before encoding.
-    EncodedObjects[i].this = getObjectFromGUID(i)
-    if EncodedObjects[i].this ~= nil or EncodedObjects[i].inContainer == true then
-      local tempThis = EncodedObjects[i].this
-      EncodedObjects[i].this = ""
-      data_to_save["cards"][i] = JSON.encode(EncodedObjects[i])
-      EncodedObjects[i].this = tempThis
+  local present={}
+  for guid,record in pairs(EncodedObjects) do
+    present[guid]=true
+    if EncoderSaveCache.cardFragments[guid] == nil or EncoderSaveCache.dirtyCards[guid] then
+      EncoderSaveCache.cardFragments[guid]=encodeCardRecord(guid,record)
     end
   end
-  for i,v in pairs(Zones) do
-    if Zones[i].funcOwner ~= nil then
-      local tempThis = Zones[i].funcOwner
-      Zones[i].funcOwner = Zones[i].funcOwner.getGUID()
-      data_to_save["zones"][i] = JSON.encode(Zones[i])
-      Zones[i].funcOwner = tempThis
+  for guid,_ in pairs(EncoderSaveCache.cardFragments) do
+    if present[guid] ~= true or getObjectFromGUID(guid) == nil then
+      EncoderSaveCache.cardFragments[guid]=nil
     end
   end
-  for i,v in pairs(Properties) do
-    --Removing Object reference before encoding.
-    if Properties[i].funcOwner ~= nil then
-      local tempThis = Properties[i].funcOwner
-      Properties[i].funcOwner = Properties[i].funcOwner.getGUID()
-      data_to_save["properties"][i] = JSON.encode(Properties[i])
-      Properties[i].funcOwner = tempThis
-    end
+  EncoderSaveCache.dirtyCards={}
+
+  if EncoderSaveCache.registryDirty or EncoderSaveCache.registry == nil then
+    EncoderSaveCache.registry=encodeRegistryENC4()
+    EncoderSaveCache.registryDirty=false
   end
-  for i,v in pairs(Values) do
-    local tempThis = Values[i].validate
-    Values[i].validate = ''
-    data_to_save["values"][i] = JSON.encode(Values[i])
-    Values[i].validate = tempThis
-  end
-  for i,v in pairs(Menus) do
-    if Menus[i].funcOwner ~= nil then
-      local tempThis = Menus[i].funcOwner
-      Menus[i].funcOwner = Menus[i].funcOwner.getGUID()
-      data_to_save["menus"][i] = JSON.encode(Menus[i])
-      Menus[i].funcOwner = tempThis
-    end
-  end
-  saved_data = JSON.encode(data_to_save)
-  return saved_data
+  local registry=EncoderSaveCache.registry
+  EncoderSaveCache.finalJSON='{"f":"ENC4","cards":'..encodeStringMap(EncoderSaveCache.cardFragments)
+    ..',"properties":'..encodeStringMap(registry.properties)
+    ..',"zones":'..encodeStringMap(registry.zones)
+    ..',"values":'..encodeStringMap(registry.values)
+    ..',"players":'..JSON.encode(registry.players)
+    ..',"menus":'..encodeStringMap(registry.menus)..'}'
+  EncoderSaveCache.dirty=false
+  return EncoderSaveCache.finalJSON
 end
 
 -- Calls the version check for the encoder, and any modules
@@ -490,19 +548,15 @@ function onObjectEnterZone(zone, obj)
     --log("Object has entered zone: "..Zones[zone.getGUID()].name)
     self.call(Zones[zone.getGUID()].func_enter,{obj})
   end
-  queueModuleEvent("objectEnterZone", {obj = obj, zone = zone, zoneGUID = zone.getGUID()})
 end
 function onObjectLeaveZone(zone, obj)
   if Zones[zone.getGUID()] ~= nil then
     self.call(Zones[zone.getGUID()].func_leave,{obj})
   end
-  queueModuleEvent("objectLeaveZone", {obj = obj, zone = zone, zoneGUID = zone.getGUID()})
 end
 function onObjectLeaveContainer(ctr,obj)
   if EncodedObjects[obj.getGUID()] ~= nil then
-    PendingDestroyRemoval[obj.getGUID()] = nil
     EncodedObjects[obj.getGUID()].this = getObjectFromGUID(obj.getGUID())
-    EncodedObjects[obj.getGUID()].inContainer = nil
     if obj.use_hands == true then
       Wait.condition( function()
       Wait.condition(
@@ -512,51 +566,14 @@ function onObjectLeaveContainer(ctr,obj)
       function() return not obj.resting end)
     end
   end
-  queueModuleEvent("objectLeaveContainer", {obj = obj, container = ctr, containerGUID = ctr.getGUID()})
 end
-function onObjectEnterContainer(ctr,obj)
-  if obj == nil then return end
-  local guid = obj.getGUID()
-  if EncodedObjects[guid] ~= nil then
-    PendingDestroyRemoval[guid] = nil
-    EncodedObjects[guid].this = nil
-    EncodedObjects[guid].inContainer = true
-  end
-  queueModuleEvent("objectEnterContainer", {obj = obj, container = ctr, containerGUID = ctr.getGUID()})
-end
-
-function onObjectSpawn(obj)
-  queueModuleEvent("objectSpawn", {obj = obj})
-end
-
-function scheduleEncodedObjectRemoval(guid)
-  if guid == nil or EncodedObjects[guid] == nil then return end
-  if PendingDestroyRemoval[guid] == true then return end
-  PendingDestroyRemoval[guid] = true
-  Wait.frames(function()
-    PendingDestroyRemoval[guid] = nil
-    if EncodedObjects[guid] == nil then return end
-    local obj = getObjectFromGUID(guid)
-    if obj ~= nil then
-      EncodedObjects[guid].this = obj
-      EncodedObjects[guid].inContainer = nil
-      queueRebuildButtons(obj)
-    elseif EncodedObjects[guid].inContainer ~= true then
-      EncodedObjects[guid] = nil
-      RebuildQueued[guid] = nil
-    end
-  end, 30)
-end
-
-function handleObjectDestroyed(obj)
+function onObjectDestroyed(obj)
   if obj == self then
     for i,v in pairs(EncodedObjects) do
       EncodedObjects[i].this = getObjectFromGUID(i)
-      if v.this ~= nil then
-        v.this.clearButtons()
-        v.this.setName(v.oName)
-        v.this.clearContextMenu()
-      end
+      v.this.clearButtons()
+      v.this.setName(v.name)
+      v.this.clearContextMenu()
     end
 		for k,v in pairs(Player.getColors()) do
 			if v ~= "Grey" then
@@ -569,26 +586,8 @@ function handleObjectDestroyed(obj)
         o.destruct()
       end
     end
-  else
-    local guid = obj.getGUID()
-    if EncodedObjects[guid] ~= nil and EncodedObjects[guid].inContainer == true then
-      EncodedObjects[guid].this = nil
-    else
-      scheduleEncodedObjectRemoval(guid)
-    end
   end
 end
-
-function onObjectDestroyed(obj)
-  queueModuleEvent("objectDestroyed", {obj = obj})
-  handleObjectDestroyed(obj)
-end
-
-function onObjectDestroy(obj)
-  queueModuleEvent("objectDestroyed", {obj = obj})
-  handleObjectDestroyed(obj)
-end
-
 function onObjectDropped(c,obj)
   local ver = versionComp(Global.getVar('Encoder').getVar('version'),version)
   if ver == version and mod_name == 'Encoder' or Global.getVar('Encoder') == nil then
@@ -605,7 +604,6 @@ function onObjectDropped(c,obj)
   if obj.getVar("pID") ~= nil then
     obj.call("registerModule")
   end
-  queueModuleEvent("objectDropped", {obj = obj, color = c})
 end
 --Use a raycast to check if an object is resting in a hand or not.
 --Currently has a problem with tables that have multiple points of
@@ -633,164 +631,12 @@ function createEncoderButtons()
   end
 end
 
-function queueRebuildButtons(o, immediate)
-  if o == nil then return end
-  local guid = o.getGUID()
-  if EncodedObjects[guid] == nil then return end
-
-  if RebuildQueued[guid] ~= true then
-    RebuildQueued[guid] = true
-    if immediate == true then
-      table.insert(RebuildQueue, 1, o)
-    else
-      table.insert(RebuildQueue, o)
-    end
-  end
-
-  if rebuildQueueActive ~= true then
-    rebuildQueueActive = true
-    Timer.destroy("encoderRebuildQueue")
-    Timer.create({
-      identifier = "encoderRebuildQueue",
-      function_name = "ProcessRebuildQueue",
-      function_owner = self,
-      delay = rebuildQueueDelay
-    })
-  end
-end
-
-function ProcessRebuildQueue()
-  local processed = 0
-  while processed < rebuildBatchSize and #RebuildQueue > 0 do
-    local obj = table.remove(RebuildQueue, 1)
-    if obj ~= nil then
-      local guid = obj.getGUID()
-      RebuildQueued[guid] = nil
-      if EncodedObjects[guid] ~= nil then
-        pcall(function() buildButtons(obj) end)
-      end
-    end
-    processed = processed + 1
-  end
-
-  if #RebuildQueue > 0 then
-    Timer.destroy("encoderRebuildQueue")
-    Timer.create({
-      identifier = "encoderRebuildQueue",
-      function_name = "ProcessRebuildQueue",
-      function_owner = self,
-      delay = rebuildQueueDelay
-    })
-  else
-    rebuildQueueActive = false
-  end
-end
-
-function normalizeModuleEvents(events)
-  local out = {}
-  if type(events) == "table" then
-    for k,v in pairs(events) do
-      if type(k) == "number" then
-        out[v] = true
-      elseif v == true then
-        out[k] = true
-      end
-    end
-  elseif type(events) == "string" then
-    out[events] = true
-  end
-  return out
-end
-
-function moduleEventKey(eventName, params)
-  local guid = nil
-  if params ~= nil and params.obj ~= nil then
-    local ok, value = pcall(function() return params.obj.getGUID() end)
-    if ok then guid = value end
-  end
-  return tostring(eventName or "").."|"..tostring(guid or "").."|"..tostring(params and params.zoneGUID or "").."|"..tostring(params and params.containerGUID or "")
-end
-
-function queueModuleEvent(eventName, params)
-  if eventName == nil or ModuleEventSubscribers[eventName] == nil then return false end
-  if params == nil then params = {} end
-  params.event = eventName
-  local key = moduleEventKey(eventName, params)
-  if ModuleEventQueued[key] ~= true then
-    ModuleEventQueued[key] = true
-    table.insert(ModuleEventQueue, {key = key, event = eventName, params = params})
-  end
-
-  if moduleEventQueueActive ~= true then
-    moduleEventQueueActive = true
-    Timer.destroy("encoderModuleEventQueue")
-    Timer.create({
-      identifier = "encoderModuleEventQueue",
-      function_name = "ProcessModuleEventQueue",
-      function_owner = self,
-      delay = moduleEventQueueDelay
-    })
-  end
-  return true
-end
-
-function callModuleEventHandler(moduleID, eventName, params)
-  local mod = ModuleRegistry[moduleID]
-  if mod == nil or mod.owner == nil then return false end
-  local handler = mod.eventHandlers and mod.eventHandlers[eventName] or mod.eventHandler or "handleEncoderEvent"
-  if handler == nil or handler == "" then return false end
-  return safeModuleCall(mod.owner, handler, params)
-end
-
-function ProcessModuleEventQueue()
-  local processed = 0
-  while processed < moduleEventBatchSize and #ModuleEventQueue > 0 do
-    local entry = table.remove(ModuleEventQueue, 1)
-    if entry ~= nil then
-      ModuleEventQueued[entry.key] = nil
-      local subscribers = ModuleEventSubscribers[entry.event] or {}
-      for moduleID,_ in pairs(subscribers) do
-        callModuleEventHandler(moduleID, entry.event, entry.params)
-      end
-    end
-    processed = processed + 1
-  end
-
-  if #ModuleEventQueue > 0 then
-    Timer.destroy("encoderModuleEventQueue")
-    Timer.create({
-      identifier = "encoderModuleEventQueue",
-      function_name = "ProcessModuleEventQueue",
-      function_owner = self,
-      delay = moduleEventQueueDelay
-    })
-  else
-    moduleEventQueueActive = false
-  end
-end
-
-function removeEncodedObject(obj)
-  if obj == nil or obj == self then return end
-  local guid = obj.getGUID()
-  if EncodedObjects[guid] ~= nil then
-    PendingDestroyRemoval[guid] = nil
-    RebuildQueued[guid] = nil
-    EncodedObjects[guid] = nil
-  end
-end
-
 -- If the encoder is deleted, make sure to cleanup.
-function encodeObject(o, skipBuild)
+function encodeObject(o)
   if o.getVar('noencode') == true then
     return false
   end
-  local guid = o.getGUID()
-  if EncodedObjects[guid] ~= nil and o ~= self then
-    EncodedObjects[guid].this = o
-    EncodedObjects[guid].inContainer = nil
-    return false
-  end
-  if EncodedObjects[guid] == nil and o ~= self then
+  if EncodedObjects[o.getGUID()] == nil and o ~= self then
     EncodedObjects[o.getGUID()] = {
     this = o,
     oName = o.getName(),
@@ -800,12 +646,10 @@ function encodeObject(o, skipBuild)
     menus = {},
     editing = nil,
     flip = 1,
-    disable = false,
-    inContainer = nil
+    disable = false
     }
-    if skipBuild ~= true then
-      queueRebuildButtons(o)
-    end
+    markEncoderCardDirty(o)
+    buildButtons(o)
     -- buildContextMenu(o)
     return true
   end
@@ -822,6 +666,7 @@ function encodePlayer(c)
       style = "basic",
       menus = {}
     }
+    markEncoderRegistryDirty()
     --updateXML(c)
     return true
   end
@@ -865,18 +710,11 @@ end
 
 --Calls the menus/property modules createButtons funciton
 --  when updating a given object.
-function safeModuleCall(owner, functionName, params)
-  if owner == nil or functionName == nil then return false end
-  local ok = pcall(function() owner.call(functionName, params) end)
-  return ok
-end
-
 function buildButtons(o,h)
   if h == nil then
     h = handCheck(o)
   end
   if o==nil then return end
-  if EncodedObjects[o.getGUID()] == nil then return end
   if EncodedObjects[o.getGUID()].disable ~= true then
     o.clearButtons()
     o.clearInputs()
@@ -890,9 +728,9 @@ function buildButtons(o,h)
             v.visible_in_hand = 0
           end
           if h==true and v.visible_in_hand>=1 then
-            safeModuleCall(v.funcOwner, v.activateFunc, {obj=o})
+            v.funcOwner.call(v.activateFunc,{obj=o})
           elseif h~=true and v.visible_in_hand<=1 then
-            safeModuleCall(v.funcOwner, v.activateFunc, {obj=o})
+            v.funcOwner.call(v.activateFunc,{obj=o})
           end
         else
           --log(v.funcOwner,"Missing module for menu "..k,'missing_module')
@@ -904,16 +742,16 @@ function buildButtons(o,h)
             Properties[k].visible_in_hand = 0
           end
           if h==true and Properties[k].visible_in_hand>=1 then
-            safeModuleCall(Properties[k].funcOwner, "createButtons", {obj=o})
+            Properties[k].funcOwner.call("createButtons",{obj=o})
           elseif h~=true and Properties[k].visible_in_hand<=1 then
-            safeModuleCall(Properties[k].funcOwner, "createButtons", {obj=o})
+            Properties[k].funcOwner.call("createButtons",{obj=o})
           end
         end
       end
     else
       k = EncodedObjects[o.getGUID()].editing
       if Properties[k]~=nil and Properties[k].funcOwner~= nil then
-        safeModuleCall(Properties[k].funcOwner, "createButtons", {obj=o})
+        Properties[k].funcOwner.call("createButtons",{obj=o})
       end
       flip = EncodedObjects[o.getGUID()].flip
       temp = " X "
@@ -1003,6 +841,7 @@ function toggleProperty(o,p)
         EncodedObjects[o.getGUID()].values[v] = Values[v].default
       end
     end
+    markEncoderCardDirty(o)
     return EncodedObjects[o.getGUID()].encoded[p]
   elseif type(o) == 'String' and Players[o] ~= nil then
     local prop = Players[o].encoded[p]
@@ -1020,6 +859,7 @@ function toggleProperty(o,p)
         Players[o].values[v] = Values[v].default
       end
     end
+    markEncoderRegistryDirty()
     return Players[o].encoded[p]
   end
 end
@@ -1084,96 +924,11 @@ function APIregisterProperty(p)
   xml_index = tableindex
   }]]
   Properties[p.propID] = deepcopy(p)
+  markEncoderRegistryDirty()
   log(nil,Properties[p.propID].propID.." Registered",0)
   --buildPropFunction(p.propID)
 	--updateUI()
 end
-
-function APIregisterModule(p)
-  if p == nil then return false end
-  local moduleID = p.moduleID or p.propID or p.name
-  local owner = p.owner or p.funcOwner
-  if moduleID == nil or owner == nil then return false end
-
-  local old = ModuleRegistry[moduleID]
-  if old ~= nil and old.events ~= nil then
-    for eventName,_ in pairs(old.events) do
-      if ModuleEventSubscribers[eventName] ~= nil then
-        ModuleEventSubscribers[eventName][moduleID] = nil
-      end
-    end
-  end
-
-  local events = normalizeModuleEvents(p.events)
-  ModuleRegistry[moduleID] = {
-    moduleID = moduleID,
-    propID = p.propID,
-    owner = owner,
-    events = events,
-    methods = p.methods or {},
-    eventHandler = p.eventHandler,
-    eventHandlers = p.eventHandlers or {}
-  }
-
-  for eventName,_ in pairs(events) do
-    if ModuleEventSubscribers[eventName] == nil then ModuleEventSubscribers[eventName] = {} end
-    ModuleEventSubscribers[eventName][moduleID] = true
-  end
-
-  return true
-end
-
-function APIlistModules()
-  local data = {}
-  for moduleID,mod in pairs(ModuleRegistry) do
-    data[moduleID] = {
-      moduleID = moduleID,
-      propID = mod.propID,
-      events = deepcopy(mod.events or {}),
-      methods = deepcopy(mod.methods or {})
-    }
-  end
-  return data
-end
-
-function APIcallModule(p)
-  if p == nil or p.moduleID == nil or p.method == nil then return nil end
-  local mod = ModuleRegistry[p.moduleID]
-  if mod == nil or mod.owner == nil then return nil end
-  local ok, result = pcall(function()
-    return mod.owner.call(p.method, p.params or {})
-  end)
-  if ok then return result end
-  return nil
-end
-
-function APIemitEvent(p)
-  if p == nil or p.event == nil then return false end
-  return queueModuleEvent(p.event, p.params or p)
-end
-
-function APIbroadcastModules(p)
-  return APIemitEvent(p)
-end
-
-function APIqueueObjectUpdate(p)
-  if p == nil or p.obj == nil then return false end
-  queueRebuildButtons(p.obj, p.immediate == true)
-  return true
-end
-
-function APIgetModuleState(p)
-  if p == nil or p.obj == nil or p.propID == nil then return nil end
-  return APIobjGetPropData({obj = p.obj, propID = p.propID})
-end
-
-function APIsetModuleState(p)
-  if p == nil or p.obj == nil or p.propID == nil or p.data == nil then return false end
-  APIobjSetPropData({obj = p.obj, propID = p.propID, data = p.data})
-  if p.rebuild ~= false then queueRebuildButtons(p.obj) end
-  return true
-end
-
 --Lists currently registered properties.
 function APIgetPropsList(p)
   tags = {}
@@ -1253,6 +1008,7 @@ function APIregisterValue(p)
     Values[p.valueID]['validType']= p.validType
     Values[p.valueID]['desc']= p.desc ~= nil and p.desc or 'No Description Given'
     buildValueValidationFunction(p.valueID)
+    markEncoderRegistryDirty()
   --end
   --table.insert(Values[p.valueID]['props'],p.propID)
 end
@@ -1279,6 +1035,7 @@ function APIregisterMenu(p)
     activateFunc = p.activateFunc,
     visible_in_hand = p.visible_in_hand
    }
+  markEncoderRegistryDirty()
 end
 function APIlistMenus()
   data = {}
@@ -1311,6 +1068,7 @@ function APIobjSetMenuData(p)
     for k,v in pairs(p.data) do
       EncodedObjects[target].menus[p.menuID][k] = v
     end
+    markEncoderCardDirty(target)
   end
 end
 function APIobjGetMenus(p)
@@ -1330,6 +1088,7 @@ function APIobjToggleMenu(p)
     else
       EncodedObjects[target].menus[p.menuID].open = false
     end
+    markEncoderCardDirty(target)
   end
 end
 
@@ -1342,6 +1101,7 @@ function APIregisterStyle(p)
     desc = p.desc,
     styleTable = p.styleTable
   }
+  markEncoderRegistryDirty()
 end
 function APIlistStyles()
   data = {}
@@ -1382,6 +1142,7 @@ function APIregisterZone(p)
     func_leave = p.func_exit,
     funcOwner = p.funcOwner,
     color = p.color}
+  markEncoderRegistryDirty()
 end
 function APIlistZones()
   return Zones
@@ -1409,7 +1170,7 @@ end
 --OBJECT FUNCTIONS
 --registers a new object to be encoded.
 function APIencodeObject(p)
-  return encodeObject(p.obj, p.skipBuild == true or p.deferButtons == true)
+  encodeObject(p.obj)
 end
 --checks if a given object is encoded, returns BOOL
 function APIobjectExists(p)
@@ -1438,6 +1199,8 @@ function APIobjRemove(p)
   p.obj.setVar("noencode","Will no longer be encoded.")
   local e = EncodedObjects[p.obj.getGUID()]
   EncodedObjects[p.obj.getGUID()] = nil
+  EncoderSaveCache.cardFragments[p.obj.getGUID()] = nil
+  markEncoderSaveDirty()
   return e
 end
 --Clones object p.obj data to p.clone
@@ -1450,6 +1213,7 @@ function APIobjCloneData(p)
     end
     EncodedObjects[new_target] = deepcopy(EncodedObjects[target])
     EncodedObjects[new_target].this = p.new_obj
+    markEncoderCardDirty(new_target)
   end
 end
 function APIobjUpdateThis(p)
@@ -1476,7 +1240,7 @@ end
 function APIobjGetProps(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil then
-    return deepcopy(EncodedObjects[target].encoded)
+    return EncodedObjects[target].encoded
   end
 end
 --Set a prop to active or not: {obj=obj,data={propID=bool}}
@@ -1484,6 +1248,7 @@ function APIobjSetProps(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil then
     EncodedObjects[target].encoded = p.data
+    markEncoderCardDirty(target)
   end
 end
 --Call target properties activateFunc: {obj=obj,propID=propID,color=player.color,data=alt_click}
@@ -1524,6 +1289,7 @@ function APIobjResetProp(p)
     for k,v in pairs(Properties[p.propID].values) do
       EncodedObjects[target].values[v] = Values[v].default
     end
+    markEncoderCardDirty(target)
   end
 end
 
@@ -1537,7 +1303,7 @@ function APIobjGetValueData(p)
     end
     val = EncodedObjects[target].values[p.valueID]
     data = {}
-    data[p.valueID]=deepcopy(val)
+    data[p.valueID]=val
     return data
   end
 end
@@ -1545,12 +1311,14 @@ function APIobjSetValueData(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil and Values[p.valueID] ~= nil then
     EncodedObjects[target].values[p.valueID] = _G[p.valueID.."Validate"](p.data[p.valueID],EncodedObjects[target].values[p.valueID])
+    markEncoderCardDirty(target)
   end
 end
 function APIobjDefaultValue(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil and  Values[p.valueID] ~= nil then
     EncodedObjects[target].values[p.valueID] = Values[p.valueID].default
+    markEncoderCardDirty(target)
   end
 end
 --Get or Set value data based on propID. Returns and accepts an array of Key-Values. Key is a valid valueID.
@@ -1563,8 +1331,9 @@ function APIobjGetPropData(p)
       if EncodedObjects[target].values[v] == nil and  Values[v] ~= nil then
         EncodedObjects[target].values[v] = Values[v].default
       end
-      data[v]=deepcopy(EncodedObjects[target].values[v])
+      data[v]=EncodedObjects[target].values[v]
     end
+    markEncoderCardDirty(target)
     return data
   end
 end
@@ -1583,7 +1352,7 @@ end
 function APIobjGetAllData(p)
   local target = p.obj.getGUID()
   if EncodedObjects[target] ~= nil then
-   return deepcopy(EncodedObjects[target].values)
+   return EncodedObjects[target].values
   end
 end
 --{obj=obj,data={valueID=value}}
@@ -1597,6 +1366,7 @@ function APIobjSetAllData(p)
         --log(k,'Unknown value '..k..'.','value')
       end
     end
+    markEncoderCardDirty(target)
   end
 end
 
@@ -1633,6 +1403,7 @@ function APIplySetProps(p)
   local target = p.ply
   if Players[target] ~= nil then
     Players[target].encoded = p.data
+    markEncoderRegistryDirty()
   end
 end
 --Enable target prop: {ply=color,propID=propID}
@@ -1672,12 +1443,14 @@ function APIplySetValueData(p)
   local target = p.ply
   if Players[target] ~= nil and Values[p.valueID] ~= nil then
     Players[target].values[p.valueID] = _G[p.valueID.."Validate"](p.data[p.valueID],Players[target].values[p.valueID])
+    markEncoderRegistryDirty()
   end
 end
 function APIplyDefaultValue(p)
   local target = p.ply
   if Players[target] ~= nil and  Values[p.valueID] ~= nil then
     Players[target].values[p.valueID] = Values[p.valueID].default
+    markEncoderRegistryDirty()
   end
 end
 --Get or Set value data based on propID. Returns and accepts an array of Key-Values. Key is a valid valueID.
@@ -1703,6 +1476,7 @@ function APIplySetPropData(p)
         Players[target].values[v] = Values[v]["validate"](p.data[v],Players[target].values[v])
       end
     end
+    markEncoderRegistryDirty()
   end
 end
 --{ply=color}
@@ -1723,6 +1497,7 @@ function APIplySetAllData(p)
         --log(k,'Unknown value '..k..'.','value')
       end
     end
+    markEncoderRegistryDirty()
   end
 end
 
@@ -1735,8 +1510,10 @@ end
 function APIsetEditing(p)
   if p.obj ~= nil then
     EncodedObjects[p.obj.getGUID()].editing = p.propID
+    markEncoderCardDirty(p.obj)
   else
     Players[p.ply].editing = p.propID
+    markEncoderRegistryDirty()
   end
 end
 --gets current editing state, so that buttons don't overlap.
@@ -1752,14 +1529,17 @@ end
 function APIclearEditing(p)
   if p.obj ~= nil then
     EncodedObjects[p.obj.getGUID()].editing = nil
+    markEncoderCardDirty(p.obj)
   else
     Players[p.ply].editing = nil
+    markEncoderRegistryDirty()
   end
 end
 --Builds the card buttons for all enabled properties.
 function APIrebuildButtons(p)
   if p.obj ~= nil then
-    queueRebuildButtons(p.obj, p.immediate == true)
+    markEncoderCardDirty(p.obj)
+    buildButtons(p.obj)
   else
     updateXML(p.ply)
   end
@@ -1770,6 +1550,7 @@ end
 --Flips which side of the card the buttons show up on.
 function APIFlip(p)
   flipMenu(p.obj,p.flip)
+  markEncoderCardDirty(p.obj)
 end
 --Returns which side the menu is currently on.
 function APIgetFlip(p)
@@ -1781,6 +1562,7 @@ end
 function APIdisableEncoding(p)
   if EncodedObjects[p.obj.getGUID()] ~= nil then
     EncodedObjects[p.obj.getGUID()].disable = true
+    markEncoderCardDirty(p.obj)
     p.obj.clearButtons()
     p.obj.clearInputs()
   end
@@ -1788,6 +1570,7 @@ end
 function APIenableEncoding(p)
   if EncodedObjects[p.obj.getGUID()] ~= nil then
     EncodedObjects[p.obj.getGUID()].disable = false
+		markEncoderCardDirty(p.obj)
 		buildButtons(p.obj)
   end
 end
@@ -1806,6 +1589,7 @@ end
 --CLEANUP
 function APIremoveProperty(p)
   Properties[p.propID] = nil
+	markEncoderRegistryDirty()
 	--updateUI()
 end
 
@@ -1827,26 +1611,35 @@ function deepcopy(orig)
 end
 
 function garbageCollect()
+  local cardsChanged=false
+  local registryChanged=false
   for k,v in pairs(EncodedObjects) do
     if v.this == nil then
-      if getObjectFromGUID(k) == nil and v.inContainer ~= true then
+      if getObjectFromGUID(k) == nil then
         EncodedObjects[k] = nil
+        EncoderSaveCache.cardFragments[k]=nil
+        cardsChanged=true
       end
     end
   end
   for k,v in pairs(Properties) do
     if v.funcOwner == nil then
       Properties[k] = nil
+      registryChanged=true
     end
   end
   for k,v in pairs(Zones) do
     if v.funcOwner == nil then
       Zones[k] = nil
+      registryChanged=true
     end
   end
   for k,v in pairs(Menus) do
     if v.funcOwner == nil then
       Menus[k] = nil
+      registryChanged=true
     end
   end
+  if cardsChanged then markEncoderSaveDirty() end
+  if registryChanged then markEncoderRegistryDirty() end
 end
