@@ -192,11 +192,7 @@ function onObjectLeaveContainer(container, obj)
   if obj == nil or obj.type ~= "Card" then return end
   if readPersistedNote(obj) == nil then return end
   Wait.condition(
-    function()
-      restorePersistedNote(obj)
-      local enc = Global.getVar('Encoder')
-      if enc ~= nil then enc.call("APIrebuildButtons",{obj=obj}) end
-    end,
+    function() restorePersistedNote(obj) end,
     function() return obj == nil or not obj.spawning end,
     2
   )
@@ -230,8 +226,13 @@ function restorePersistedNote(obj)
   end
 
   local data = enc.call("APIobjGetPropData",{obj=obj,propID=pID})
-  data.note = persistedNote
-  enc.call("APIobjSetPropData",{obj=obj,propID=pID,data=data})
+  local currentNote = data.note
+  if currentNote == nil
+    or currentNote.text ~= persistedNote.text
+    or currentNote.editON ~= persistedNote.editON then
+    data.note = persistedNote
+    enc.call("APIobjSetPropData",{obj=obj,propID=pID,data=data})
+  end
 end
 
 function persistNote(obj, noteData)
@@ -240,7 +241,8 @@ function persistNote(obj, noteData)
   local visibleNotes = stripPersistedNote(rawNotes)
   local encodedNote = JSON.encode(noteData)
   local separator = visibleNotes ~= "" and "\n" or ""
-  obj.setGMNotes(visibleNotes..separator..persistStart..encodedNote..persistEnd)
+  local updatedNotes = visibleNotes..separator..persistStart..encodedNote..persistEnd
+  if rawNotes ~= updatedNotes then obj.setGMNotes(updatedNotes) end
 end
 
 function clearPersistedNote(obj)
