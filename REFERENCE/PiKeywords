@@ -7,28 +7,6 @@ This module adds keyword abilities.
 
 pID = "πKeywords"
 version = 3.14159
-local pendingKeywordDecalRefresh = {}
-local hubRegistered = false
-
-function getKeywordObjectGuid(obj)
-  if obj == nil then return nil end
-  local ok, guid = pcall(function() return obj.getGUID() end)
-  if ok then return guid end
-  return nil
-end
-
-function markKeywordDecalsDirty(obj)
-  local guid = getKeywordObjectGuid(obj)
-  if guid ~= nil then pendingKeywordDecalRefresh[guid] = true end
-end
-
-function consumeKeywordDecalsDirty(obj)
-  local guid = getKeywordObjectGuid(obj)
-  if guid == nil then return false end
-  local dirty = pendingKeywordDecalRefresh[guid] == true
-  pendingKeywordDecalRefresh[guid] = nil
-  return dirty
-end
 
 KeywordList={
   mtg_stuncounter=         {name=" Stun",
@@ -174,14 +152,6 @@ function registerModule(obj,ply)
       visible_in_hand=1
     }
     enc.call("APIregisterProperty",properties)
-    hubRegistered = enc.call("APIregisterModule", {
-      moduleID = pID,
-      propID = pID,
-      owner = self,
-      events = {"objectSpawn"},
-      eventHandler = "handleEncoderEvent",
-      methods = {"refreshKeywords"}
-    }) == true
   end
 end
 
@@ -249,13 +219,13 @@ function toggleStatus(obj,ply,alt,key)
         if data[key] ~= true then
           data[key] = true
           table.insert(activeIcons,key)
-          markKeywordDecalsDirty(obj)
+          updateDecals=true
         end
       else
         if data[key] ~= false then
           data[key] = false
           activeIcons = rmFromTable(activeIcons,key)
-          markKeywordDecalsDirty(obj)
+          updateDecals=true
       end
     end
 
@@ -272,13 +242,13 @@ function toggleStatus(obj,ply,alt,key)
       if alt ~= true then
         if data[key]==0 then
           table.insert(activeIcons,key)
-          markKeywordDecalsDirty(obj)
+          updateDecals=true
         end
         data[key] = data[key]+1
       else
         if data[key]==1 then
           activeIcons = rmFromTable(activeIcons,key)
-          markKeywordDecalsDirty(obj)
+          updateDecals=true
         end
         data[key] = data[key]-1
         if data[key]<0 then data[key]=0 end
@@ -309,7 +279,7 @@ function toggleLayout(obj,ply)
   else
     iconLayout='above'
   end
-  markKeywordDecalsDirty(obj)
+  updateDecals=true
   enc.call("APIobjSetValueData",{obj=obj,valueID='iconLayout',data={iconLayout=iconLayout}})
   enc.call("APIrebuildButtons",{obj=obj})
 end
@@ -318,13 +288,16 @@ function resetDecals(obj)
   -- reset decals, keeping any that are not from keywords
   local decals = obj.getDecals()
   local ndecals = {}
+  local removedKeyword = false
   if decals~=nil then
     for i,d in pairs(decals) do
       if not isKeyword(d.name) then
         table.insert(ndecals,d)
+      else
+        removedKeyword = true
       end
     end
-    obj.setDecals(ndecals)
+    if removedKeyword then obj.setDecals(ndecals) end
   end
 end
 
@@ -338,27 +311,8 @@ function isKeyword(str)
   return isKeyword
 end
 
-function hasKeywordDecals(obj, activeIcons)
-  if obj == nil or activeIcons == nil or #activeIcons == 0 then return true end
-  local decals = obj.getDecals()
-  if decals == nil then return false end
-
-  local found = {}
-  for _,d in pairs(decals) do
-    found[d.name] = true
-  end
-
-  for _,key in pairs(activeIcons) do
-    if KeywordList[key] ~= nil and found[KeywordList[key].name] ~= true then
-      return false
-    end
-  end
-  return true
-end
-
 function updateActiveIcons(data,obj)
   local activeIcons = data['activeIcons']
-  if activeIcons == nil then activeIcons = {} end
   local prevActiveIcons = activeIcons
   for i,key in pairs(activeIcons) do
     if data[key]==0 or data[key]==false then
@@ -368,12 +322,11 @@ function updateActiveIcons(data,obj)
   data['activeIcons'] = activeIcons
   enc.call("APIobjSetValueData",{obj=obj,valueID='activeIcons',data={activeIcons=activeIcons}})
 
-  local iconsChanged = false
   if table.concat(activeIcons)~=table.concat(prevActiveIcons) then
-    iconsChanged = true
+    updateDecals=true
   end
 
-  return activeIcons, iconsChanged
+  return activeIcons
 end
 
 function createButtons(t)
@@ -385,12 +338,7 @@ function createButtons(t)
     local scaler = {x=1,y=1,z=1}        --t.obj.getScale()
     local iconMenuOn  = data['iconMenuOn']
     local layout      = data['iconLayout']
-    local activeIcons, iconsChanged = updateActiveIcons(data,t.obj)
-    local updateDecals = consumeKeywordDecalsDirty(t.obj) or iconsChanged
-
-    if not hasKeywordDecals(t.obj, activeIcons) then
-      updateDecals=true
-    end
+    activeIcons = updateActiveIcons(data,t.obj)
 
     if updateDecals then
       resetDecals(t.obj)
@@ -508,6 +456,8 @@ function createButtons(t)
       end
     end
 
+    updateDecals=false
+
     -- menu
     if not iconMenuOn then
 
@@ -593,37 +543,14 @@ end   --end createButtons
 
 function null() end
 
-function refreshKeywords(params)
-  if params == nil or params.obj == nil then return end
-  markKeywordDecalsDirty(params.obj)
-  enc = Global.getVar('Encoder')
-  if enc ~= nil then enc.call("APIqueueObjectUpdate",{obj=params.obj}) end
-end
-
-function handleEncoderEvent(params)
-  if params == nil or params.event ~= "objectSpawn" then return end
-  local obj = params.obj
-  if obj == nil or obj.tag ~= "Card" then return end
-  enc = Global.getVar('Encoder')
-  if enc ~= nil then
-    if enc.call("APIobjIsPropEnabled",{obj=obj,propID=pID}) then
-      markKeywordDecalsDirty(obj)
-      enc.call("APIqueueObjectUpdate",{obj=obj})
-    else
-      resetDecals(obj)
-    end
-  end
-end
-
 -- prevent copy pasting emblems
 function onObjectSpawn(obj)
-  if hubRegistered then return end
-  if obj == nil or obj.tag ~= "Card" then return end
+  if obj == nil or obj.type ~= "Card" then return end
   enc = Global.getVar('Encoder')
   if enc ~= nil then
     if enc.call("APIobjIsPropEnabled",{obj=obj,propID=pID}) then
-      markKeywordDecalsDirty(obj)
-      enc.call("APIrebuildButtons",{obj=obj})
+      local t = {obj=obj}
+      createButtons(t)
     else
       resetDecals(obj)
     end
