@@ -50,8 +50,11 @@ function tToken(obj,ply)
   if enc ~= nil then
     enc.call("APItoggleProperty",{obj=obj,propID=pID})
     data = enc.call("APIobjGetPropData",{obj=obj,propID=pID})
-    data.mtg_token = enc.call("APIobjIsPropEnabled",{obj=obj,propID=pID}) == true
-    enc.call("APIobjSetPropData",{obj=obj,propID=pID,data=data})
+    if data.mtg_token ~= true then
+      data.mtg_token = true
+    else
+      data.mtg_token = false
+    end
     enc.call("APIrebuildButtons",{obj=obj})
   end
 end
@@ -68,7 +71,7 @@ function toggleToken(obj,ply)
       local selection =Player[ply].getSelectedObjects()
       if selection ~= nil then
         for k,v in pairs(selection) do
-          if v ~= obj and enc.call("APIobjectExists",{obj=v}) == true then
+          if v ~= tar and enc.call("APIobjExists",{obj=v}) == true then
             toggleToken(v,0)
           end
         end
