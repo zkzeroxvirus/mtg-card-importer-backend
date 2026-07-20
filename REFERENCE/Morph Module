@@ -1,7 +1,7 @@
 pID = 'MorphinTime'
 version = '1.2'
+local contextDebounce = {}
 --DXHHH101
-local pendingContextOptions = {}
 
 function onload()
 	Global.setVar('MorphinTime',self)
@@ -221,7 +221,6 @@ function createButtons(t)
 		local flip = enc.call("APIgetFlip",{obj=t.obj})
         local subMenuOpen = data['subMenuOpen']
         activeMode = data['activeMode']
-        if faceDownTypes[activeMode] == nil then activeMode = "mtg_faceDownCreature" end
         
         
 		if not subMenuOpen then
@@ -329,19 +328,20 @@ function setCardDetails(obj, data, isFlipped)
         
         local decals = obj.getDecals() --reset the decals
         if decals ~= nil then
-            local keptDecals = {}
-            for _,v in pairs(decals) do
-                if faceDownTypes[v.name] == nil then
-                    table.insert(keptDecals, v)
+            for k,v in pairs(decals) do
+                for ke,va in pairs(faceDownTypes) do
+                    if v.name == ke then
+                        table.remove(decals, k)
+                    end
                 end
             end
-            obj.setDecals(keptDecals)
+            
+            obj.setDecals(decals)
         end
         
         if (isFlipped) then --what side is it on
         
             activeMode = data['activeMode']
-            if faceDownTypes[activeMode] == nil then activeMode = "mtg_faceDownCreature" end
             modeData = faceDownTypes[activeMode]
             
             obj.setName(modeData.cardName)
@@ -366,15 +366,16 @@ function setCardDetails(obj, data, isFlipped)
 end
 
 function addContextOptions(obj)
-    if obj == nil or obj.type ~= 'Card' then return end
 
-    local guid = obj.getGUID()
-    if guid ~= nil and pendingContextOptions[guid] == true then return end
-    if guid ~= nil then pendingContextOptions[guid] = true end
+    if obj~=nil and obj.type=='Card' then
+        local guid=obj.getGUID()
+        if contextDebounce[guid] then return end
+        contextDebounce[guid]=true
 
         Wait.frames(function()        -- wait 1 frame to allow Global's context menu reset to take place first
-            if guid ~= nil then pendingContextOptions[guid] = nil end
-            if obj == nil or obj.type ~= 'Card' then return end
+
+            contextDebounce[guid]=nil
+            if obj==nil or obj.type~='Card' then return end
 
             enc = Global.getVar('Encoder')
             if enc ~= nil then
@@ -402,6 +403,8 @@ function addContextOptions(obj)
       
 
         end,1)
+    
+    end
   
 end
 
@@ -416,9 +419,8 @@ end
 function genericFlip(params) -- params is a table (obj, mode)
     obj = params[1]
     mode = params[2]
-    local enc = Global.getVar('Encoder')
     if enc ~= nil then
-        enc.call("APIencodeObject",{obj=obj, skipBuild=true})
+        enc.call("APIencodeObject",{obj=obj})
         local data = enc.call("APIobjGetPropData",{obj=obj,propID=pID})
         data['activeMode'] = mode
         enc.call("APIobjSetPropData",{obj=obj,propID=pID,data=data})
