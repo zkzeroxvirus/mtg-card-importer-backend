@@ -300,6 +300,12 @@ pendingTownCardObj   = nil   -- card object staged for Upgrade/Augment confirm
 pendingTownActionType = nil  -- "upgrade" or "augment" during confirm step
 townNoteValue        = ""    -- live value of the optional-note input field
 cathedralTextValue   = ""    -- live value of the Cathedral description input
+townRequestSequence  = 0
+townSubmissionInFlight = false
+bazaarTrade          = nil
+bazaarPartnerSlots   = {}
+bazaarCommitLog      = {}
+bonusBazaarFreeDeals = 0
 merchantPacksPurchasedThisTown = {}
 gamblersNeverQuitUsedThisTown = false  -- Gamblers Never Quit fires at most once per town
 
@@ -396,7 +402,7 @@ function removePendingTownAction(requestId, actionType)
       table.remove(pendingTownActions, i)
       return entry
     end
-    if fallbackIndex == nil and (actionType == nil or entry.type == actionType) then
+    if requestId == nil and fallbackIndex == nil and (actionType == nil or entry.type == actionType) then
       fallbackIndex = i
     end
   end
@@ -541,6 +547,75 @@ function getBuildingUsesThisTown(buildingKey)
   return buildingUsesThisTown[buildingKey] or 0
 end
 
+function getBazaarDealStatus()
+  return {
+    normalDeals = math.max(0, buildingUsesThisTown.Bazaar or 0) + math.max(0, bonusBuildingUsesGeneric or 0),
+    freeDeals = math.max(0, bonusBazaarFreeDeals or 0),
+  }
+end
+
+function grantAdditionalBazaarDeals(params)
+  local amount = type(params) == "table" and params.amount or params
+  amount = math.max(0, math.floor(tonumber(amount) or 0))
+  buildingUsesThisTown.Bazaar = math.max(0, buildingUsesThisTown.Bazaar or 0) + amount
+  return buildingUsesThisTown.Bazaar
+end
+
+function bazaarValidateCommit(params)
+  if type(params) ~= "table" or type(params.tradeId) ~= "string" then return false end
+  local prior = bazaarCommitLog[params.tradeId]
+  if prior and prior.status == "committed" then return true end
+  local delta = math.floor(tonumber(params.essenceDelta) or 0)
+  if delta < 0 and essence < -delta then return false end
+  if params.freeForBoth == true then
+    if params.useBonus == true and (bonusBazaarFreeDeals or 0) <= 0 then return false end
+    return true
+  end
+  return (buildingUsesThisTown.Bazaar or 0) > 0 or (bonusBuildingUsesGeneric or 0) > 0
+end
+
+function bazaarApplyCommit(params)
+  if not bazaarValidateCommit(params) then return false end
+  local prior = bazaarCommitLog[params.tradeId]
+  if prior and prior.status == "committed" then return true end
+  local snapshot = {
+    townDeals=buildingUsesThisTown.Bazaar or 0,
+    genericDeals=bonusBuildingUsesGeneric or 0,
+    freeDeals=bonusBazaarFreeDeals or 0,
+    essence=essence,
+  }
+  if params.freeForBoth == true then
+    if params.useBonus == true then bonusBazaarFreeDeals = bonusBazaarFreeDeals - 1 end
+  elseif (buildingUsesThisTown.Bazaar or 0) > 0 then
+    buildingUsesThisTown.Bazaar = buildingUsesThisTown.Bazaar - 1
+  else
+    bonusBuildingUsesGeneric = math.max(0, (bonusBuildingUsesGeneric or 0) - 1)
+  end
+  local delta = math.floor(tonumber(params.essenceDelta) or 0)
+  if delta ~= 0 then
+    applyEssenceDeltaTracked(delta, "Bazaar " .. params.tradeId .. " with " .. tostring(params.partner or "player"), true)
+  end
+  bazaarCommitLog[params.tradeId] = {status="committed",snapshot=snapshot}
+  markDirty()
+  notifyMasters()
+  return true
+end
+
+function bazaarRollbackCommit(params)
+  if type(params) ~= "table" then return false end
+  local prior = bazaarCommitLog[params.tradeId]
+  if not prior or prior.status ~= "committed" or type(prior.snapshot) ~= "table" then return true end
+  buildingUsesThisTown.Bazaar = prior.snapshot.townDeals or 0
+  bonusBuildingUsesGeneric = prior.snapshot.genericDeals or 0
+  bonusBazaarFreeDeals = prior.snapshot.freeDeals or 0
+  essence = clampEssence(prior.snapshot.essence or essence)
+  prior.status = "rolledback"
+  refreshXPDisplay()
+  notifyMasters()
+  markDirty()
+  return true
+end
+
 function markMerchantPackPurchased(packName)
   if not packName or packName == "" then return end
   merchantPacksPurchasedThisTown[packName] = true
@@ -660,15 +735,29 @@ function hasMTGSpawnerMethod(params)
     resetTownActions = true,
     applyTownCostModifiers = true,
     grantBonusBuildingUse = true,
+    grantAdditionalBazaarDeals = true,
     grantBasicLandAdds = true,
     enterSellMode = true,
     receiveTravelerEffect = true,
+    bazaarTradeUpdated = true,
+    bazaarTradeCompleted = true,
+    bazaarTradeCancelled = true,
+    bazaarValidateCommit = true,
+    bazaarApplyCommit = true,
+    bazaarRollbackCommit = true,
   })[methodName] == true
 end
 
 --==============================================================================
 -- onLoad / onSave / onDestroy
 --==============================================================================
+function loadSavedEssenceCategory(savedCategory, templateList)
+  if type(savedCategory) == "string" then
+    return deserializeCategory(savedCategory, templateList)
+  end
+  return mergeSavedCategory(savedCategory, templateList)
+end
+
 function onLoad(saved)
   resetMerchantTownLocks()
   -- Seed from current catalog templates first so newly added entries appear on older saves.
@@ -701,10 +790,10 @@ function onLoad(saved)
         end
         if type(data.essence) == "number" then essence = clampEssence(data.essence) end
         if type(data.essenceState) == "table" then
-          essenceState.crypt        = mergeSavedCategory(data.essenceState.crypt,        CRYPT_REWARDS)
-          essenceState.achievements = mergeSavedCategory(data.essenceState.achievements, ACHIEVEMENTS_LIST)
-          essenceState.tickets      = mergeSavedCategory(data.essenceState.tickets,      TICKETS_LIST)
-          essenceState.brands       = mergeSavedCategory(data.essenceState.brands,       BRANDS_LIST)
+          essenceState.crypt        = loadSavedEssenceCategory(data.essenceState.crypt,        CRYPT_REWARDS)
+          essenceState.achievements = loadSavedEssenceCategory(data.essenceState.achievements, ACHIEVEMENTS_LIST)
+          essenceState.tickets      = loadSavedEssenceCategory(data.essenceState.tickets,      TICKETS_LIST)
+          essenceState.brands       = loadSavedEssenceCategory(data.essenceState.brands,       BRANDS_LIST)
           if data.essenceState.captures ~= nil then
             essenceState.captures = ess_decodeCaptures(data.essenceState.captures)
           end
@@ -740,6 +829,7 @@ function onLoad(saved)
         if type(data.townResultQueue) == "table" then
           townResultQueue = data.townResultQueue
         end
+        if type(data.townRequestSequence) == "number" then townRequestSequence = math.max(0,math.floor(data.townRequestSequence)) end
         if type(data.buildingUsesThisTown) == "table" then
           buildingUsesThisTown = {}
           for key, val in pairs(data.buildingUsesThisTown) do
@@ -765,6 +855,13 @@ function onLoad(saved)
           -- Fallback: initialize if not in profile
           bonusBuildingUsesByKey = {}
         end
+        if type(data.bonusBazaarFreeDeals) == "number" then
+          bonusBazaarFreeDeals = math.max(0, math.floor(data.bonusBazaarFreeDeals))
+        elseif (bonusBuildingUsesByKey.Bazaar or 0) > 0 then
+          bonusBazaarFreeDeals = math.max(0, math.floor(bonusBuildingUsesByKey.Bazaar))
+          bonusBuildingUsesByKey.Bazaar = nil
+        end
+        if type(data.bazaarCommitLog) == "table" then bazaarCommitLog = data.bazaarCommitLog end
       end
     end
   end
@@ -804,7 +901,13 @@ function onSave()
     xp                           = xp,
     settings                     = settings,
     essence                      = essence,
-    essenceState                 = essenceState,
+    essenceState                 = {
+      crypt        = serializeCategory(essenceState.crypt),
+      achievements = serializeCategory(essenceState.achievements),
+      tickets      = serializeCategory(essenceState.tickets),
+      brands       = serializeCategory(essenceState.brands),
+      captures     = ess_serializeCaptures(essenceState.captures),
+    },
     localPlayerKey               = localPlayerKey,
     claimedPlayerName            = claimedPlayerName,
     claimedGuid                  = self.getGUID(),
@@ -815,13 +918,26 @@ function onSave()
     pendingTownActions           = pendingTownActions,
     townResultCards              = townResultCards,
     townResultQueue              = townResultQueue,
+    townRequestSequence          = townRequestSequence,
     buildingUsesThisTown         = buildingUsesThisTown,
     bonusBuildingUsesGeneric     = bonusBuildingUsesGeneric,
     bonusBuildingUsesByKey       = bonusBuildingUsesByKey,
+    bonusBazaarFreeDeals         = bonusBazaarFreeDeals,
+    bazaarCommitLog              = bazaarCommitLog,
   })
 end
 
 function onDestroy()
+  if bazaarTrade then
+    local trade=bazaarTrade
+    local mine=bazaarMySides(trade)
+    if mine and mine.offer then restoreBazaarOffer(mine.offer) end
+    local tokenGuid=self.getGUID()
+    pcall(function()
+      callBazaarMaster("cancelBazaarTrade",{tradeId=trade.id,tokenGuid=tokenGuid})
+    end)
+    bazaarTrade=nil
+  end
   nBooster = 0
   boosterDecks = {}
 end
@@ -1644,7 +1760,7 @@ function showShopScreen()
   local canResumeTraderSell = isTraderSellSessionActive() and getTraderSellRemaining() > 0
   trackButton({
     click_function = "click_shopCashout", function_owner = self,
-    label = "Redeem Cashout",
+    label = "Cashouts",
     position = {0, 0.1, -0.5},
     width = 1800, height = 230, font_size = 85,
     color = {0.45, 0.35, 0.15}, font_color = {1, 1, 1},
@@ -1691,7 +1807,7 @@ end
 
 function click_shopExperience()  showExperienceScreen() end
 function click_shopEssence()     showEssenceScreen()    end
-function click_shopCashout()     showRedeemCashoutScreen() end
+function click_shopCashout()     showCashoutsScreen()      end
 function click_shopSettings()    showSettingsScreen()   end
 function click_shopBuy()         showExperienceScreen() end
 function click_shopXPShop()      showExperienceScreen() end
@@ -1699,6 +1815,41 @@ function click_shopEssenceShop() showEssenceScreen()    end
 function click_resumeTraderSell() enterSellMode() end
 
 function click_endSession() showEndSessionConfirm() end
+
+function showCashoutsScreen()
+  pendingCashoutCard = nil
+  pendingBazaarCard = nil
+  pendingBazaarMode = nil
+  pendingBazaarCMC = nil
+  openScreen("cashouts", nil, "Cashouts")
+  trackButton({
+    click_function = "click_cashoutsRedeem", function_owner = self,
+    label = "Redeem",
+    position = {-0.75, 0.1, 0.15},
+    width = 700, height = 320, font_size = 95,
+    color = {0.2, 0.4, 0.2}, font_color = {1, 1, 1},
+    tooltip = "Redeem a Cashout token for its listed reward",
+  })
+  trackButton({
+    click_function = "click_cashoutsSell", function_owner = self,
+    label = "Sell",
+    position = {0.75, 0.1, 0.15},
+    width = 700, height = 320, font_size = 95,
+    color = {0.45, 0.3, 0.08}, font_color = {1, 0.95, 0.7},
+    tooltip = "Sell Cashout tokens for XP or cards for Essence; unlimited uses",
+  })
+  trackButton({
+    click_function = "click_cashoutsBack", function_owner = self,
+    label = "Back",
+    position = {-1.6, 0.1, 1.38},
+    width = 450, height = 185, font_size = 85,
+    color = {0.3, 0.3, 0.3}, font_color = {1, 1, 1},
+  })
+end
+
+function click_cashoutsRedeem() showRedeemCashoutScreen() end
+function click_cashoutsSell()   showBazaarScreen()       end
+function click_cashoutsBack()   showShopScreen()          end
 
 function showEndSessionConfirm()
   openScreen("end_session_confirm", nil)
@@ -1794,7 +1945,7 @@ function showRedeemCashoutScreen()
   })
 end
 
-function click_redeemCashoutBack() showShopScreen() end
+function click_redeemCashoutBack() showCashoutsScreen() end
 
 function extractCMCFromName(name)
   if not name then return nil end
@@ -1893,7 +2044,7 @@ function showExperienceScreen()
     position = {1.5, 0.1, 0.55},
     width = BW, height = BH, font_size = BF,
     color = {0.35, 0.22, 0.08}, font_color = {1, 0.9, 0.5},
-    tooltip = "Sell tokens or cards for Essence",
+    tooltip = "Make a 1-for-1 deal with another player — 2 Deals per Town",
   })
   trackButton({
     click_function = "click_experienceBack", function_owner = self,
@@ -1936,11 +2087,12 @@ function click_xpBlacksmith()
   showBlacksmithScreen()
 end
 function click_xpBazaar()
-  if not canUseBuildingThisTown("Bazaar") then
-    broadcastToAll("[" .. self.getName() .. "] Bazaar: No uses remaining this town.", {0.95, 0.45, 0.2})
+  local status=getBazaarDealStatus()
+  if status.normalDeals<=0 and status.freeDeals<=0 then
+    broadcastToAll("[" .. self.getName() .. "] Bazaar: No Deals remaining this town.", {0.95, 0.45, 0.2})
     return
   end
-  showBazaarScreen()
+  showBazaarOverviewScreen()
 end
 function click_experienceBack() showShopScreen()     end
 
@@ -2204,8 +2356,8 @@ function showMysticScreen()
   })
   trackButton({
     click_function = "click_mysticBack", function_owner = self,
-    label = "Back", position = {-1.6, 0.1, 1.3},
-    width = 500, height = 200, font_size = 90,
+    label = "Back", position = {-0.9, 0.1, 1.3},
+    width = 650, height = 200, font_size = 90,
     color = {0.3, 0.3, 0.3}, font_color = {1, 1, 1},
   })
 end
@@ -2537,16 +2689,235 @@ function click_blacksmithAugment()
 end
 
 --==============================================================================
--- BAZAAR SCREEN
+-- BAZAAR DEALS
+--==============================================================================
+function callBazaarMaster(methodName, params)
+  local master = getMasterController()
+  if not master then return nil, "XPMaster is unavailable." end
+  local ok, result = pcall(function() return master.call(methodName, params) end)
+  if not ok then return nil, tostring(result) end
+  return result, nil
+end
+
+function bazaarAuthorized(playerColor)
+  if not playerColor then return false end
+  local master=getMasterController()
+  local entry=master and master.call("getClaimedPlayerToken",{color=playerColor,force=true}) or nil
+  return type(entry)=="table" and entry.guid==self.getGUID()
+end
+
+function bazaarRequireOwner(playerColor)
+  if bazaarAuthorized(playerColor) then return true end
+  printToColor("Only this Custom Token's claimed player may control its Bazaar deals.",playerColor or "White",{1,0.35,0.25})
+  return false
+end
+
+function bazaarOfferLabel(offer)
+  if type(offer) ~= "table" then return "Waiting for offer" end
+  if offer.kind == "essence" then return tostring(offer.amount or 0) .. " Essence" end
+  return tostring(offer.name or (offer.kind == "cashout" and "Cashout" or "Card"))
+end
+
+function bazaarMySides(trade)
+  if type(trade) ~= "table" then return nil, nil end
+  local guid = self.getGUID()
+  if trade.a and trade.a.tokenGuid == guid then return trade.a, trade.b end
+  if trade.b and trade.b.tokenGuid == guid then return trade.b, trade.a end
+  return nil, nil
+end
+
+function restoreBazaarOffer(offer)
+  if type(offer) ~= "table" or offer.kind == "essence" or not offer.objectGuid then return end
+  local obj = getObjectFromGUID(offer.objectGuid)
+  if not obj then return end
+  pcall(function()
+    obj.setLock(offer.originalLocked == true)
+    obj.interactable = offer.originalInteractable ~= false
+    if offer.originalPosition then obj.setPositionSmooth(offer.originalPosition, false, true) end
+    if offer.originalRotation then obj.setRotationSmooth(offer.originalRotation, false, true) end
+  end)
+end
+
+function showBazaarOverviewScreen()
+  local active = callBazaarMaster("getBazaarTradeForToken", {tokenGuid=self.getGUID()})
+  if type(active) == "table" then bazaarTrade=active; showBazaarTradeScreen(); return end
+  openScreen("bazaar_overview", nil, "Bazaar")
+  local status=getBazaarDealStatus()
+  trackButton({
+    click_function = "xp_noop", function_owner = self,
+    label = "1-for-1 player deals\nDeals: "..status.normalDeals.."   Free-for-both: "..status.freeDeals,
+    position = {0, 0.1, -0.45},
+    width = 1750, height = 260, font_size = 72,
+    color = {0.2, 0.15, 0.08}, font_color = {0.95, 0.9, 0.7},
+  })
+  trackButton({
+    click_function = "click_bazaarStart", function_owner = self,
+    label = "Start Deal",
+    position = {0, 0.1, 0.35}, width = 1000, height = 300, font_size = 100,
+    color = {0.35, 0.25, 0.08}, font_color = {1, 0.95, 0.7},
+  })
+  trackButton({
+    click_function = "click_bazaarOverviewBack", function_owner = self,
+    label = "Back",
+    position = {-1.6, 0.1, 1.38},
+    width = 450, height = 185, font_size = 85,
+    color = {0.3, 0.3, 0.3}, font_color = {1, 1, 1},
+  })
+end
+
+function click_bazaarOverviewBack() showExperienceScreen() end
+
+function showBazaarPartnerScreen()
+  openScreen("bazaar_partners", nil, "Choose a Player")
+  bazaarPartnerSlots={}
+  local master=getMasterController()
+  local players=master and master.call("getClaimedPlayerTokens",{force=true}) or {}
+  local row=0
+  for _,entry in ipairs(players or {}) do
+    if entry.guid~=self.getGUID() and row<6 then
+      row=row+1
+      bazaarPartnerSlots[row]={guid=entry.guid,name=entry.name,color=entry.color}
+      trackButton({
+        click_function="click_bazaarPartner"..row,function_owner=self,label=entry.name,
+        position={0,0.1,-0.85+(row-1)*0.36},width=1500,height=145,font_size=65,
+        color={0.2,0.18,0.1},font_color={1,0.95,0.75},
+      })
+    end
+  end
+  if row==0 then
+    trackButton({click_function="xp_noop",function_owner=self,label="No other claimed players are available.",position={0,0.1,0},width=1700,height=240,font_size=70,color={0.2,0.1,0.1},font_color={1,0.7,0.7}})
+  end
+  trackButton({click_function="click_bazaarPartnerBack",function_owner=self,label="Back",position={-1.6,0.1,1.38},width=450,height=185,font_size=85,color={0.3,0.3,0.3},font_color={1,1,1}})
+end
+
+function click_bazaarStart(_,playerColor) if bazaarRequireOwner(playerColor) then showBazaarPartnerScreen() end end
+function click_bazaarPartnerBack() showBazaarOverviewScreen() end
+
+function chooseBazaarPartner(slot,playerColor)
+  if not bazaarRequireOwner(playerColor) then return end
+  local target=bazaarPartnerSlots[slot]
+  if not target then showBazaarPartnerScreen(); return end
+  local result,err=callBazaarMaster("createBazaarTrade",{fromGuid=self.getGUID(),toGuid=target.guid})
+  if type(result)~="table" or result.ok~=true then
+    broadcastToAll("["..self.getName().."] Bazaar: "..tostring((result and result.error) or err),{0.9,0.3,0.3})
+    showBazaarOverviewScreen()
+    return
+  end
+  bazaarTrade=result.trade
+  showBazaarTradeScreen()
+end
+function click_bazaarPartner1(_,c) chooseBazaarPartner(1,c) end
+function click_bazaarPartner2(_,c) chooseBazaarPartner(2,c) end
+function click_bazaarPartner3(_,c) chooseBazaarPartner(3,c) end
+function click_bazaarPartner4(_,c) chooseBazaarPartner(4,c) end
+function click_bazaarPartner5(_,c) chooseBazaarPartner(5,c) end
+function click_bazaarPartner6(_,c) chooseBazaarPartner(6,c) end
+
+function showBazaarTradeScreen()
+  local trade=bazaarTrade
+  local mine,other=bazaarMySides(trade)
+  if not mine then bazaarTrade=nil; showBazaarOverviewScreen(); return end
+  openScreen("bazaar_trade",nil,"Bazaar "..trade.id)
+  trackButton({click_function="xp_noop",function_owner=self,label=mine.name..": "..bazaarOfferLabel(mine.offer)..(mine.confirmed and "  [Confirmed]" or ""),position={0,0.1,-0.72},width=1750,height=200,font_size=64,color={0.12,0.22,0.12},font_color={0.8,1,0.8}})
+  trackButton({click_function="xp_noop",function_owner=self,label=other.name..": "..bazaarOfferLabel(other.offer)..(other.confirmed and "  [Confirmed]" or ""),position={0,0.1,-0.18},width=1750,height=200,font_size=64,color={0.18,0.14,0.08},font_color={1,0.9,0.7}})
+  trackButton({click_function="xp_noop",function_owner=self,label="Drop one Card or Cashout here",position={-0.75,0.1,0.45},width=750,height=220,font_size=58,color={0.15,0.15,0.15},font_color={0.9,0.9,0.9}})
+  local essenceAmount=(other.offer and other.offer.kind=="card") and ((other.offer.cmc or 0)*2) or 0
+  trackButton({click_function="click_bazaarOfferEssence",function_owner=self,label=essenceAmount>0 and ("Offer "..essenceAmount.." Essence") or "Essence requires\na card offer",position={0.75,0.1,0.45},width=750,height=220,font_size=58,color={0.28,0.18,0.4},font_color={0.9,0.8,1}})
+  if (bonusBazaarFreeDeals or 0)>0 or trade.useBonusFrom then
+    local using=trade.useBonusFrom==self.getGUID()
+    trackButton({click_function="click_bazaarToggleBonus",function_owner=self,label=using and "Bonus Bazaar: ON" or "Use Bonus Bazaar",position={-1.0,0.1,1.02},width=650,height=170,font_size=55,color=using and {0.15,0.45,0.18} or {0.25,0.22,0.08},font_color={1,1,1}})
+  end
+  trackButton({click_function="click_bazaarConfirm",function_owner=self,label=mine.confirmed and "Confirmed" or "Confirm",position={0,0.1,1.02},width=600,height=170,font_size=70,color=mine.confirmed and {0.12,0.35,0.12} or {0.2,0.5,0.2},font_color={1,1,1}})
+  trackButton({click_function="click_bazaarCancelTrade",function_owner=self,label="Cancel",position={1.0,0.1,1.02},width=550,height=170,font_size=65,color={0.5,0.15,0.15},font_color={1,1,1}})
+end
+
+function bazaarSubmitOffer(offer)
+  local mine=bazaarMySides(bazaarTrade)
+  if mine and mine.offer then restoreBazaarOffer(mine.offer) end
+  local result,err=callBazaarMaster("setBazaarOffer",{tradeId=bazaarTrade.id,tokenGuid=self.getGUID(),offer=offer})
+  if type(result)~="table" or result.ok~=true then
+    restoreBazaarOffer(offer)
+    broadcastToAll("["..self.getName().."] Bazaar: "..tostring((result and result.error) or err),{0.9,0.3,0.3})
+  end
+end
+
+function click_bazaarOfferEssence(_,playerColor)
+  if not bazaarRequireOwner(playerColor) then return end
+  local mine,other=bazaarMySides(bazaarTrade)
+  if not other or not other.offer or other.offer.kind~="card" or not other.offer.cmc then
+    broadcastToAll("["..self.getName().."] Bazaar: the other player must offer a card first.",{0.9,0.6,0.3}) return
+  end
+  bazaarSubmitOffer({kind="essence",amount=other.offer.cmc*2,name=tostring(other.offer.cmc*2).." Essence"})
+end
+
+function click_bazaarToggleBonus(_,playerColor)
+  if not bazaarRequireOwner(playerColor) then return end
+  local enabled=bazaarTrade.useBonusFrom~=self.getGUID()
+  if enabled and (bonusBazaarFreeDeals or 0)<=0 then return end
+  local result=callBazaarMaster("setBazaarBonus",{tradeId=bazaarTrade.id,tokenGuid=self.getGUID(),enabled=enabled})
+  if type(result)=="table" and result.ok~=true then broadcastToAll("Bazaar: "..tostring(result.error),{0.9,0.3,0.3}) end
+end
+
+function click_bazaarConfirm(_,playerColor)
+  if not bazaarRequireOwner(playerColor) then return end
+  local result,err=callBazaarMaster("confirmBazaarTrade",{tradeId=bazaarTrade.id,tokenGuid=self.getGUID()})
+  if type(result)~="table" or result.ok~=true then broadcastToAll("["..self.getName().."] Bazaar: "..tostring((result and result.error) or err),{0.9,0.3,0.3}) end
+end
+
+function click_bazaarCancelTrade(_,playerColor)
+  if not bazaarRequireOwner(playerColor) then return end
+  if bazaarTrade then callBazaarMaster("cancelBazaarTrade",{tradeId=bazaarTrade.id,tokenGuid=self.getGUID()}) end
+end
+
+function bazaarTradeUpdated(trade)
+  if type(trade)~="table" then return end
+  bazaarTrade=trade
+  showBazaarTradeScreen()
+end
+
+function bazaarTradeCompleted(trade)
+  bazaarTrade=nil
+  broadcastToAll("["..self.getName().."] Bazaar "..tostring(trade.id).." completed.",{0.55,1,0.55})
+  showBazaarOverviewScreen()
+end
+
+function bazaarTradeCancelled(trade)
+  local mine=bazaarMySides(trade)
+  if mine and mine.offer then restoreBazaarOffer(mine.offer) end
+  bazaarTrade=nil
+  broadcastToAll("["..self.getName().."] Bazaar "..tostring(trade.id).." cancelled; offers returned.",{0.9,0.75,0.4})
+  showBazaarOverviewScreen()
+end
+
+function handleBazaarTradeDrop(obj,playerColor)
+  if not bazaarRequireOwner(playerColor) then return end
+  if not bazaarTrade or not obj then return end
+  local name=""; pcall(function() name=obj.getName() or "" end)
+  local kind=name:match("^T%d+%s*%-") and "cashout" or nil
+  if not kind and obj.tag=="Card" then kind="card" end
+  if not kind then broadcastToAll("["..self.getName().."] Bazaar: offer one Card or Cashout.",{0.9,0.4,0.3}); return end
+  local pos=obj.getPosition(); local rot=obj.getRotation()
+  local offer={kind=kind,name=name:match("^([^\n]*)") or name,objectGuid=obj.getGUID(),originalPosition={x=pos.x,y=pos.y,z=pos.z},originalRotation={x=rot.x,y=rot.y,z=rot.z},originalLocked=obj.getLock(),originalInteractable=obj.interactable~=false}
+  local function finish()
+    pcall(function() obj.setPositionSmooth(self.positionToWorld(Vector(0,2.2,-1.8)),false,true); obj.setLock(true); obj.interactable=false end)
+    bazaarSubmitOffer(offer)
+  end
+  if kind=="card" then
+    lookupCardCMC(obj,function(cmc) if not cmc then broadcastToAll("Bazaar: could not determine that card's CMC.",{0.9,0.3,0.3}); return end; offer.cmc=cmc; finish() end)
+  else finish() end
+end
+
+--==============================================================================
+-- CASHOUT SALES (free and unlimited; not a Bazaar Deal)
 --==============================================================================
 function showBazaarScreen()
   pendingBazaarCard = nil
   pendingBazaarMode = nil
   pendingBazaarCMC  = nil
-  openScreen("bazaar", nil, "Bazaar")
+  openScreen("bazaar", nil, "Sell Cashouts")
   trackButton({
     click_function = "xp_noop", function_owner = self,
-    label = "Sell tokens or cards for Essence",
+    label = "Sell any number of Cashouts to the Host for 10 XP each",
     position = {0, 0.1, -0.45},
     width = 1500, height = 150, font_size = 65,
     color = {0.2, 0.15, 0.08}, font_color = {0.9, 0.85, 0.7},
@@ -2554,18 +2925,10 @@ function showBazaarScreen()
   trackButton({
     click_function = "click_bazaarCashOut", function_owner = self,
     label = "Cash Out\n10 XP",
-    position = {-0.75, 0.1, 0.2},
+    position = {0, 0.1, 0.2},
     width = 700, height = 280, font_size = 75,
     color = {0.4, 0.28, 0.05}, font_color = {1, 0.9, 0.5},
-    tooltip = "Sell a token (T# - Name) for 10 Essence",
-  })
-  trackButton({
-    click_function = "click_bazaarSellCMC", function_owner = self,
-    label = "Sell by CMC\n2x Mana Value",
-    position = {0.75, 0.1, 0.2},
-    width = 700, height = 280, font_size = 70,
-    color = {0.28, 0.2, 0.35}, font_color = {0.85, 0.75, 1},
-    tooltip = "Sell any card for 2x its CMC in Essence",
+    tooltip = "Sell a token (T# - Name) for 10 XP",
   })
   trackButton({
     click_function = "click_bazaarBack", function_owner = self,
@@ -2575,9 +2938,8 @@ function showBazaarScreen()
     color = {0.3, 0.3, 0.3}, font_color = {1, 1, 1},
   })
 end
-function click_bazaarBack()    showExperienceScreen()    end
+function click_bazaarBack()    showCashoutsScreen()      end
 function click_bazaarCashOut() showBazaarCashOutPrompt() end
-function click_bazaarSellCMC() showBazaarSellCMCPrompt() end
 
 function showBazaarCashOutPrompt()
   pendingBazaarCard = nil
@@ -2624,7 +2986,7 @@ end
 function click_bazaarSellCMCBack() showBazaarScreen() end
 
 function showBazaarConfirm(displayName, gain, currency)
-  openScreen("bazaar_confirm", nil, "Sell at Bazaar?")
+  openScreen("bazaar_confirm", nil, "Confirm Sale")
   trackButton({
     click_function = "xp_noop", function_owner = self,
     label = displayName,
@@ -2656,25 +3018,18 @@ function showBazaarConfirm(displayName, gain, currency)
 end
 
 function click_bazaarCancel()
-  local mode = pendingBazaarMode
   pendingBazaarCard = nil
   pendingBazaarCMC  = nil
-  if mode == "cashout" then
-    showBazaarCashOutPrompt()
-  else
-    showBazaarSellCMCPrompt()
-  end
+  showBazaarCashOutPrompt()
 end
 
 function click_bazaarConfirmOK()
   local card = pendingBazaarCard
   local mode = pendingBazaarMode
-  local cmc  = pendingBazaarCMC
   pendingBazaarCard = nil
   pendingBazaarMode = nil
   pendingBazaarCMC  = nil
   if not card then showBazaarScreen() return end
-  decrementBuildingUse("Bazaar")
   local rawName = ""
   pcall(function() rawName = card.getName() or "" end)
   local displayName = rawName:match("^([^\n]*)") or rawName
@@ -2682,10 +3037,6 @@ function click_bazaarConfirmOK()
   if mode == "cashout" then
     receiveXP({amount = 10})
     broadcastToAll("[" .. self.getName() .. "] Cashed out " .. displayName .. " for +10 XP.", {1, 0.9, 0.5})
-  elseif mode == "cmc" then
-    local gain = (cmc or 0) * 2
-    applyEssenceDeltaTracked(gain, "Bazaar Sell CMC: " .. displayName)
-    broadcastToAll("[" .. self.getName() .. "] Sold " .. displayName .. " (CMC " .. tostring(cmc or 0) .. ") for +" .. gain .. " Essence.", {0.7, 0.5, 1.0})
   end
   pcall(function() card.destruct() end)
   showBazaarScreen()
@@ -2706,14 +3057,14 @@ end
 
 function handleBazaarCashOutDrop(obj)
   if not isBazaarSellableObject(obj) then
-    broadcastToAll("[" .. self.getName() .. "] Bazaar: drop a single cashout token.", {0.9, 0.6, 0.3})
+    broadcastToAll("[" .. self.getName() .. "] Cashouts: drop a single cashout token.", {0.9, 0.6, 0.3})
     return
   end
   local name = ""
   pcall(function() name = obj.getName() or "" end)
   local firstName = name:match("^([^\n]*)") or name
   if not firstName:match("^T%d+%s*%-") then
-    broadcastToAll("[" .. self.getName() .. "] Bazaar: not a Cash Out token — name must start like \"T3 - Bonus Guild\".", {0.9, 0.3, 0.3})
+    broadcastToAll("[" .. self.getName() .. "] Cashouts: not a Cash Out token — name must start like \"T3 - Bonus Guild\".", {0.9, 0.3, 0.3})
     return
   end
   pendingBazaarCard = obj
@@ -2724,12 +3075,12 @@ end
 
 function handleBazaarSellCMCDrop(obj)
   if not isBazaarSellableObject(obj) then
-    broadcastToAll("[" .. self.getName() .. "] Bazaar: drop a single card (not a deck).", {0.9, 0.6, 0.3})
+    broadcastToAll("[" .. self.getName() .. "] Cashouts: drop a single card (not a deck).", {0.9, 0.6, 0.3})
     return
   end
   lookupCardCMC(obj, function(cmc)
     if not cmc then
-      broadcastToAll("[" .. self.getName() .. "] Bazaar: couldn't determine CMC for this card.", {0.9, 0.3, 0.3})
+      broadcastToAll("[" .. self.getName() .. "] Cashouts: couldn't determine CMC for this card.", {0.9, 0.3, 0.3})
       return
     end
     pendingBazaarCard = obj
@@ -3002,7 +3353,6 @@ function handleMerchantPackCashoutDrop(obj, packName)
     broadcastToAll("[" .. self.getName() .. "] Redeeming Merchant Pack: " .. packName, {0.5, 0.85, 0.5})
     spawnMysteryPack(0, "mystery")
     ess_safeDestructObject(obj)
-    requestSync(DEBOUNCE_SECONDS)
     showRedeemCashoutScreen()
     return
   end
@@ -3076,6 +3426,14 @@ function handleRedeemCashoutDrop(obj)
 
   bonusName = bonusName:gsub("^%s*", ""):gsub("%s*$", "")  -- Trim whitespace
 
+  if bonusName:lower() == "bazaar" then
+    bonusBazaarFreeDeals = (bonusBazaarFreeDeals or 0) + 1
+    broadcastToAll("[" .. self.getName() .. "] Bonus Bazaar granted: one deal is free for both participants.", {0.5, 0.8, 0.5})
+    ess_safeDestructObject(obj)
+    showCashoutsScreen()
+    return
+  end
+
   -- Map special names to buildings or Blacksmith-specific action bonuses.
   -- "Mystic" and "Guild" are XP-gated (no limit)
   local buildingKey = nil
@@ -3108,9 +3466,8 @@ function handleRedeemCashoutDrop(obj)
   -- Destroy the cashout token
   ess_safeDestructObject(obj)
 
-  -- Return to shop
-  requestSync(DEBOUNCE_SECONDS)
-  showShopScreen()
+  -- Return to the Cashouts hub
+  showCashoutsScreen()
 end
 
 --==============================================================================
@@ -3496,14 +3853,21 @@ end
 
 -- Submit to HostTownActions ------------------------------------------------
 function submitTownAction(actionType, text, cardGuid)
+  if townSubmissionInFlight then
+    broadcastToAll("["..self.getName().."] A Town request is already being submitted.",{0.9,0.6,0.3})
+    return
+  end
+  townSubmissionInFlight=true
   local blocked, reason = isTownActionBlocked(actionType)
   if blocked then
+    townSubmissionInFlight=false
     broadcastToAll("[" .. self.getName() .. "] " .. reason, {0.95, 0.45, 0.2})
     return
   end
   local hostObjs = getObjectsWithTag(HOST_ACTIONS_TAG) or {}
   local hostObj  = hostObjs[1]
   if not hostObj then
+    townSubmissionInFlight=false
     broadcastToAll("[" .. self.getName() .. "] HostTownActions object not found in scene. Ask the host to place it.", {0.9, 0.3, 0.3})
     return
   end
@@ -3530,17 +3894,21 @@ function submitTownAction(actionType, text, cardGuid)
     paidCost = cost
   end
 
+  townRequestSequence=townRequestSequence+1
+  local clientRequestId=self.getGUID().."-"..tostring(os.time()).."-"..tostring(townRequestSequence)
+  local requestPayload={
+    type=actionType,spawnerGuid=self.getGUID(),spawnerName=claimedPlayerName or self.getName(),
+    text=text or "",cardGuid=cardGuid,clientRequestId=clientRequestId,
+  }
   local submitted, requestId = pcall(function()
-    return hostObj.call("submitAction", {
-      type        = actionType,
-      spawnerGuid = self.getGUID(),
-      spawnerName = claimedPlayerName or self.getName(),
-      text        = text or "",
-      cardGuid    = cardGuid,
-    })
+    return hostObj.call("submitAction", requestPayload)
   end)
+  if not submitted or type(requestId)~="number" then
+    submitted,requestId=pcall(function() return hostObj.call("submitAction",requestPayload) end)
+  end
 
-  if not submitted then
+  townSubmissionInFlight=false
+  if not submitted or type(requestId)~="number" then
     if paidCost and paidCost > 0 then
       refundXP(paidCost, (actionType:sub(1,1):upper() .. actionType:sub(2)) .. " Submit Refund")
     end
@@ -3555,15 +3923,19 @@ function submitTownAction(actionType, text, cardGuid)
     return
   end
 
+  local buildingUsageSnapshot=nil
   if actionType == "cathedral" then
+    buildingUsageSnapshot={town=buildingUsesThisTown.Cathedral or 0,specific=bonusBuildingUsesByKey.Cathedral or 0,generic=bonusBuildingUsesGeneric or 0}
     decrementBuildingUse("Cathedral")
   end
   addPendingTownAction({
     requestId = requestId,
+    clientRequestId = clientRequestId,
     type = actionType,
     submittedAt = getTimeStr(),
     costPaid = paidCost,
     usedBonus = usedBonus,
+    buildingUsageSnapshot = buildingUsageSnapshot,
   })
   townNoteValue     = ""
   cathedralTextValue = ""
@@ -3587,9 +3959,29 @@ function showTownAwaitScreen()
     color = {0.3, 0.3, 0.3}, font_color = {1, 1, 1},
     tooltip = "Return to main menu — your request stays queued",
   })
+  trackButton({
+    click_function = "click_townAwaitCancel", function_owner = self,
+    label = "Cancel Oldest", position = {0.9, 0.1, 1.3},
+    width = 650, height = 200, font_size = 75,
+    color = {0.5, 0.15, 0.15}, font_color = {1, 1, 1},
+    tooltip = "Cancel a pending request and safely refund its cost or use",
+  })
 end
 
 function click_townAwaitBack() showShopScreen() end
+
+function click_townAwaitCancel()
+  normalizeTownActionQueues()
+  local pending=pendingTownActions[1]
+  if not pending then showShopScreen(); return end
+  local hosts=getObjectsWithTag(HOST_ACTIONS_TAG) or {}
+  local host=hosts[1]
+  if not host then broadcastToAll("["..self.getName().."] HostTownActions is unavailable; request was not changed.",{0.9,0.3,0.3}); return end
+  local ok,cancelled=pcall(function() return host.call("cancelAction",{requestId=pending.requestId,clientRequestId=pending.clientRequestId,spawnerGuid=self.getGUID()}) end)
+  if not ok or cancelled~=true then
+    broadcastToAll("["..self.getName().."] That request is already active or could not be cancelled safely.",{0.9,0.5,0.2})
+  end
+end
 
 -- Result: Cathedral (Keep or Sacrifice) ------------------------------------
 function showCathedralResult()
@@ -3758,8 +4150,10 @@ end
 
 -- Public API: called by HostTownActions ------------------------------------
 function receiveTownActionResult(params)
-  if type(params) ~= "table" then return end
+  if type(params) ~= "table" then return false end
   normalizeTownActionQueues()
+  if townResultCards and townResultCards.requestId==params.requestId then return true end
+  for _,queued in ipairs(townResultQueue or {}) do if queued.requestId==params.requestId then return true end end
   removePendingTownAction(params.requestId, params.type)
   if townResultCards then
     table.insert(townResultQueue, params)
@@ -3774,14 +4168,24 @@ function receiveTownActionResult(params)
   else
     Wait.frames(showUpgradeResult, 60)
   end
+  return true
 end
 
 function receiveTownActionCancelled(params)
-  if type(params) ~= "table" then return end
+  if type(params) ~= "table" then return false end
   normalizeTownActionQueues()
   local actionType = params.type or ""
   local pendingAction = removePendingTownAction(params.requestId, actionType)
-  if actionType == "upgrade" then
+  if not pendingAction then return true end
+  if actionType == "cathedral" then
+    local snapshot=pendingAction.buildingUsageSnapshot
+    if type(snapshot)=="table" then
+      buildingUsesThisTown.Cathedral=snapshot.town or buildingUsesThisTown.Cathedral or 0
+      bonusBuildingUsesByKey.Cathedral=snapshot.specific or bonusBuildingUsesByKey.Cathedral or 0
+      bonusBuildingUsesGeneric=snapshot.generic or bonusBuildingUsesGeneric or 0
+    end
+    broadcastToAll("["..self.getName().."] Cathedral request cancelled; its use was restored.",{0.9,0.9,0.5})
+  elseif actionType == "upgrade" then
     local refund = (pendingAction and pendingAction.costPaid) or applyTownCostModifiers(UPGRADE_COST)
     refundXP(refund, "Upgrade Cancel Refund")
     if pendingAction and pendingAction.usedBonus then
@@ -3805,6 +4209,7 @@ function receiveTownActionCancelled(params)
       .. refund .. " XP refunded.", {0.9, 0.9, 0.5})
   end
   showShopScreen()
+  return true
 end
 
 function tryOpenPackInput(packName)
@@ -4469,7 +4874,6 @@ function attemptPurchase(packName)
   end
   
   if isCashoutRedemption then
-    requestSync(DEBOUNCE_SECONDS)
     showRedeemCashoutScreen()
   elseif activePack and activePack == packName then
     openPackInput(activePack)
@@ -6388,16 +6792,16 @@ function onObjectDropped(player_color, dropped_object)
 
   if currentScreen == "mystic_prompt" then
     handleMysticDrop(dropped_object)
+    return true
+  end
+
+  if currentScreen == "bazaar_trade" then
+    handleBazaarTradeDrop(dropped_object,player_color)
     return
   end
 
   if currentScreen == "bazaar_cashout_prompt" then
     handleBazaarCashOutDrop(dropped_object)
-    return
-  end
-
-  if currentScreen == "bazaar_cmc_prompt" then
-    handleBazaarSellCMCDrop(dropped_object)
     return
   end
 
