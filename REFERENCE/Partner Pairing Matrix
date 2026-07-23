@@ -1,0 +1,40 @@
+# Commander Pairing Reference
+
+Last verified: 2026-07-23
+
+## Sources of truth
+
+- Rules: Wizards of the Coast, *Magic: The Gathering Comprehensive Rules*, rules 702.124 and 903.
+- Card roster and current Oracle text: Scryfall card search / Oracle Cards bulk data.
+- Runtime card spawning: `api.mtginfo.org`, whose query parser supports normal Scryfall terms but not Scryfall regular expressions.
+
+The Lua chooser uses the online card roster to remain current, then independently validates every selected card against the rules below. This is safer than maintaining a static name list as the only authority.
+
+## Pairing matrix
+
+| Selected first Commander | Legal second Commander | Backend-compatible roster query | Verified count |
+|---|---|---|---:|
+| Standalone `Partner` | Another card with standalone `Partner` | `o:"Partner" -o:"Partner with" -o:"Character select" -o:"Father & son" -o:"Friends forever" -o:"Survivors" is:commander game:paper` | 63 |
+| `Partner—Survivors` | Exact same ability | `o:"Partner" o:"Survivors" is:commander game:paper` | 4 |
+| `Partner—Friends forever` | Exact same ability | `o:"Partner" o:"Friends forever" is:commander game:paper` | 7 |
+| `Partner—Character select` | Exact same ability | `o:"Partner" o:"Character select" is:commander game:paper` | 6 |
+| `Partner—Father & son` | Exact same ability | `o:"Partner" o:"Father & son" is:commander game:paper` | 2 |
+| `Partner with [name]` | The specifically named reciprocal card | Exact card-name query | 1 |
+| `Choose a Background` | Any legendary Background | `t:background t:legendary game:paper` | Dynamic |
+| Legendary Background selected first | A Commander with `Choose a Background` | `o:"Choose a Background" is:commander -t:background game:paper` | Dynamic |
+| `Doctor's companion` | Legendary creature with exactly the creature types `Time Lord Doctor` | `t:"Time Lord Doctor" is:commander game:paper` | 17 before local exact-type filtering |
+| Exact `Time Lord Doctor` | A card with `Doctor's companion` | `o:"Doctor's companion" is:commander game:paper` | 27 |
+
+## Mandatory local validation
+
+The online query creates only a candidate pool. Before selection, Lua must still verify:
+
+1. The candidate has the exact reciprocal pairing ability.
+2. A Doctor has exactly `Time Lord Doctor` as its creature types and no additional creature type.
+3. Standalone `Partner` is not confused with any `Partner—...` or `Partner with ...` variant.
+4. Candidate and first Commander do not share the same normalized name or Oracle ID.
+5. Backgrounds are legendary Background enchantments.
+
+## Updating
+
+Recheck the queries when Wizards adds a partner variant or changes Oracle wording. Prefer generating any future static snapshot from Scryfall Oracle Cards bulk data; do not hand-maintain card names when a rules-derived query can express the pairing.
