@@ -1,40 +1,104 @@
-# Commander Pairing Reference
+# Commander Pairing Catalog
 
-Last verified: 2026-07-23
+Last verified against Scryfall Oracle data: 2026-07-23
 
-## Sources of truth
+Rules authority: Wizards of the Coast *Magic: The Gathering Comprehensive Rules*, rules 702.124 and 903.
 
-- Rules: Wizards of the Coast, *Magic: The Gathering Comprehensive Rules*, rules 702.124 and 903.
-- Card roster and current Oracle text: Scryfall card search / Oracle Cards bulk data.
-- Runtime card spawning: `api.mtginfo.org`, whose query parser supports normal Scryfall terms but not Scryfall regular expressions.
+Runtime implementation: finite pairing families are embedded in every Deck Token as `PAIRING_CATALOG`. Each listed name is retrieved through the MTGR backend's exact `/card/[name]` endpoint and assembled locally into one native TTS deck. Search queries are not trusted to determine these pools.
 
-The Lua chooser uses the online card roster to remain current, then independently validates every selected card against the rules below. This is safer than maintaining a static name list as the only authority.
+## Exact Time Lord Doctors
 
-## Pairing matrix
+- The Eighth Doctor
+- The Eleventh Doctor
+- The Fifteenth Doctor
+- The Fifth Doctor
+- The First Doctor
+- The Fourteenth Doctor
+- The Fourth Doctor
+- The Fugitive Doctor
+- The Ninth Doctor
+- The Second Doctor
+- The Seventh Doctor
+- The Sixth Doctor
+- The Tenth Doctor
+- The Third Doctor
+- The Thirteenth Doctor
+- The Twelfth Doctor
+- The War Doctor
 
-| Selected first Commander | Legal second Commander | Backend-compatible roster query | Verified count |
-|---|---|---|---:|
-| Standalone `Partner` | Another card with standalone `Partner` | `o:"Partner" -o:"Partner with" -o:"Character select" -o:"Father & son" -o:"Friends forever" -o:"Survivors" is:commander game:paper` | 63 |
-| `Partner—Survivors` | Exact same ability | `o:"Partner" o:"Survivors" is:commander game:paper` | 4 |
-| `Partner—Friends forever` | Exact same ability | `o:"Partner" o:"Friends forever" is:commander game:paper` | 7 |
-| `Partner—Character select` | Exact same ability | `o:"Partner" o:"Character select" is:commander game:paper` | 6 |
-| `Partner—Father & son` | Exact same ability | `o:"Partner" o:"Father & son" is:commander game:paper` | 2 |
-| `Partner with [name]` | The specifically named reciprocal card | Exact card-name query | 1 |
-| `Choose a Background` | Any legendary Background | `t:background t:legendary game:paper` | Dynamic |
-| Legendary Background selected first | A Commander with `Choose a Background` | `o:"Choose a Background" is:commander -t:background game:paper` | Dynamic |
-| `Doctor's companion` | Legendary creature with exactly the creature types `Time Lord Doctor` | `t:"Time Lord Doctor" is:commander game:paper` | 17 before local exact-type filtering |
-| Exact `Time Lord Doctor` | A card with `Doctor's companion` | `o:"Doctor's companion" is:commander game:paper` | 27 |
+## Doctor's companion cards
 
-## Mandatory local validation
+- Ace, Fearless Rebel
+- Adric, Mathematical Genius
+- Amy Pond
+- Barbara Wright
+- Bill Potts
+- Clara Oswald
+- Dan Lewis
+- Donna Noble
+- Graham O'Brien
+- Ian Chesterton
+- Jamie McCrimmon
+- Jo Grant
+- K-9, Mark I
+- Leela, Sevateem Warrior
+- Martha Jones
+- Nardole, Resourceful Cyborg
+- Nyssa of Traken
+- Peri Brown
+- Romana II
+- Rose Noble
+- Rose Tyler
+- Ryan Sinclair
+- Sarah Jane Smith
+- Susan Foreman
+- Tegan Jovanka
+- Vislor Turlough
+- Yasmin Khan
 
-The online query creates only a candidate pool. Before selection, Lua must still verify:
+## Partner—Friends forever
 
-1. The candidate has the exact reciprocal pairing ability.
-2. A Doctor has exactly `Time Lord Doctor` as its creature types and no additional creature type.
-3. Standalone `Partner` is not confused with any `Partner—...` or `Partner with ...` variant.
-4. Candidate and first Commander do not share the same normalized name or Oracle ID.
-5. Backgrounds are legendary Background enchantments.
+- Bjorna, Nightfall Alchemist
+- Cecily, Haunted Mage
+- Elmar, Ulvenwald Informant
+- Hargilde, Kindly Runechanter
+- Othelm, Sigardian Outcast
+- Sophina, Spearsage Deserter
+- Wernog, Rider's Chaplain
 
-## Updating
+## Partner—Survivors
 
-Recheck the queries when Wizards adds a partner variant or changes Oracle wording. Prefer generating any future static snapshot from Scryfall Oracle Cards bulk data; do not hand-maintain card names when a rules-derived query can express the pairing.
+- Abby, Merciless Soldier
+- Ellie, Brick Master
+- Ellie, Vengeful Hunter
+- Joel, Resolute Survivor
+
+## Partner—Character select
+
+- April O'Neil, Live on the Scene
+- Donatello, the Brains
+- Leonardo, the Balance
+- Michelangelo, the Heart
+- Raphael, the Muscle
+- Splinter, the Mentor
+
+## Partner—Father & son
+
+- Atreus, Impulsive Son
+- Kratos, Stoic Father
+
+## Rules-derived dynamic pairings
+
+- Standalone Partner uses the standalone-Partner query plus exact local ability validation.
+- Partner with [name] uses the reciprocal exact card name from Oracle text.
+- Choose a Background uses the full legendary Background roster.
+- A Background selected first uses the full roster of commanders with Choose a Background.
+
+## Safety checks
+
+- The first Commander is removed from every exact catalog pool before requests begin.
+- Selection is rejected when normalized names or Oracle IDs match.
+- Every candidate is revalidated for the exact reciprocal ability.
+- Doctors must have exactly the creature types `Time Lord Doctor`, with no additional creature type.
+
+When Wizards adds or changes a finite pairing family, regenerate the affected list from Scryfall Oracle Cards and update both this document and `PAIRING_CATALOG`.
